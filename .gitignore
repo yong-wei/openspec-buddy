@@ -8,4 +8,5 @@ AGENTS.md
 !.env.openspec-buddy.example
 .agents/
 .codex/
+.serena/
 .code-review-graph/

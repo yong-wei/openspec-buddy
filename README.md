@@ -106,6 +106,30 @@ npm publish --access public
 `package.json` pins `publishConfig.registry` to `https://registry.npmjs.org/`
 so publishing does not accidentally target a mirror registry.
 
+### GitHub automatic publishing
+
+The repository includes `.github/workflows/npm-publish.yml`.
+
+Recommended setup:
+
+1. In npm, open the `openspec-buddy` package settings.
+2. Add a trusted publisher for GitHub Actions:
+   - repository owner: `yong-wei`
+   - repository name: `openspec-buddy`
+   - workflow filename: `npm-publish.yml`
+   - environment: leave empty unless the repository later adds one
+3. Publish by creating a GitHub Release for a tag such as `v0.1.1`, or by
+   manually running the workflow with the tag input.
+
+The workflow checks that the tag matches `package.json` version, runs
+`npm run check`, then publishes with npm trusted publishing. npm automatically
+generates provenance for supported public GitHub Actions publishes.
+
+If npm package settings are unavailable before the first package publish, do
+the first publish manually with OTP or a short-lived granular token. After the
+package exists, configure trusted publishing and use GitHub Releases for later
+versions.
+
 ## Repository Layout
 
 ```text
