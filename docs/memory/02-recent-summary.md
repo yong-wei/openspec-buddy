@@ -16,8 +16,9 @@
 - `openspec-buddy` 与 `openspec-buddy-auto` 已复制到 `skills/`。
 - 本机全局 `openspec-buddy` 与 `openspec-buddy-auto` 技能入口已改为指向本仓库技能目录的软链接。
 - npm CLI 提供 `install`、`init`、`doctor` 和 `version` 命令。
+- `openspec-buddy@0.1.0` 已发布到 npm；后续版本通过 GitHub Release 触发 npm Trusted Publishing。
 
 ## 当前警惕点
 
-- npm registry 当前未登录；真正执行 `npm publish` 需要用户先完成 `npm login`。
+- README 面向使用者，不承载 release 和 GitHub automatic publishing 这类维护者流程。
 - 协作者应优先使用 npm copy 安装，避免把个人机器上的绝对路径软链接提交到项目中。

@@ -1,22 +1,30 @@
 # OpenSpec Buddy
 
-Versioned distribution for the `openspec-buddy` and `openspec-buddy-auto`
-agent skills.
+`openspec-buddy` 是一组面向 OpenSpec 工作流的代理技能包，包含两个技能：
 
-The repository is the source of truth for both skills. Local global skills can
-be symlinked to this checkout for development, while collaborators should use
-explicit npm or Git upgrades so skill changes are reviewable and repeatable.
+- `openspec-buddy`：把一个 OpenSpec 变更和 GitHub Issue、声明分支、Pull Request、GitHub Project 状态绑定起来，适合人工控制的提案登记、领取、实现后归档。
+- `openspec-buddy-auto`：在 `openspec-buddy` 的约束上执行自动化循环，负责选择可执行变更、领取 issue、实现、开 PR、等待 review、合并、同步归档状态。
 
-## Install
+这两个技能不替代 OpenSpec 自身的设计和实现技能。推荐配合方式是：
 
-Global npm install:
+1. 用 OpenSpec 系列技能完成需求探索、变更提案和本地变更文件。
+2. 用 `openspec-buddy propose` 把变更登记到 GitHub Issue，并写清 `change_id`、分支、依赖、风险和项目状态。
+3. 用 `openspec-buddy apply` 领取单个 GitHub Issue 对应的 OpenSpec 变更，再调用 OpenSpec 实现技能完成代码、测试和 spec 同步。
+4. 用 `openspec-buddy achieve` 在 PR 合并后同步 GitHub Issue、GitHub Project 和 OpenSpec 归档记录。
+5. 需要连续处理一组已登记变更时，再使用 `openspec-buddy-auto`，让它按依赖、状态、review 和 CI 闸门逐个推进。
+
+核心约束是：一个协调变更对应一个 GitHub Issue、一个 `change_id`、一个声明分支、一个 OpenSpec change 和一个 PR。GitHub 负责跨分支、跨代理、跨工作树的协作状态；OpenSpec 仍然是需求、任务和 spec 的本地事实源。
+
+## 安装
+
+全局安装 npm 包后，把技能复制到常用 skill root：
 
 ```bash
 npm install -g openspec-buddy
 openspec-buddy install --target agents --force
 ```
 
-One-shot installs with common JavaScript CLIs:
+也可以用常见 JavaScript CLI 一次性安装：
 
 ```bash
 npx openspec-buddy install --target agents --force
@@ -25,13 +33,13 @@ yarn dlx openspec-buddy install --target agents --force
 bunx openspec-buddy install --target agents --force
 ```
 
-Install targets:
+安装目标：
 
-- `agents`: `$HOME/.agents/skills`
-- `codex`: `$CODEX_HOME/skills`, or `$HOME/.codex/skills`
-- `project`: `./.agents/skills` in the current project
+- `agents`：`$HOME/.agents/skills`
+- `codex`：`$CODEX_HOME/skills`，未设置时使用 `$HOME/.codex/skills`
+- `project`：当前项目下的 `./.agents/skills`
 
-For local skill development from a Git checkout:
+默认安装模式是 `copy`，适合团队成员显式升级。只有在直接维护本仓库技能源码时，才建议使用 `symlink`：
 
 ```bash
 git clone https://github.com/yong-wei/openspec-buddy.git
@@ -41,37 +49,33 @@ npm test
 openspec-buddy install --target agents --mode symlink --source ./skills --force
 ```
 
-## First Project Setup
+## 首次配置
 
-The first time either skill is used in a project, create project-local Buddy
-configuration:
+在一个项目中第一次使用 `openspec-buddy` 或 `openspec-buddy-auto` 前，先生成项目级配置：
 
 ```bash
 openspec-buddy init
 ```
 
-The command asks for:
+命令会询问：
 
-- Buddy base branch
-- release branch
+- Buddy 基线分支
+- 发布分支
 - GitHub Project owner
 - GitHub Project number
 - GitHub Project title
-- optional auto-review request for `openspec-buddy-auto`
+- `openspec-buddy-auto` 使用的可选 review 请求语句
 
-It writes `.env.openspec-buddy` in the current project. Keep that file out of
-git unless the project explicitly wants a committed example.
-Use `.env.openspec-buddy.example` as the field reference when preparing a
-project template.
+配置会写入当前项目的 `.env.openspec-buddy`。这个文件通常不提交到 Git；如需给团队提供模板，可参考 `.env.openspec-buddy.example`。
 
-Verify configuration:
+配置检查：
 
 ```bash
 $HOME/.agents/skills/openspec-buddy/scripts/check-config.sh
 $HOME/.agents/skills/openspec-buddy/scripts/check-config.sh auto
 ```
 
-## Commands
+## 常用命令
 
 ```bash
 openspec-buddy install --target agents --mode copy --force
@@ -82,61 +86,12 @@ openspec-buddy doctor --target agents
 openspec-buddy version
 ```
 
-Default installer mode is `copy`, which is safer for collaborators because npm
-upgrades are explicit. Use `symlink` only when editing this repository directly.
+## 平台说明
 
-## Release
+npm 安装器使用 Node.js，要求 Node.js 18 或更高版本。
 
-The package version is stored in `package.json`. Release tags use the
-`vMAJOR.MINOR.PATCH` format.
+Buddy 技能脚本目前以 Bash 为主要运行环境，并依赖 `git`、`gh`、`openspec`、`node` 等命令。因此：
 
-Local verification:
-
-```bash
-npm run check
-```
-
-Publish to npm after logging in:
-
-```bash
-npm login
-npm publish --access public
-```
-
-`package.json` pins `publishConfig.registry` to `https://registry.npmjs.org/`
-so publishing does not accidentally target a mirror registry.
-
-### GitHub automatic publishing
-
-The repository includes `.github/workflows/npm-publish.yml`.
-
-Recommended setup:
-
-1. In npm, open the `openspec-buddy` package settings.
-2. Add a trusted publisher for GitHub Actions:
-   - repository owner: `yong-wei`
-   - repository name: `openspec-buddy`
-   - workflow filename: `npm-publish.yml`
-   - environment: leave empty unless the repository later adds one
-3. Publish by creating a GitHub Release for a tag such as `v0.1.1`, or by
-   manually running the workflow with the tag input.
-
-The workflow checks that the tag matches `package.json` version, runs
-`npm run check`, then publishes with npm trusted publishing. npm automatically
-generates provenance for supported public GitHub Actions publishes.
-
-If npm package settings are unavailable before the first package publish, do
-the first publish manually with OTP or a short-lived granular token. After the
-package exists, configure trusted publishing and use GitHub Releases for later
-versions.
-
-## Repository Layout
-
-```text
-skills/openspec-buddy/       Core Buddy skill, scripts, references, evals
-skills/openspec-buddy-auto/  Automation skill and references
-src/cli.mjs                  npm CLI implementation
-bin/openspec-buddy.mjs       executable entrypoint
-test/                        package installer/config tests
-docs/memory/                 stable project memory for future agents
-```
+- macOS 和 Linux 是主要支持环境。
+- Windows 推荐通过 WSL2 使用。
+- Windows 原生 PowerShell 或 cmd 目前不作为完整支持环境。
