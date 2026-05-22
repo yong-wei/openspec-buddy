@@ -1,0 +1,23 @@
+{
+  "skill_name": "openspec-buddy-auto",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "使用 openspec-buddy-auto 处理下一个可以执行的 change。",
+      "expected_output": "先检查 OPENSPEC_BUDDY_* 环境变量并同步配置的 Buddy base branch，核对 active OpenSpec change 与 status:ready issue，排除 type:series-parent 和仍有 open blockedBy 的 issue，要求 issue base_branch 为配置的 base branch，优先选择能 blocking 后续变更的可执行项，调用 openspec-buddy apply 通过 gh issue develop 创建 issue Development 分支链接并抢占，再进入同名分支，同步 Project Status 为 In Progress 且设置 Start，不直接跳过 claim。",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "在 goal 模式下自动处理所有剩余 OpenSpec change。",
+      "expected_output": "每轮只 claim 一个 change；一旦开始某个 series，后续优先处理同 series 可执行 issue；实现和验证完成后先在 claim branch 上归档 OpenSpec change，把代码、测试、主 spec 与 archive 目录放入同一个 PR；PR 合并后只同步 issue 为 status:archived、Project Status 为 Done 且设置 End，重新 fetch 配置的 Buddy base branch 并重算候选；无可执行项或预算耗尽时停止。",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "PR 已打开，等待 code review 后继续。",
+      "expected_output": "先确认或补齐 PR 元数据：PR 必须带 pr:openspec-buddy、pr:base-<base-branch> 以及 issue 的 area/series/risk 标签，加入与 issue 相同的 Project，Project Status 为 In Progress，并按 OPENSPEC_BUDDY_PR_DEVELOPMENT_LINK_MODE 记录来源 issue；keyword 模式必须通过 closingIssuesReferences 验证 PR Development 链接，非默认 base 下则报告需要手动在 GitHub Development sidebar 链接；然后在当前串行流程中按配置时长执行一次阻塞等待，不使用 Codex 自动化、heartbeat 或后台监控，等待期间不检查时间、不轮询 shell、不查询 GitHub、不读文件、不汇报进度、不处理其他工作；等待结束后检查 PR base 是否为配置的 Buddy base branch、review、unresolved threads、requested changes、CI、mergeability 和 PR 元数据；若 PR 指向 release branch 则改为 Buddy base branch 或停止；有反馈则修复、reply、resolve、推送，并再次串行等待；无反馈且检查通过才合并。",
+      "files": []
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+node_modules/
+*.tgz
+npm-debug.log*
+.DS_Store
+.env
+.env.*
+!.env.openspec-buddy.example
+.agents/
+.codex/
+.code-review-graph/

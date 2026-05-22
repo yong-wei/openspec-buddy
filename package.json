@@ -1,0 +1,46 @@
+{
+  "name": "openspec-buddy",
+  "version": "0.1.0",
+  "description": "Versioned npm distribution for the OpenSpec Buddy agent skills.",
+  "type": "module",
+  "bin": {
+    "openspec-buddy": "bin/openspec-buddy.mjs"
+  },
+  "files": [
+    "bin",
+    "src",
+    "skills",
+    "README.md",
+    ".env.openspec-buddy.example",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "bash -n skills/openspec-buddy/scripts/*.sh && node --check src/cli.mjs && node --check bin/openspec-buddy.mjs && node --test test/*.test.mjs && bash skills/openspec-buddy/evals/load-config-dotenv.test.sh && node skills/openspec-buddy/evals/build-pr-development-note.test.mjs && node skills/openspec-buddy-auto/evals/select-next-change.test.mjs",
+    "check": "npm test && npm pack --dry-run",
+    "pack:local": "npm pack",
+    "publish:public": "npm publish --access public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yong-wei/openspec-buddy.git"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "keywords": [
+    "openspec",
+    "agent-skills",
+    "codex",
+    "github-issues"
+  ],
+  "author": "Yong-Wei Zhang",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/yong-wei/openspec-buddy/issues"
+  },
+  "homepage": "https://github.com/yong-wei/openspec-buddy#readme",
+  "engines": {
+    "node": ">=18"
+  }
+}
