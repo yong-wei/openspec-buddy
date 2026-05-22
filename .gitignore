@@ -2,6 +2,7 @@ node_modules/
 *.tgz
 npm-debug.log*
 .DS_Store
+AGENTS.md
 .env
 .env.*
 !.env.openspec-buddy.example
