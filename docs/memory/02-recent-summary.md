@@ -16,7 +16,7 @@
 - `openspec-buddy` 与 `openspec-buddy-auto` 已复制到 `skills/`。
 - 本机全局 `openspec-buddy` 与 `openspec-buddy-auto` 技能入口已改为指向本仓库技能目录的软链接。
 - npm CLI 提供 `install`、`init`、`doctor` 和 `version` 命令。
-- `openspec-buddy@0.1.0` 已发布到 npm；后续版本通过 GitHub Release 触发 npm Trusted Publishing。
+- npm 包已发布；后续版本通过 GitHub Release 触发 npm Trusted Publishing。
 
 ## 当前警惕点
 

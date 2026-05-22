@@ -1,6 +1,6 @@
 {
   "name": "openspec-buddy",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Versioned npm distribution for the OpenSpec Buddy agent skills.",
   "type": "module",
   "bin": {
