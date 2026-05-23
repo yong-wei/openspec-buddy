@@ -69,13 +69,8 @@ function parseScalar(value) {
   return trimmed;
 }
 
-function parseFrontMatter(markdown) {
-  const match = markdown.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
-  if (!match) {
-    throw new Error("Missing YAML front matter at the start of the issue body.");
-  }
-
-  const lines = match[1].split(/\r?\n/);
+function parseMetadataBlock(rawMetadata, sourceName) {
+  const lines = rawMetadata.split(/\r?\n/);
   const data = {};
   let currentListKey = null;
 
@@ -91,7 +86,7 @@ function parseFrontMatter(markdown) {
 
     const pair = line.match(/^([A-Za-z0-9_-]+):(?:\s*(.*))?$/);
     if (!pair) {
-      throw new Error(`Unsupported YAML line: ${line}`);
+      throw new Error(`Unsupported ${sourceName} metadata line: ${line}`);
     }
 
     const key = pair[1];
@@ -121,6 +116,28 @@ function parseFrontMatter(markdown) {
   }
 
   return data;
+}
+
+function parseFrontMatter(markdown) {
+  const match = markdown.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
+  if (!match) return null;
+  return parseMetadataBlock(match[1], "YAML front matter");
+}
+
+function parseHiddenMetadata(markdown) {
+  const match = markdown.match(/<!--\s*openspec-buddy\s*\r?\n([\s\S]*?)\r?\n\s*-->/);
+  if (!match) return null;
+  return parseMetadataBlock(match[1], "openspec-buddy hidden");
+}
+
+function parseIssueMetadata(markdown) {
+  const frontMatter = parseFrontMatter(markdown);
+  if (frontMatter) return frontMatter;
+
+  const hiddenMetadata = parseHiddenMetadata(markdown);
+  if (hiddenMetadata) return hiddenMetadata;
+
+  throw new Error("Missing OpenSpec Buddy metadata. Expected YAML front matter or <!-- openspec-buddy ... --> block.");
 }
 
 function validate(data) {
@@ -194,7 +211,7 @@ function validate(data) {
 }
 
 try {
-  const data = parseFrontMatter(body);
+  const data = parseIssueMetadata(body);
   validate(data);
   process.stdout.write(`${JSON.stringify(data, null, 2)}\n`);
 } catch (error) {

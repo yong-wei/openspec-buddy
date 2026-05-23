@@ -15,7 +15,7 @@ fi
 
 existing_statuses="$(
   gh issue view "$issue_number" --json labels \
-    --jq '[.labels[].name | select(startswith("status:"))] | join(",")'
+    --jq '[.labels[].name | select(test("^status:\\s*"))] | join(",")'
 )"
 
 args=(issue edit "$issue_number")

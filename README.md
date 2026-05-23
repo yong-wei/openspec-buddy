@@ -2,18 +2,18 @@
 
 `openspec-buddy` 是一组面向 OpenSpec 工作流的代理技能包，包含两个技能：
 
-- `openspec-buddy`：把一个 OpenSpec 变更和 GitHub Issue、声明分支、Pull Request、GitHub Project 状态绑定起来，适合人工控制的提案登记、领取、实现后归档。
-- `openspec-buddy-auto`：在 `openspec-buddy` 的约束上执行自动化循环，负责选择可执行变更、领取 issue、实现、开 PR、等待 review、合并、同步归档状态。
+- `openspec-buddy`：把一个 OpenSpec 变更和 GitHub Issue、声明分支、Pull Request、GitHub Project 状态绑定起来，适合人工控制的开放 issue 领取、提案登记、实现后归档。
+- `openspec-buddy-auto`：在 `openspec-buddy` 的约束上执行自动化循环，负责选择可领取 issue、建立 claim、实现、开 PR、等待 review、合并、同步归档状态。
 
 这两个技能不替代 OpenSpec 自身的设计和实现技能。推荐配合方式是：
 
-1. 用 OpenSpec 系列技能完成需求探索、变更提案和本地变更文件。
-2. 用 `openspec-buddy propose` 把变更登记到 GitHub Issue，并写清 `change_id`、分支、依赖、风险和项目状态。
-3. 用 `openspec-buddy apply` 领取单个 GitHub Issue 对应的 OpenSpec 变更，再调用 OpenSpec 实现技能完成代码、测试和 spec 同步。
+1. 对已有 GitHub issue，先用 `openspec-buddy claim [issue]` 建立 claim；不指定 issue 时会选择最小编号的可领取开放 issue。
+2. 对还没有 issue 的本机变更，用 OpenSpec 系列技能完成需求探索和提案，再用 `openspec-buddy propose` 登记 GitHub Issue。
+3. 用 `openspec-buddy apply` 在已 claim 的 GitHub Issue 上完成代码、测试和 spec 同步。
 4. 用 `openspec-buddy achieve` 在 PR 合并后同步 GitHub Issue、GitHub Project 和 OpenSpec 归档记录。
-5. 需要连续处理一组已登记变更时，再使用 `openspec-buddy-auto`，让它按依赖、状态、review 和 CI 闸门逐个推进。
+5. 需要连续处理一组开放 issue 或已登记变更时，再使用 `openspec-buddy-auto`，让它按 claim、依赖、状态、review 和 CI 闸门逐个推进。
 
-核心约束是：一个协调变更对应一个 GitHub Issue、一个 `change_id`、一个声明分支、一个 OpenSpec change 和一个 PR。GitHub 负责跨分支、跨代理、跨工作树的协作状态；OpenSpec 仍然是需求、任务和 spec 的本地事实源。
+核心约束是：一个可执行协调变更对应一个 GitHub Issue、一个 `change_id`、一个声明分支、一个 OpenSpec change 和一个 PR。复杂开放 issue 会先被 claim，再拆分成多个子 issue；原 issue 只作为跟踪父 issue。GitHub 负责跨分支、跨代理、跨工作树的协作状态；OpenSpec 仍然是需求、任务和 spec 的本地事实源。
 
 ## 安装
 

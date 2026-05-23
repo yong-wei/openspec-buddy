@@ -27,6 +27,17 @@ Only one `status:*` label should be present on an issue. Do not modify status la
 Backlog -> Ready -> Claimed -> In Progress -> In Review -> Archived
 ```
 
+For an ordinary collaborator issue, `claim` is the first Buddy transition:
+
+```text
+Open issue -> Claimed -> Simple executable change -> In Progress
+Open issue -> Claimed -> Complex decomposition -> Tracking parent + Ready child issues
+```
+
+Complex issue decomposition is not deferred to a later phase. After the claim
+lock succeeds, classify immediately. Only convert the source issue to
+`status:tracking` after child executable issues have been created and linked.
+
 In the default pre-archive PR flow, the OpenSpec files move to
 `openspec/changes/archive/` before review, but the GitHub issue remains
 `status:in-review` until the PR merges. After merge, `mark-achieved.sh` moves
@@ -44,7 +55,9 @@ where a PR was merged before the OpenSpec archive landed.
 | Action | From | To | Required proof |
 | --- | --- | --- |
 | propose | none/backlog | ready | issue front matter and labels created |
-| claim | ready | claimed | assignee and claim comment confirmed |
+| claim prepared change | ready | claimed | assignee and claim comment confirmed |
+| claim open issue | open/backlog/ready | claimed | branch lock, hidden metadata, assignee, status, and Project sync confirmed |
+| decompose complex claim | claimed | tracking parent + ready children | child issues exist and are linked |
 | start work | claimed | in-progress | branch exists and OpenSpec change is selected |
 | open pre-archived PR | in-progress | in-review | PR URL comment and archive path included in PR |
 | achieve merged PR | in-review | archived | PR merge commit, archived tasks complete, archive path |
@@ -57,7 +70,9 @@ where a PR was merged before the OpenSpec archive landed.
 
 ## Coupling Rule
 
-Before claiming an issue, check open issues in the same `coupling_group`.
+Before claiming a prepared issue, check open issues in the same `coupling_group`.
+For an ordinary open issue, `claim-issue.sh` derives `coupling_group: none`
+unless an existing label such as `coupling:<name>` provides a stricter group.
 
 Stop if any issue other than the current one has:
 

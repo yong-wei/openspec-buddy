@@ -8,7 +8,10 @@ const metadataCache = new Map();
 
 function normalizeLabels(labels) {
   const list = Array.isArray(labels) ? labels : labels?.nodes || [];
-  return list.map((label) => (typeof label === "string" ? label : label.name)).filter(Boolean);
+  return list
+    .map((label) => (typeof label === "string" ? label : label.name))
+    .filter(Boolean)
+    .map((name) => name.replace(/^(status|type|area|series|risk|mode):\s+/, "$1:"));
 }
 
 function normalizeActiveChanges(activeChanges) {

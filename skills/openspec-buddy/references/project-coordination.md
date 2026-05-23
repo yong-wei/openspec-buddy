@@ -20,7 +20,7 @@ target project with environment variables before running any Project mutation:
 | `OPENSPEC_BUDDY_PROJECT_END_FIELD` | End date field name, default `End` |
 | `OPENSPEC_BUDDY_PR_DEVELOPMENT_LINK_MODE` | PR Development link policy: `auto` default, `keyword`, `manual`, or `off` |
 
-The Project is the human-visible coordination board. Labels and issue front matter remain the agent execution source of truth, but every issue status transition must also mirror to the Project `Status` field.
+The Project is the human-visible coordination board. Labels and issue metadata remain the agent execution source of truth, but every issue status transition must also mirror to the Project `Status` field.
 
 ## Issue Development Branches
 

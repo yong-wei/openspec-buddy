@@ -2,6 +2,12 @@
   "skill_name": "openspec-buddy",
   "evals": [
     {
+      "id": 0,
+      "prompt": "openspec-buddy claim：没有指定 issue，请自动接收一个开放 issue。",
+      "expected_output": "先检查 OPENSPEC_BUDDY_* 环境变量；在没有指定 issue 时选择最小编号的可 claim open issue；先通过 gh issue develop 建立 Development 分支和远端分支锁，再写入隐藏 openspec-buddy 元数据、指定当前用户为 assignee、设置 status:claimed、同步 Project Status 为 In Progress 和 Start 日期；随后立即判断 simple/complex，简单 issue 作为一个 change 继续，复杂 issue 先拆分子 issue 后把原 issue 转为 tracking parent。",
+      "files": []
+    },
+    {
       "id": 1,
       "prompt": "openspec-buddy propose：为竞技场排行榜筛选重构注册一个新的 change，要求使用 GitHub Issue 协调。",
       "expected_output": "生成或确认 change_id，先检查 OPENSPEC_BUDDY_* 环境变量，使用 YAML front matter issue 模板，设置 claim_branch 等于 change_id 且 base_branch 等于配置的 Buddy base branch；若属于系列变更，创建或识别 series parent 并用 Add parent 关系关联；若存在依赖，用 blockedBy/blocking 关系登记；创建 issue 后加入配置的 GitHub Project，将 Project Status 设为 Todo，并说明不会开始实现。",
@@ -10,7 +16,7 @@
     {
       "id": 2,
       "prompt": "openspec-buddy apply #123：开始实现这个 OpenSpec change。",
-      "expected_output": "先读取并校验 Issue metadata、labels 和 GitHub blockedBy 关系，拒绝 parent issue 与仍被阻塞的 issue，检查耦合组、claim_branch，再通过 gh issue develop 创建 issue Development 分支链接、远端同名分支锁和结构化 claim comment 抢占，并同步 Project Status 为 In Progress 与 Start 日期；claim 失败时停止，不修改代码。",
+      "expected_output": "先读取并校验 Issue metadata、labels 和 GitHub blockedBy 关系，拒绝 parent issue 与仍被阻塞的 issue，检查耦合组、claim_branch；若 issue 是 status:ready，则通过 gh issue develop 创建 issue Development 分支链接、远端同名分支锁和结构化 claim comment 抢占，并同步 Project Status 为 In Progress 与 Start 日期；若已由当前用户 status:claimed，则校验 assignee、Development 分支、远端分支锁和 claim comment 后继续；claim 校验失败时停止，不修改代码。",
       "files": []
     },
     {

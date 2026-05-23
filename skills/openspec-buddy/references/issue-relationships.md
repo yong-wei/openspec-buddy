@@ -1,6 +1,6 @@
 # OpenSpec Buddy Issue Relationships
 
-GitHub Issue relationships are the cross-agent scheduling truth. Issue front matter keeps an auditable mirror, but native GitHub relationships decide whether a change can be claimed.
+GitHub Issue relationships are the cross-agent scheduling truth. Issue metadata keeps an auditable mirror, but native GitHub relationships decide whether a change can be claimed.
 
 ## Series Parent
 
@@ -66,7 +66,7 @@ Use the relationship list and verifier when diagnosing drift:
 node <openspec-buddy-skill-dir>/scripts/verify-issue-relationships.mjs < relationships.json
 ```
 
-The verifier is a consistency check. The claim gate still uses GitHub native `blockedBy` relationships, not front matter alone.
+The verifier is a consistency check. The claim gate still uses GitHub native `blockedBy` relationships, not metadata alone.
 Pass `requireParent: true` in the input JSON only when auditing a newly registered series that should already have parent links; older issues may not have that relationship.
 
 ## Project Dates

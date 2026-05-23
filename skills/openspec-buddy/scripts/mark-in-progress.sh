@@ -27,7 +27,7 @@ if [[ "$current_branch" != "$claim_branch" ]]; then
   exit 1
 fi
 
-if ! node -e 'const fs=require("fs"); const issue=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); const labels=issue.labels.map((l)=>l.name); process.exit(labels.includes("status:claimed") ? 0 : 1);' "$issue_file"; then
+if ! node -e 'const fs=require("fs"); const issue=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); const labels=issue.labels.map((l)=>l.name.replace(/^status:\s+/,"status:")); process.exit(labels.includes("status:claimed") ? 0 : 1);' "$issue_file"; then
   echo "Issue #$issue_number is not status:claimed." >&2
   exit 1
 fi

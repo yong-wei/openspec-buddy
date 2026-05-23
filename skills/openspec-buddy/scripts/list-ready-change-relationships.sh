@@ -10,7 +10,7 @@ gh api graphql \
   -f query='
 query($owner: String!, $name: String!, $limit: Int!) {
   repository(owner: $owner, name: $name) {
-    issues(first: $limit, states: OPEN, labels: ["status:ready"], orderBy: {field: CREATED_AT, direction: ASC}) {
+    issues(first: $limit, states: OPEN, orderBy: {field: CREATED_AT, direction: ASC}) {
       nodes {
         id
         number

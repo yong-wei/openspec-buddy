@@ -1,10 +1,35 @@
-# Selecting An Executable Change
+# Selecting A Claim Target
 
 Recalculate candidates at the start of every iteration.
 
 ## Candidate Source
 
-Use both sources:
+`openspec-buddy claim` is the first action. If the user supplies an issue
+number, claim that issue. If not, select the smallest claimable open issue
+number and claim it before doing deeper exploration or decomposition.
+
+For ordinary open issues, use:
+
+```bash
+<openspec-buddy-skill-dir>/scripts/claim-issue.sh [issue-number]
+```
+
+The claim selector skips closed issues, issues assigned to another user, series
+parents, and issues labeled with active or terminal `status:*` values. Missing
+status, `status:backlog`, `status: ready`, and `status:ready` are claimable.
+Automatic selection uses the lowest issue number among those candidates.
+
+After claim, immediately classify the issue:
+
+- Simple issue: adopt it as one executable Buddy change and continue with the
+  apply flow.
+- Complex issue: keep the source issue claimed while creating child change
+  issues, then make the source issue a `status:tracking` series parent.
+
+## Prepared Change Source
+
+For already prepared Buddy issues with active OpenSpec changes, use both
+sources:
 
 ```bash
 openspec list --json
@@ -23,7 +48,7 @@ For the common case, use the wrapper:
 <openspec-buddy-skill-dir>/scripts/select-next-change.sh [current-series]
 ```
 
-An issue is executable only when:
+A prepared issue is executable only when:
 
 ```text
 local active OpenSpec change exists on latest $OPENSPEC_BUDDY_BASE_BRANCH
@@ -45,7 +70,7 @@ If any condition is unclear, mark the issue `status:blocked` or `status:needs-hu
 
 ## Tie Breaker
 
-Prefer:
+Prepared executable changes prefer:
 
 1. Issues from the current series when goal mode or the previous iteration has already started that series.
 2. Issues that unblock downstream changes through GitHub `blocking` relationships.

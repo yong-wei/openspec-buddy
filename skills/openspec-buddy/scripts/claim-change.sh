@@ -45,12 +45,12 @@ if ! gh issue develop --help >/dev/null 2>&1; then
   exit 1
 fi
 
-if ! node -e 'const fs=require("fs"); const issue=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); const labels=issue.labels.map((l)=>l.name); process.exit(labels.includes("status:ready") ? 0 : 1);' "$issue_file"; then
+if ! node -e 'const fs=require("fs"); const issue=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); const labels=issue.labels.map((l)=>l.name.replace(/^status:\s+/,"status:")); process.exit(labels.includes("status:ready") ? 0 : 1);' "$issue_file"; then
   echo "Issue #$issue_number is not status:ready." >&2
   exit 1
 fi
 
-if node -e 'const fs=require("fs"); const issue=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); const labels=issue.labels.map((l)=>l.name); process.exit(labels.includes("type:series-parent") ? 0 : 1);' "$issue_file"; then
+if node -e 'const fs=require("fs"); const issue=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); const labels=issue.labels.map((l)=>l.name.replace(/^type:\s+/,"type:")); process.exit(labels.includes("type:series-parent") ? 0 : 1);' "$issue_file"; then
   echo "Issue #$issue_number is a series parent and cannot be claimed." >&2
   exit 1
 fi
@@ -74,7 +74,7 @@ if ! node -e '
 const fs = require("fs");
 const data = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
 const blockers = data.data.node.blockedBy.nodes.filter((issue) => {
-  const labels = issue.labels.nodes.map((label) => label.name);
+  const labels = issue.labels.nodes.map((label) => label.name.replace(/^status:\s+/, "status:"));
   return issue.state !== "CLOSED" && !labels.includes("status:archived") && !labels.includes("status:merged");
 });
 if (blockers.length > 0) {
@@ -149,7 +149,7 @@ node -e '
 const fs = require("fs");
 const issue = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
 const viewer = process.argv[2];
-const labels = issue.labels.map((label) => label.name);
+const labels = issue.labels.map((label) => label.name.replace(/^status:\s+/, "status:"));
 const assignees = issue.assignees.map((assignee) => assignee.login);
 if (!labels.includes("status:claimed") || !assignees.includes(viewer)) process.exit(1);
 ' "$tmp_dir/claimed.json" "$viewer"

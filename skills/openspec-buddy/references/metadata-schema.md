@@ -1,6 +1,30 @@
 # OpenSpec Buddy Metadata Schema
 
-GitHub Issue front matter is the machine-readable task record.
+GitHub Issue metadata is the machine-readable task record.
+
+Prepared Buddy issues created by `propose` should use YAML front matter at the
+start of the issue body. Ordinary collaborator issues adopted through
+`claim-issue.sh` keep their human-readable body and receive a hidden metadata
+block instead:
+
+```markdown
+<!-- openspec-buddy
+change_id: issue-27-student-flow
+claim_branch: issue-27-student-flow
+series: student-flow
+coupling_group: none
+execution_mode: isolated
+base_branch: integration
+required_branch:
+depends_on: []
+openspec_path: openspec/changes/issue-27-student-flow
+risk: medium
+area: workflow
+-->
+```
+
+`parse-issue-metadata.mjs` accepts both forms. If both are present, front matter
+wins; avoid that mixed state unless repairing an old issue.
 
 ## Required Fields
 
@@ -50,4 +74,8 @@ GitHub Issue front matter is the machine-readable task record.
   metadata.
 - `execution_mode: fixed-branch` requires `required_branch` to equal `claim_branch`.
 - `execution_mode: stacked` requires `depends_on` to be non-empty.
-- A change can be claimed only from `status:ready`.
+- A prepared Buddy change can be claimed only from `status:ready`.
+- An ordinary open issue can be claimed by `claim-issue.sh` when it is open,
+  unassigned or assigned to the current viewer, not a series parent, and has no
+  active or terminal `status:*` label. Missing status, `status:backlog`, and
+  `status:ready` are claimable.

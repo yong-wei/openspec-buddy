@@ -4,7 +4,7 @@
     {
       "id": 1,
       "prompt": "使用 openspec-buddy-auto 处理下一个可以执行的 change。",
-      "expected_output": "先检查 OPENSPEC_BUDDY_* 环境变量并同步配置的 Buddy base branch，核对 active OpenSpec change 与 status:ready issue，排除 type:series-parent 和仍有 open blockedBy 的 issue，要求 issue base_branch 为配置的 base branch，优先选择能 blocking 后续变更的可执行项，调用 openspec-buddy apply 通过 gh issue develop 创建 issue Development 分支链接并抢占，再进入同名分支，同步 Project Status 为 In Progress 且设置 Start，不直接跳过 claim。",
+      "expected_output": "先检查 OPENSPEC_BUDDY_* 环境变量并同步配置的 Buddy base branch，调用 openspec-buddy claim；没有指定 issue 时选择最小编号的可 claim open issue，先建立 gh issue develop Development 分支锁、指派当前用户、设置 status:claimed 并同步 Project Status/Start；普通开放 issue 被收编后立即判断 simple/complex，简单 issue 创建或确认 OpenSpec change 后继续 apply，复杂 issue 拆分为 child issues 后把原 issue 转为 tracking parent。",
       "files": []
     },
     {

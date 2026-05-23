@@ -1,6 +1,6 @@
 ---
 name: openspec-buddy
-description: Use when the user explicitly invokes openspec-buddy propose, openspec-buddy apply, or openspec-buddy achieve for OpenSpec changes coordinated through GitHub Issues across branches, agents, or worktrees.
+description: Use when the user explicitly invokes openspec-buddy claim, propose, apply, or achieve for OpenSpec changes coordinated through GitHub Issues across branches, agents, or worktrees.
 compatibility: Requires openspec CLI and GitHub CLI.
 ---
 
@@ -9,7 +9,7 @@ compatibility: Requires openspec CLI and GitHub CLI.
 OpenSpec Buddy is the coordination layer for GitHub-tracked OpenSpec work.
 GitHub Issues are the cross-worktree task record. OpenSpec remains the local specification and execution package.
 
-Use this skill only when the user explicitly asks for `openspec-buddy propose`, `openspec-buddy apply`, `openspec-buddy achieve`, or asks to coordinate OpenSpec changes through GitHub Issues.
+Use this skill only when the user explicitly asks for `openspec-buddy claim`, `openspec-buddy propose`, `openspec-buddy apply`, `openspec-buddy achieve`, or asks to coordinate OpenSpec changes through GitHub Issues.
 
 ## Required Configuration
 
@@ -72,17 +72,19 @@ Optional Development-link policy:
 
 ## Core Rule
 
-One coordinated change maps to:
+One executable coordinated change maps to:
 
 ```text
 one GitHub Issue = one change_id = one claim branch = one OpenSpec change = one PR
 ```
 
-The issue front matter must include `claim_branch`, and `claim_branch` must equal `change_id`.
+The issue metadata must include `claim_branch`, and `claim_branch` must equal `change_id`.
+
+An ordinary open issue can be a source issue before it is adopted. The first Buddy action on that source issue is always `claim`: create the Development branch lock, assign the agent, add hidden Buddy metadata, and then decide whether the issue is simple enough to become one executable change or complex enough to become a tracking parent with child change issues.
 
 ## Execution Retrospective Requirement
 
-After every `propose`, `apply`, or `achieve` run, include a brief execution retrospective in the final report.
+After every `claim`, `propose`, `apply`, or `achieve` run, include a brief execution retrospective in the final report.
 The retrospective must state:
 
 - what worked in the Buddy workflow
@@ -92,6 +94,33 @@ The retrospective must state:
 If the run reveals a reusable workflow gap and the user asks to persist it, update the relevant skill file in the same branch before closing the task.
 
 ## Modes
+
+### claim
+
+Use when the user wants to pick up an existing GitHub issue, with or without an issue number.
+
+Claim is the intake operation. Do not explore, draft an OpenSpec proposal, split the issue, or start implementation before the claim lock succeeds.
+
+Steps:
+
+1. If the user gave an issue number or URL, use that issue. If not, select the smallest claimable open issue number:
+   ```bash
+   <openspec-buddy-skill-dir>/scripts/claim-issue.sh [issue-number]
+   ```
+   The script lists open issues when no number is provided, skips series parents, issues assigned to another user, active or terminal status labels, and accepts unlabeled, `status:backlog`, or `status:ready` issues.
+2. If the selected issue already has valid Buddy metadata, the script delegates to `claim-change.sh`.
+3. If the selected issue is an ordinary open issue, the script derives `change_id` as `issue-<number>-<title-slug>`, creates `origin/<change_id>` through `gh issue develop`, verifies the issue Development branch link, prepends a hidden `<!-- openspec-buddy ... -->` metadata block, assigns the current GitHub viewer, sets `status:claimed`, syncs the GitHub Project to `In Progress`, and sets Project `Start`.
+4. Re-read the claimed issue and confirm:
+   - the issue has the current viewer as assignee
+   - `status:claimed` is present
+   - the Development branch exists and is linked
+   - `parse-issue-metadata.mjs` parses either front matter or the hidden Buddy block
+5. Classify the claimed issue immediately:
+   - Simple issue: keep the claimed issue as the single executable change, run `openspec-explore` only as needed, create the local OpenSpec change under `openspec/changes/<change_id>`, then continue with `apply`.
+   - Complex issue: keep the claim while decomposing. Create child executable issues with their own Buddy metadata, link them as sub-issues or dependencies, then convert the original issue to `type:series-parent` and `status:tracking` only after the child issues exist.
+6. If complexity is unclear after a bounded read of the issue and repository context, keep the issue claimed and ask the user whether to treat it as simple or decompose it. Do not release the claim merely because classification needs a human decision.
+
+When a complex issue is decomposed, the original issue is no longer an executable change. The child issues carry the one-issue/one-change mapping.
 
 ### propose
 
@@ -152,15 +181,15 @@ Steps:
    <openspec-buddy-skill-dir>/scripts/parse-issue-metadata.mjs <issue-body-file>
    ```
 4. Verify:
-   - issue has `status:ready`
+   - issue has `status:ready` or is already `status:claimed` by the current viewer
    - issue is not labeled `type:series-parent`
    - native `blockedBy` has no open, unarchived issue
-   - front matter `depends_on` entries are not active unfinished changes
+   - metadata `depends_on` entries are not active unfinished changes
    - no open issue in the same `coupling_group` has `status:claimed` or `status:in-progress`
    - `claim_branch` equals `change_id`
    - `base_branch` equals `$OPENSPEC_BUDDY_BASE_BRANCH`
    - execution mode and branch constraints are satisfiable
-5. Claim the issue with a linked Development branch and remote branch lock:
+5. If the issue is `status:ready`, claim it with a linked Development branch and remote branch lock:
    ```bash
    <openspec-buddy-skill-dir>/scripts/claim-change.sh <issue-number>
    ```
@@ -168,7 +197,11 @@ Steps:
    `gh issue develop`, verifies that the issue Development branch list contains
    the claim branch, writes a structured claim comment, and sets a lease.
    It also mirrors the issue status to the Project `Status` field and sets Project `Start` to the current date.
-6. Re-read the issue and confirm the claim id, assignee, status label, and branch lock.
+   If the issue is already `status:claimed`, do not claim it again. Re-read the
+   issue and confirm that the current viewer is the assignee, `origin/<change_id>`
+   exists, the issue Development branch list contains `<change_id>`, and the
+   latest Buddy claim comment records the same branch.
+6. Confirm the claim id, assignee, status label, and branch lock.
 7. Use branch `<change_id>` for the implementation. For isolated work, create it from `base_branch`. For fixed-branch work, stop if the required branch is not the same as the declared claim branch.
 8. After entering the claim branch, mark the issue in progress:
    ```bash
@@ -214,7 +247,7 @@ Steps:
    The script also rejects draft PRs and runs the PR metadata configuration
    helper. This must leave the issue Project `Status` as `In Progress`.
 
-If claim verification fails, stop before editing files.
+If claim verification fails, stop before editing files. If the user is starting from an ordinary open issue rather than a prepared Buddy issue, run `claim` first so intake and adoption happen before implementation.
 
 ### achieve / archive
 
@@ -263,8 +296,9 @@ Read only the reference needed for the current mode:
 - Do not implement unclaimed GitHub-tracked changes.
 - Do not execute adjacent OpenSpec changes found in the worktree.
 - Do not claim `type:series-parent` issues.
+- Do not inspect an open collaborator issue deeply, split it, or propose local OpenSpec artifacts before the `claim` lock succeeds.
 - Do not claim an issue while GitHub `blockedBy` contains any open, unarchived issue.
-- Do not treat GitHub Projects as the agent execution source of truth; use issue front matter, labels, assignee, and comments.
+- Do not treat GitHub Projects as the agent execution source of truth; use issue metadata, labels, assignee, and comments.
 - Do not update `status:*` labels without the Buddy wrapper scripts; Project `Status` must stay synchronized for human-visible coordination.
 - Do not open, review, or merge Buddy PRs against `$OPENSPEC_BUDDY_RELEASE_BRANCH`. Retarget them to `$OPENSPEC_BUDDY_BASE_BRANCH` or stop.
 - Do not create or submit draft PRs for Buddy changes; PRs must be ready for review when they are handed to the review loop.
@@ -273,7 +307,7 @@ Read only the reference needed for the current mode:
 - Do not claim a PR Development link is complete when the PR targets a non-default base branch; use the manual GitHub sidebar link or report it as a remaining coordination step.
 - Do not set `status:archived`, Project `Done`, or Project `End` merely because files were pre-archived in a PR. Those GitHub states are set only after the PR merges and `mark-achieved.sh` runs.
 - Do not use a branch whose name differs from `change_id` unless the user explicitly cancels OpenSpec Buddy coordination for this change.
-- Do not bypass the remote branch lock in `claim-change.sh`; label changes alone are not a reliable lock.
+- Do not bypass the remote branch lock in `claim-issue.sh` or `claim-change.sh`; label changes alone are not a reliable lock.
 - Do not reclaim `status:claimed` or `status:in-progress` work unless the lease is stale and the branch/PR recovery checks prove it is safe.
 - Do not continue after a failed claim or unresolved coupling conflict.
 - GitHub is the task-state source of truth; Git is still the code source of truth.
@@ -282,6 +316,8 @@ Read only the reference needed for the current mode:
 
 For `propose`, report the issue URL, `change_id`, labels, OpenSpec path, parent issue link, and dependency relationship links.
 Also report the GitHub Project item id or state that the issue was already present in the Project, plus the Project `Status`.
+
+For `claim`, report the issue number, whether it was selected automatically or specified by the user, `change_id`, claim branch, claim id, whether the issue was adopted from an ordinary open issue, and whether it is simple or requires decomposition.
 
 For `apply`, report the issue, claim branch, blockedBy status, downstream blocking count when known, coupling-group result, Project `Start`, PR metadata labels, PR Project membership, and the OpenSpec change being applied.
 

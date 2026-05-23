@@ -18,7 +18,7 @@ const conflicts = [];
 
 for (const issue of issues) {
   if (issue.number === currentIssue) continue;
-  const labelNames = (issue.labels || []).map((label) => label.name);
+  const labelNames = (issue.labels || []).map((label) => label.name.replace(/^status:\s+/, "status:"));
   if (!labelNames.some((name) => activeStatuses.has(name))) continue;
   if (!issue.body) continue;
 

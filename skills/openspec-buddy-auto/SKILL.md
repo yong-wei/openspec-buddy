@@ -7,7 +7,7 @@ compatibility: Requires openspec CLI, GitHub CLI, OpenSpec Buddy, and a foregrou
 # OpenSpec Buddy Auto
 
 OpenSpec Buddy Auto is the high-permission execution layer for GitHub-tracked OpenSpec changes.
-It orchestrates one change from ready issue to merged, archived result. It does not replace `openspec-buddy`; it calls `openspec-buddy` for issue, claim, branch, and archive state.
+It orchestrates one claimed issue from intake to merged, archived result. It does not replace `openspec-buddy`; it calls `openspec-buddy` for issue, claim, branch, and archive state.
 
 ## When To Use
 
@@ -17,7 +17,7 @@ Do not use for ordinary `openspec-propose`, manual `openspec-apply-change`, or i
 
 ## Required References
 
-- `references/selection-rules.md`: selecting an executable change
+- `references/selection-rules.md`: selecting a claim target and prepared executable change
 - `references/execution-loop.md`: end-to-end run lifecycle
 - `references/review-waiting.md`: five-minute PR review wait loop
 - `references/failure-recovery.md`: stale claim, unsafe recovery, and stop conditions
@@ -45,13 +45,13 @@ still missing, ask the user for the review request string and append it to
 
 1. Start from a clean worktree on the long-lived coordination branch.
 2. Fetch `origin/$OPENSPEC_BUDDY_BASE_BRANCH` and fast-forward the local base branch.
-3. List active OpenSpec changes from `origin/$OPENSPEC_BUDDY_BASE_BRANCH`.
-4. Read GitHub issues in the configured Project through issue labels and front matter.
-5. Select one executable change using `references/selection-rules.md`.
-   Relationship-aware selection must ignore series parent issues, skip issues with open `blockedBy`, prefer the current series when one is already in progress, and prefer issues that unblock downstream changes.
-6. Run `openspec-buddy apply` for the issue:
-   - claim the issue
-   - create the linked issue Development branch and remote branch lock
+3. Run `openspec-buddy claim` for the user-specified issue, or with no issue number to select the smallest claimable open issue.
+4. Re-read the claimed issue. If the claim adopted an ordinary open issue, classify it immediately:
+   - Simple issue: create or confirm the matching local OpenSpec change and continue.
+   - Complex issue: create child change issues, link them, convert the source issue to a tracking parent, then stop this iteration or claim the first child in the next iteration.
+5. For an already prepared Buddy issue with an active OpenSpec change, use `references/selection-rules.md` only after claim to decide whether it is executable now. Relationship-aware selection must ignore series parent issues, skip issues with open `blockedBy`, prefer the current series when one is already in progress, and prefer issues that unblock downstream changes.
+6. Continue the `openspec-buddy apply` flow for the claimed executable issue:
+   - verify the linked issue Development branch and remote branch lock
    - switch to branch `<change_id>`
    - set Project `Start`
    - set issue status to `status:in-progress`
@@ -119,6 +119,7 @@ still missing, ask the user for the review request string and append it to
 When the user asks to process all available changes, repeat one-change runs with these rules:
 
 - Claim only one issue per iteration.
+- If no issue is specified, every iteration starts with the smallest currently claimable open issue. Do not keep using a cached issue list after another agent may have claimed work.
 - After every merge and post-merge issue sync, fetch `origin/$OPENSPEC_BUDDY_BASE_BRANCH` and recalculate executable changes.
 - If the previous iteration completed a series issue, prefer the same series until no issue in that series is executable.
 - Skip `status:blocked`, `status:claimed`, `status:in-progress`, `status:stale-claim`, `status:needs-human`, and `status:failed`.

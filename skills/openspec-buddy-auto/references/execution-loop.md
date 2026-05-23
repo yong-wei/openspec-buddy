@@ -15,7 +15,8 @@ Stop if local unrelated changes exist.
 
 ## Claim
 
-Use `openspec-buddy apply`. The claim must create:
+Use `openspec-buddy claim [issue-number]`. If no issue number is supplied, it
+must select the smallest claimable open issue number. The claim must create:
 
 ```text
 origin/<change_id>
@@ -26,7 +27,13 @@ Project Status: In Progress
 Project Start: current local date
 ```
 
-Then switch to `<change_id>` and mark `status:in-progress`; the Project `Status` must remain `In Progress`.
+If the claimed issue was an ordinary open issue, classify it before switching
+branches. Simple issues continue as one executable change. Complex issues are
+split into child issues; the source issue becomes a tracking parent only after
+the children exist and are linked.
+
+Then switch to `<change_id>` for a simple or prepared change and mark
+`status:in-progress`; the Project `Status` must remain `In Progress`.
 
 ## Implement
 
