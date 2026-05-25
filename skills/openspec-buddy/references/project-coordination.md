@@ -52,7 +52,10 @@ The helper must:
 
 - add `pr:openspec-buddy`
 - add `pr:base-<base-branch>`
-- copy the issue's `area:*`, `series:*`, and `risk:*` labels to the PR
+- copy the issue's non-status coordination labels to the PR:
+  `type:*`, `level:*`, `area:*`, `series:*`, `risk:*`, `mode:*`, and
+  `coupling:*`
+- mirror the issue assignees onto the PR
 - add the PR to the same Project as the issue
 - set the PR Project `Status` to `In Progress`
 - record the origin issue in the PR body
@@ -61,6 +64,17 @@ The helper must:
 
 Do not copy `status:*` labels to PRs. Issue status remains the Buddy execution
 state, while `pr:*` labels describe PR-specific review metadata.
+
+Before moving the issue to review, run:
+
+```bash
+<openspec-buddy-skill-dir>/scripts/request-pr-review.sh <pr-number-or-url>
+<openspec-buddy-skill-dir>/scripts/verify-pr-coordination.sh <issue-number> <pr-number-or-url>
+```
+
+The review request must come from `OPENSPEC_BUDDY_PR_REVIEW_REQUEST`. For
+projects that require Codex review, configure that value explicitly, for
+example `@codex review 中文回复，即使没有重大问题也必须给出显式回复`.
 
 GitHub CLI has no direct `gh issue link-pr` equivalent. For a PR to appear as a
 verifiable issue Development link through CLI, the PR body must contain a

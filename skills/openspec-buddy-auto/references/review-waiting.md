@@ -65,15 +65,25 @@ Check:
 new review comments
 new requested changes
 PR base branch is $OPENSPEC_BUDDY_BASE_BRANCH
-PR has pr:* metadata labels and copied area/series/risk labels
-PR is in the same Project as the originating issue
+PR has pr:* metadata labels and copied non-status coordination labels
+PR assignees mirror the originating issue assignees
+PR is in the same Project as the originating issue with Status: In Progress
 PR body records the origin issue
+PR contains the configured OPENSPEC_BUDDY_PR_REVIEW_REQUEST comment
 PR Development link is verified through closingIssuesReferences when keyword mode is active
 unresolved review threads
 CI/check failures
 mergeability
 new commits not created by this run
 ```
+
+For the coordination checks, prefer the core verifier:
+
+```bash
+<openspec-buddy-skill-dir>/scripts/verify-pr-coordination.sh <issue-number> <pr-number-or-url>
+```
+
+Do not enter or continue the review wait loop if this verifier fails.
 
 If `baseRefName` is `$OPENSPEC_BUDDY_RELEASE_BRANCH`, retarget the PR before any review or merge gate:
 

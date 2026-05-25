@@ -4,7 +4,7 @@
     {
       "id": 0,
       "prompt": "openspec-buddy claim：没有指定 issue，请自动接收一个开放 issue。",
-      "expected_output": "先检查 OPENSPEC_BUDDY_* 环境变量；在没有指定 issue 时选择最小编号的可 claim open issue；先通过 gh issue develop 建立 Development 分支和远端分支锁，再写入隐藏 openspec-buddy 元数据、指定当前用户为 assignee、设置 status:claimed、同步 Project Status 为 In Progress 和 Start 日期；随后立即判断 simple/complex，简单 issue 作为一个 change 继续，复杂 issue 先拆分子 issue 后把原 issue 转为 tracking parent。",
+      "expected_output": "先检查 OPENSPEC_BUDDY_* 环境变量并调用 sync-base-branch.sh 同步配置的 Buddy base branch；在没有指定 issue 时选择最小编号的可 claim open issue；对已有开放 issue 直接在原 issue 顶部加入隐藏 openspec-buddy 元数据，不创建镜像 issue；先通过 gh issue develop 建立 Development 分支和远端分支锁，再指定当前用户为 assignee、设置 status:claimed、同步 Project Status 为 In Progress 和 Start 日期；随后立即判断 simple/complex，简单 issue 作为一个 change 继续，复杂 issue 先拆分子 issue 后把原 issue 转为 tracking parent。",
       "files": []
     },
     {
@@ -16,7 +16,13 @@
     {
       "id": 2,
       "prompt": "openspec-buddy apply #123：开始实现这个 OpenSpec change。",
-      "expected_output": "先读取并校验 Issue metadata、labels 和 GitHub blockedBy 关系，拒绝 parent issue 与仍被阻塞的 issue，检查耦合组、claim_branch；若 issue 是 status:ready，则通过 gh issue develop 创建 issue Development 分支链接、远端同名分支锁和结构化 claim comment 抢占，并同步 Project Status 为 In Progress 与 Start 日期；若已由当前用户 status:claimed，则校验 assignee、Development 分支、远端分支锁和 claim comment 后继续；claim 校验失败时停止，不修改代码。",
+      "expected_output": "先调用 sync-base-branch.sh 同步配置的 Buddy base branch，再读取并校验 Issue metadata、labels 和 GitHub blockedBy 关系，拒绝 parent issue 与仍被阻塞的 issue，检查耦合组、claim_branch；若 issue 是 status:ready，则通过 gh issue develop 创建 issue Development 分支链接、远端同名分支锁和结构化 claim comment 抢占，并同步 Project Status 为 In Progress 与 Start 日期；若已由当前用户 status:claimed，则校验 assignee、Development 分支、远端分支锁和 claim comment 后继续；claim 校验失败时停止，不修改代码。",
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "openspec-buddy apply #123：实现完成并已打开 PR，请进入 review。",
+      "expected_output": "PR 必须是 ready 且 base 为 OPENSPEC_BUDDY_BASE_BRANCH；通过 mark-review.sh 统一处理 PR 协调，不手写分散逻辑；该 helper 应调用 configure-pr-metadata.sh 复制 pr:* 和 issue 的非 status 协作标签 type/level/area/series/risk/mode/coupling，镜像 issue assignee，把 PR 加入同一 Project 且 Status 为 In Progress，记录 origin issue 与 Development-link 策略；随后通过 request-pr-review.sh 幂等写入 OPENSPEC_BUDDY_PR_REVIEW_REQUEST，再运行 verify-pr-coordination.sh，通过后才把 issue 置为 status:in-review。",
       "files": []
     },
     {

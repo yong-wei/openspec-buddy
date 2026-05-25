@@ -30,13 +30,16 @@ Backlog -> Ready -> Claimed -> In Progress -> In Review -> Archived
 For an ordinary collaborator issue, `claim` is the first Buddy transition:
 
 ```text
-Open issue -> Claimed -> Simple executable change -> In Progress
-Open issue -> Claimed -> Complex decomposition -> Tracking parent + Ready child issues
+Open issue -> Claimed on the original issue -> Simple executable change -> In Progress
+Open issue -> Claimed on the original issue -> Complex decomposition -> Tracking parent + Ready child issues
 ```
 
 Complex issue decomposition is not deferred to a later phase. After the claim
 lock succeeds, classify immediately. Only convert the source issue to
 `status:tracking` after child executable issues have been created and linked.
+Never create a duplicate issue just to carry Buddy metadata for the source
+issue; the original issue is either the executable change or the tracking
+parent.
 
 In the default pre-archive PR flow, the OpenSpec files move to
 `openspec/changes/archive/` before review, but the GitHub issue remains

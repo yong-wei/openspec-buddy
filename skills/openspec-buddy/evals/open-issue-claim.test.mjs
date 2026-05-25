@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -9,6 +10,7 @@ const skillDir = path.resolve(path.dirname(currentFile), "..");
 const parser = path.join(skillDir, "scripts/parse-issue-metadata.mjs");
 const selector = path.join(skillDir, "scripts/select-claim-issue.mjs");
 const builder = path.join(skillDir, "scripts/build-open-issue-metadata.mjs");
+const claimIssue = path.join(skillDir, "scripts/claim-issue.sh");
 
 process.env.OPENSPEC_BUDDY_BASE_BRANCH = "integration";
 
@@ -75,6 +77,12 @@ Human-readable issue description stays visible.
   assert.equal(built.metadata.area, "workflow");
   assert.match(built.updatedBody, /<!-- openspec-buddy/);
   assert.match(built.updatedBody, /Let collaborators start from an ordinary issue/);
+}
+
+{
+  const claimScript = fs.readFileSync(claimIssue, "utf8");
+  assert.match(claimScript, /gh issue edit "\$issue_number" --body-file "\$tmp_dir\/adopted-body\.md"/);
+  assert.doesNotMatch(claimScript, /gh issue create/);
 }
 
 {

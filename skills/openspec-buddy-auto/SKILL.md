@@ -44,7 +44,9 @@ still missing, ask the user for the review request string and append it to
 ## One-Change Run
 
 1. Start from a clean worktree on the long-lived coordination branch.
-2. Fetch `origin/$OPENSPEC_BUDDY_BASE_BRANCH` and fast-forward the local base branch.
+2. Synchronize the configured Buddy base branch by calling
+   `openspec-buddy/scripts/sync-base-branch.sh`. Auto mode does not maintain a
+   separate base-sync implementation.
 3. Run `openspec-buddy claim` for the user-specified issue, or with no issue number to select the smallest claimable open issue.
 4. Re-read the claimed issue. If the claim adopted an ordinary open issue, classify it immediately:
    - Simple issue: create or confirm the matching local OpenSpec change and continue.
@@ -74,32 +76,28 @@ still missing, ask the user for the review request string and append it to
      before the PR merges
    The implementation PR must include code, tests, completed tasks, synced main
    specs, and `openspec/changes/archive/YYYY-MM-DD-<change_id>/`.
-9. Commit, push, and open a ready PR against `$OPENSPEC_BUDDY_BASE_BRANCH` using `$OPENSPEC_BUDDY_PR_REVIEW_REQUEST` when the project requires a review prompt.
+9. Commit, push, and open a ready PR against `$OPENSPEC_BUDDY_BASE_BRANCH`.
    Do not hand-write the PR Development link; the metadata helper applies the
    configured policy.
-10. Configure PR metadata with `openspec-buddy/scripts/configure-pr-metadata.sh`:
-   - add PR-scoped labels such as `pr:openspec-buddy` and `pr:base-<base-branch>`
-   - copy the issue's `area:*`, `series:*`, and `risk:*` labels to the PR
-   - add the PR to the same Project as the issue
-   - set the PR Project `Status` to `In Progress`
-   - record the originating issue in the PR body
-   - create a verifiable PR Development link when the PR targets the repository
-     default branch, or report that manual sidebar linking is required
-11. Mark the issue `status:in-review`.
-   The Project `Status` must remain `In Progress`.
-12. Wait five minutes in the same foreground workflow with a single blocking
+10. Call `openspec-buddy/scripts/mark-review.sh <issue-number> <pr-url>`.
+    Auto mode must not reimplement PR metadata or review-request logic; the
+    Buddy helper configures PR labels, assignees, Project state, origin issue,
+    Development-link policy, posts `OPENSPEC_BUDDY_PR_REVIEW_REQUEST`, verifies
+    coordination, and then marks the issue `status:in-review`.
+    The Project `Status` must remain `In Progress`.
+11. Wait five minutes in the same foreground workflow with a single blocking
     sleep command, then check again. During the wait, stay completely silent:
     do not check the time, poll the shell, query GitHub, inspect files, send
     progress updates, or perform unrelated work. Do not use Codex automations,
     heartbeats, reminders, or background monitors for this wait.
-13. Check PR review, unresolved threads, requested changes, CI, mergeability, labels, Project membership, and origin issue traceability.
-14. If new actionable review exists, use `github:gh-address-comments` and `superpowers:receiving-code-review`, then push fixes. Before resolving any review thread, reply in that thread with the fix or non-actionable rationale and evidence; then resolve the thread and repeat from step 12.
+12. Check PR review, unresolved threads, requested changes, CI, mergeability, labels, Project membership, and origin issue traceability.
+13. If new actionable review exists, use `github:gh-address-comments` and `superpowers:receiving-code-review`, then push fixes. Before resolving any review thread, reply in that thread with the fix or non-actionable rationale and evidence; then resolve the thread and repeat from step 11.
     If review feedback changes requirements, tasks, or specs, edit the archived
     change files and synced main specs in the same PR; do not restore the
     active `openspec/changes/<change_id>/` directory.
-15. If no new review appears for the configured number of quiet checks and checks are green, merge the PR without deleting the branch yet. If the configured reviewer explicitly says there are no significant issues or no major problems, and all merge gates pass, it may be merged without waiting for the remaining quiet checks.
-16. Fast-forward the claim branch to `origin/$OPENSPEC_BUDDY_BASE_BRANCH`.
-17. Run the post-merge achievement sync:
+14. If no new review appears for the configured number of quiet checks and checks are green, merge the PR without deleting the branch yet. If the configured reviewer explicitly says there are no significant issues or no major problems, and all merge gates pass, it may be merged without waiting for the remaining quiet checks.
+15. Fast-forward the claim branch to `origin/$OPENSPEC_BUDDY_BASE_BRANCH`.
+16. Run the post-merge achievement sync:
     - verify the merged PR contains `openspec/changes/archive/YYYY-MM-DD-<change_id>/`
       and synced main specs
     - read the archived `tasks.md` and require no unchecked tasks
@@ -110,9 +108,9 @@ still missing, ask the user for the review request string and append it to
     If the archived issue belongs to a series parent and all sibling changes are
     also archived, finalize the parent issue as `status:archived`, Project
     `Status: Done`, Project `End` set, and closed.
-18. Delete the local and remote claim branch.
-19. Return to the coordination branch and fast-forward it to `$OPENSPEC_BUDDY_BASE_BRANCH`.
-20. Write an execution retrospective before final reporting.
+17. Delete the local and remote claim branch.
+18. Return to the coordination branch and fast-forward it to `$OPENSPEC_BUDDY_BASE_BRANCH`.
+19. Write an execution retrospective before final reporting.
 
 ## Goal Mode
 
@@ -145,12 +143,14 @@ Do not merge unless all are true:
 
 - PR is open and mergeable.
 - PR base is `$OPENSPEC_BUDDY_BASE_BRANCH`; if base is `$OPENSPEC_BUDDY_RELEASE_BRANCH`, retarget it to the Buddy base branch before review/merge, and stop if it cannot be retargeted.
-- PR has `pr:openspec-buddy`, `pr:base-<base-branch>`, and the originating issue's applicable `area:*`, `series:*`, and `risk:*` labels.
+- PR has `pr:openspec-buddy`, `pr:base-<base-branch>`, and the originating issue's applicable non-status coordination labels.
+- PR assignees mirror the originating issue assignees.
 - PR is in the same Project as the originating issue, and its Project `Status` is `In Progress`.
 - PR body records the originating issue. If the configured Development-link
   mode is `keyword`, `gh pr view --json closingIssuesReferences` must include
   the issue number before review/merge. If the mode is `auto` and the PR base is
   non-default, the manual sidebar-link requirement must be reported.
+- PR contains the configured `OPENSPEC_BUDDY_PR_REVIEW_REQUEST` comment.
 - CI/checks have completed successfully or the repository has no required checks.
 - No unresolved review threads remain.
 - No reviewer has requested changes on the latest commit.
@@ -171,7 +171,13 @@ Do not merge unless all are true:
 - Every review-thread resolve must be preceded by a reply in that same thread. The reply must state the fix commit or the reason the thread is non-actionable, plus the verification evidence. Do not silently resolve Codex review threads.
 - Do not merge while CI is `IN_PROGRESS`, even when every review thread is resolved and the PR is mergeable.
 - OpenSpec Buddy automation targets `$OPENSPEC_BUDDY_BASE_BRANCH`, not `$OPENSPEC_BUDDY_RELEASE_BRANCH`. New changes use the configured base branch, PRs use that base branch, and pre-archived change files land through the same implementation PR. Merging the Buddy base branch to the release branch is a manual release action outside Buddy Auto unless the project configures otherwise.
-- Buddy PRs must be configured with the `pr:*` namespace labels, inherited area/series/risk labels, the same Project as the issue, and an origin issue record before review waiting begins. Use `configure-pr-metadata.sh` for PR Development links; closing keywords are allowed only when the helper can verify `closingIssuesReferences`, otherwise manual sidebar linking is required.
+- Buddy PRs must pass the core `mark-review.sh` path before review waiting
+  begins. That path configures `pr:*` labels, inherited non-status coordination
+  labels, mirrored assignees, Project state, origin issue record, Development
+  link policy, and the configured review-request comment. Use
+  `configure-pr-metadata.sh` for PR Development links; closing keywords are
+  allowed only when the helper can verify `closingIssuesReferences`, otherwise
+  manual sidebar linking is required.
 - During pre-archive, if a delta spec introduces a capability whose main spec does not exist, create the corresponding `openspec/specs/<capability>/spec.md`, validate that spec, then move the change to `openspec/changes/archive/`.
 - Treat OpenSpec tasks as part of the cross-system completion record, not as local notes. If code already satisfies a task but `tasks.md` is still unchecked, close the task in the implementation PR before review/merge/archive; otherwise GitHub issue state and local OpenSpec state drift permanently.
 - Pre-archiving files in a PR is not the same as archiving the GitHub issue. Keep the issue in `status:in-review` until the PR is merged, then run `mark-achieved.sh` to set `status:archived`, Project `Done`, and Project `End`.

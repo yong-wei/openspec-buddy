@@ -198,7 +198,7 @@ async function collectConfigValues(flags) {
       OPENSPEC_BUDDY_PROJECT_OWNER: await ask(rl, "GitHub Project owner", defaults.OPENSPEC_BUDDY_PROJECT_OWNER),
       OPENSPEC_BUDDY_PROJECT_NUMBER: await ask(rl, "GitHub Project number", defaults.OPENSPEC_BUDDY_PROJECT_NUMBER),
       OPENSPEC_BUDDY_PROJECT_TITLE: await ask(rl, "GitHub Project title", defaults.OPENSPEC_BUDDY_PROJECT_TITLE),
-      OPENSPEC_BUDDY_PR_REVIEW_REQUEST: await ask(rl, "Auto review request, optional", defaults.OPENSPEC_BUDDY_PR_REVIEW_REQUEST),
+      OPENSPEC_BUDDY_PR_REVIEW_REQUEST: await ask(rl, "PR review request, optional", defaults.OPENSPEC_BUDDY_PR_REVIEW_REQUEST),
     };
   } finally {
     rl.close();
