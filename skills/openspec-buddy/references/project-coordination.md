@@ -75,6 +75,11 @@ Before moving the issue to review, run:
 The review request must come from `OPENSPEC_BUDDY_PR_REVIEW_REQUEST`. For
 projects that require Codex review, configure that value explicitly, for
 example `@codex review 中文回复，即使没有重大问题也必须给出显式回复`.
+Before merging after the review wait, run
+`<openspec-buddy-skill-dir>/scripts/verify-review-clear.sh <pr-number-or-url>`.
+This check reads review body, review comments, and GraphQL review threads; an
+empty `gh pr view --comments` result is not evidence that Codex review feedback
+is clear.
 
 GitHub CLI has no direct `gh issue link-pr` equivalent. For a PR to appear as a
 verifiable issue Development link through CLI, the PR body must contain a

@@ -100,9 +100,23 @@ release branch.
 Use `reviewThreads.nodes[].isResolved` from GitHub GraphQL as the review gate.
 Flat `reviews`, `latestReviews`, and `comments` are useful context, but they are
 not enough to decide whether inline review feedback is still actionable.
+`gh pr view --comments` can be empty while the review body or line review
+comments still contain findings.
 
 Observed failure mode: `latestReviews` may point at a prior commit or omit the
 commit oid, while `reviewThreads` still shows the current unresolved thread.
+
+Before merging, run:
+
+```bash
+<openspec-buddy-skill-dir>/scripts/verify-review-clear.sh <pr-number-or-url>
+```
+
+This helper reads the latest configured reviewer review, REST PR review
+comments, and GraphQL review threads. A `COMMENTED` review is not a pass by
+itself. `P0`, `P1`, and `P2` findings all block merge. `P2` feedback must be
+verified and either fixed or justified with evidence before a later clean review
+state can pass the gate.
 
 ## Three-Check Merge Rule
 
@@ -114,16 +128,17 @@ new unresolved threads.
 Reset `quiet_review_checks` to `0` whenever a new review, review comment, PR
 comment, requested-changes review, or follow-up fix push appears.
 
-Exception: if the latest configured reviewer explicitly says there are no
-significant issues, no major problems, or equivalent wording, and all other
-merge gates pass, the PR may be merged without waiting for the remaining quiet
-checks.
+Exception: if `verify-review-clear.sh` confirms that the latest configured
+reviewer explicitly says there are no actionable findings, no significant
+issues, no major problems, or equivalent wording, and all other merge gates
+pass, the PR may be merged without waiting for the remaining quiet checks.
 
 ## Thread Resolution Rule
 
-If there is actionable feedback, fix it, push, and reply in the corresponding
-review thread with the fix commit or evidence. Resolve the thread only after the
-reply exists. For non-actionable feedback, reply with the rationale and evidence
+If there is actionable feedback, including `P0`, `P1`, or `P2`, fix it or
+verify it, push any required change, and reply in the corresponding review
+thread with the fix commit or evidence. Resolve the thread only after the reply
+exists. For non-actionable feedback, reply with the rationale and evidence
 before resolving. Silent thread resolution is not allowed.
 
 After resolving threads, perform another foreground review wait before

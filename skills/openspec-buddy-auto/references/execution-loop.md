@@ -9,10 +9,12 @@ git status --short --branch
 <openspec-buddy-skill-dir>/scripts/sync-base-branch.sh
 ```
 
-The helper fetches `origin`, switches to `$OPENSPEC_BUDDY_BASE_BRANCH`,
-fast-forwards it, and verifies that the local branch is not behind
-`origin/$OPENSPEC_BUDDY_BASE_BRANCH`. Stop if the worktree is dirty or the base
-branch cannot be synchronized cleanly.
+The helper fetches `origin/$OPENSPEC_BUDDY_BASE_BRANCH` and verifies the current
+worktree is aligned with it. If the current branch is
+`$OPENSPEC_BUDDY_BASE_BRANCH`, the helper may fast-forward it. In a separate
+worktree or topic branch, it must not switch branches; it succeeds only when the
+current `HEAD` equals `origin/$OPENSPEC_BUDDY_BASE_BRANCH`. Stop if the worktree
+is dirty or the current `HEAD` is not aligned with the base branch.
 
 ## Claim
 

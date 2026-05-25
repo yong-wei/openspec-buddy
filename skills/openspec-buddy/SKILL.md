@@ -89,7 +89,7 @@ one GitHub Issue = one change_id = one claim branch = one OpenSpec change = one 
 
 The issue metadata must include `claim_branch`, and `claim_branch` must equal `change_id`.
 
-An ordinary open issue can be a source issue before it is adopted. The first Buddy action on that source issue is always `claim`: synchronize the configured base branch, create the Development branch lock, assign the agent, add hidden Buddy metadata to the same original issue, and then decide whether the issue is simple enough to become one executable change or complex enough to become a tracking parent with child change issues. Do not create a mirror issue just to hold Buddy metadata for an existing issue.
+An ordinary open issue can be a source issue before it is adopted. The first Buddy action on that source issue is always `claim`: verify the current worktree is aligned with the configured base branch, create the Development branch lock, assign the agent, add hidden Buddy metadata to the same original issue, and then decide whether the issue is simple enough to become one executable change or complex enough to become a tracking parent with child change issues. Do not create a mirror issue just to hold Buddy metadata for an existing issue.
 
 ## Execution Retrospective Requirement
 
@@ -116,7 +116,7 @@ Steps:
    ```bash
    <openspec-buddy-skill-dir>/scripts/claim-issue.sh [issue-number]
    ```
-   The script first runs `sync-base-branch.sh`, then lists open issues when no number is provided, skips series parents, issues assigned to another user, active or terminal status labels, and accepts unlabeled, `status:backlog`, or `status:ready` issues.
+   The script first runs `sync-base-branch.sh`, then lists open issues when no number is provided, skips series parents, issues assigned to another user, active or terminal status labels, and accepts unlabeled, `status:backlog`, or `status:ready` issues. The helper does not force a worktree branch switch: it fast-forwards only when the current branch is `$OPENSPEC_BUDDY_BASE_BRANCH`; otherwise it requires the current `HEAD` to match `origin/$OPENSPEC_BUDDY_BASE_BRANCH`.
 2. If the selected issue already has valid Buddy metadata, the script delegates to `claim-change.sh`.
 3. If the selected issue is an ordinary open issue, the script derives `change_id` as `issue-<number>-<title-slug>`, creates `origin/<change_id>` through `gh issue develop`, verifies the issue Development branch link, prepends a hidden `<!-- openspec-buddy ... -->` metadata block, assigns the current GitHub viewer, sets `status:claimed`, syncs the GitHub Project to `In Progress`, and sets Project `Start`.
 4. Re-read the claimed issue and confirm:
@@ -184,10 +184,11 @@ Use when the user wants to implement a GitHub-tracked OpenSpec change.
 Steps:
 
 1. Locate the issue by number, URL, or `change_id`.
-2. Synchronize the configured Buddy base branch before editing files:
+2. Verify the current worktree is aligned with the configured Buddy base branch before editing files:
    ```bash
    <openspec-buddy-skill-dir>/scripts/sync-base-branch.sh
    ```
+   If the current branch is `$OPENSPEC_BUDDY_BASE_BRANCH`, the helper may fast-forward it. In a separate worktree or topic branch, the helper must not switch branches; it succeeds only when current `HEAD` equals `origin/$OPENSPEC_BUDDY_BASE_BRANCH`.
 3. Read the issue body and labels.
 4. Validate metadata:
    ```bash
@@ -272,8 +273,9 @@ archive path only for older PRs that merged before this rule existed.
 Steps:
 
 1. Confirm the PR is merged.
-2. Synchronize `$OPENSPEC_BUDDY_BASE_BRANCH` with `origin` using
-   `sync-base-branch.sh`, then confirm the target branch contains the merge.
+2. Verify the current worktree is aligned with
+   `origin/$OPENSPEC_BUDDY_BASE_BRANCH` using `sync-base-branch.sh`, then
+   confirm the target branch contains the merge.
 3. Prefer the pre-archived path:
    - confirm the merged branch contains
      `openspec/changes/archive/YYYY-MM-DD-<change_id>/`

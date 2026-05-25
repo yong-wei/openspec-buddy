@@ -44,9 +44,12 @@ still missing, ask the user for the review request string and append it to
 ## One-Change Run
 
 1. Start from a clean worktree on the long-lived coordination branch.
-2. Synchronize the configured Buddy base branch by calling
-   `openspec-buddy/scripts/sync-base-branch.sh`. Auto mode does not maintain a
-   separate base-sync implementation.
+2. Verify the current worktree is aligned with the configured Buddy base branch
+   by calling `openspec-buddy/scripts/sync-base-branch.sh`. Auto mode does not
+   maintain a separate base-sync implementation. In worktree mode, this helper
+   must not switch branches; it succeeds only when current `HEAD` matches
+   `origin/$OPENSPEC_BUDDY_BASE_BRANCH`, unless the current branch itself is the
+   base branch and can be fast-forwarded.
 3. Run `openspec-buddy claim` for the user-specified issue, or with no issue number to select the smallest claimable open issue.
 4. Re-read the claimed issue. If the claim adopted an ordinary open issue, classify it immediately:
    - Simple issue: create or confirm the matching local OpenSpec change and continue.
@@ -90,12 +93,12 @@ still missing, ask the user for the review request string and append it to
     do not check the time, poll the shell, query GitHub, inspect files, send
     progress updates, or perform unrelated work. Do not use Codex automations,
     heartbeats, reminders, or background monitors for this wait.
-12. Check PR review, unresolved threads, requested changes, CI, mergeability, labels, Project membership, and origin issue traceability.
-13. If new actionable review exists, use `github:gh-address-comments` and `superpowers:receiving-code-review`, then push fixes. Before resolving any review thread, reply in that thread with the fix or non-actionable rationale and evidence; then resolve the thread and repeat from step 11.
+12. Check PR review, unresolved threads, requested changes, CI, mergeability, labels, Project membership, and origin issue traceability. Before any merge, run `openspec-buddy/scripts/verify-review-clear.sh <pr-url>`; do not infer review clearance from `gh pr view --comments`.
+13. If new actionable review exists, including `P0`, `P1`, or `P2`, use `github:gh-address-comments` and `superpowers:receiving-code-review`, then push fixes or document the verified non-actionable rationale. Before resolving any review thread, reply in that thread with the fix or non-actionable rationale and evidence; then resolve the thread and repeat from step 11.
     If review feedback changes requirements, tasks, or specs, edit the archived
     change files and synced main specs in the same PR; do not restore the
     active `openspec/changes/<change_id>/` directory.
-14. If no new review appears for the configured number of quiet checks and checks are green, merge the PR without deleting the branch yet. If the configured reviewer explicitly says there are no significant issues or no major problems, and all merge gates pass, it may be merged without waiting for the remaining quiet checks.
+14. If no new review appears for the configured number of quiet checks, `verify-review-clear.sh` passes, and checks are green, merge the PR without deleting the branch yet. If `verify-review-clear.sh` confirms the configured reviewer explicitly says there are no actionable findings, no significant issues, or no major problems, and all merge gates pass, it may be merged without waiting for the remaining quiet checks.
 15. Fast-forward the claim branch to `origin/$OPENSPEC_BUDDY_BASE_BRANCH`.
 16. Run the post-merge achievement sync:
     - verify the merged PR contains `openspec/changes/archive/YYYY-MM-DD-<change_id>/`
@@ -151,15 +154,23 @@ Do not merge unless all are true:
   the issue number before review/merge. If the mode is `auto` and the PR base is
   non-default, the manual sidebar-link requirement must be reported.
 - PR contains the configured `OPENSPEC_BUDDY_PR_REVIEW_REQUEST` comment.
+- `openspec-buddy/scripts/verify-review-clear.sh <pr>` passes. This gate must
+  inspect the latest configured reviewer review, PR review comments, and
+  GraphQL `reviewThreads`; `gh pr view --comments` being empty is not evidence
+  that review feedback is clear.
 - CI/checks have completed successfully or the repository has no required checks.
 - No unresolved review threads remain.
 - No reviewer has requested changes on the latest commit.
-- No new review/comment has appeared for three consecutive five-minute checks after the latest head commit or latest review-handling push, unless the latest Codex review explicitly says there are no significant issues or no major problems.
+- No new review/comment has appeared for three consecutive five-minute checks after the latest head commit or latest review-handling push, unless `verify-review-clear.sh` confirms the latest configured reviewer review explicitly says there are no actionable findings, no significant issues, or no major problems.
 - The implementation branch contains only the claimed change and required follow-up fixes.
 
 ## Learned Rules
 
 - Treat GitHub `reviewThreads` as the source of truth for actionable review state. `latestReviews` can lag behind the latest head commit or report an empty commit oid.
+- Treat `COMMENTED` reviews as unknown until `verify-review-clear.sh` proves
+  they are clean. Any `P0`, `P1`, or `P2` finding from the configured reviewer
+  blocks merge. `P2` is not automatically mergeable; it must be verified,
+  addressed or explicitly justified, and followed by a clear review state.
 - Keep the review wait separate from CI waiting. Use exactly one foreground
   sleep for `$OPENSPEC_BUDDY_REVIEW_WAIT_SECONDS` per review pause; do not
   poll with `date`, `time`, `gh`, `git`, `write_stdin`, or any other tool

@@ -19,6 +19,7 @@
 - npm 包已发布；后续版本通过 GitHub Release 触发 npm Trusted Publishing。
 - `v0.2.0` 发布线引入 `openspec-buddy claim`，用于先领取普通开放 GitHub issue，再判断它是单个可执行 OpenSpec 变更，还是需要拆分为子 issue 的父跟踪项。
 - `v0.3.0` 发布线强化 PR 进入 review 前的协调检查：`mark-review.sh` 统一配置 PR 元数据、写入项目显式 review 请求，并通过 `verify-pr-coordination.sh` 校验标签、assignee、Project 状态、origin issue 和 Development-link 策略。
+- `v0.3.1` 发布线修复 claim 阶段对工作树模式的限制，并新增 `verify-review-clear.sh` 合并前闸门，防止 Codex review body、review comments 或 unresolved threads 中的 `P0/P1/P2` 反馈被误判为可合并。
 
 ## 当前警惕点
 
