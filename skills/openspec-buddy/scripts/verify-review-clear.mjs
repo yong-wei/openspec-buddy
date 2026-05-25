@@ -46,6 +46,12 @@ function normalizeReviewThreads(input) {
   return input?.data?.repository?.pullRequest?.reviewThreads?.nodes || [];
 }
 
+function normalizeIssueComments(input) {
+  if (Array.isArray(input?.comments)) return input.comments;
+  if (Array.isArray(input?.comments?.nodes)) return input.comments.nodes;
+  return [];
+}
+
 function reviewCommitOid(review) {
   return review?.commit?.oid || review?.commit?.OID || review?.commit_id || review?.commitId || '';
 }
@@ -56,12 +62,27 @@ function submittedTime(review) {
   return Number.isFinite(time) ? time : null;
 }
 
+function entryTime(entry) {
+  const value = entry?.createdAt || entry?.created_at || entry?.submittedAt || entry?.submitted_at || '';
+  const time = Date.parse(value);
+  return Number.isFinite(time) ? time : null;
+}
+
+function latestHeadCommitTime(input) {
+  const commits = Array.isArray(input?.commits) ? input.commits : input?.commits?.nodes || [];
+  const headOid = input.headRefOid || input.headOid || input.head?.oid || '';
+  const headCommit = commits.find((commit) => commit?.oid === headOid) || commits.at(-1);
+  const value = headCommit?.committedDate || headCommit?.committed_at || headCommit?.authoredDate || headCommit?.authored_at || '';
+  const time = Date.parse(value);
+  return Number.isFinite(time) ? time : null;
+}
+
 function priorityMarkers(text) {
   return Array.from(new Set(String(text || '').match(/\bP[0-2]\b/gi) || [])).map((value) => value.toUpperCase());
 }
 
 function isExplicitlyClear(text) {
-  return /no actionable findings|no significant issues|no major problems|no findings|nothing actionable/i.test(String(text || ''));
+  return /no actionable findings|no significant issues|no major problems|no major issues|did(?:n't| not) find any major issues|no findings|nothing actionable/i.test(String(text || ''));
 }
 
 function issueLabel(thread) {
@@ -79,9 +100,25 @@ reviewerReviews.sort((left, right) => {
   return left.__index - right.__index;
 });
 
+const headCommitTime = latestHeadCommitTime(pr);
+const reviewerClearComments = normalizeIssueComments(pr)
+  .filter((comment) => authorLogin(comment) === reviewer)
+  .filter((comment) => isExplicitlyClear(comment?.body || ''))
+  .filter((comment) => {
+    const commentCreatedAt = entryTime(comment);
+    return headCommitTime === null || (commentCreatedAt !== null && commentCreatedAt >= headCommitTime);
+  });
+const latestReviewerClearComment = reviewerClearComments.sort((left, right) => {
+  const leftTime = entryTime(left) ?? 0;
+  const rightTime = entryTime(right) ?? 0;
+  return leftTime - rightTime;
+}).at(-1);
+
 const latestReview = reviewerReviews.at(-1);
 if (!latestReview) {
-  errors.push(`No review found from ${reviewer}.`);
+  if (!latestReviewerClearComment) {
+    errors.push(`No review found from ${reviewer}.`);
+  }
 } else {
   const state = String(latestReview.state || '').toUpperCase();
   const body = String(latestReview.body || '');
@@ -90,7 +127,9 @@ if (!latestReview) {
   const headOid = pr.headRefOid || pr.headOid || pr.head?.oid || '';
 
   if (headOid && commitOid && commitOid !== headOid) {
-    errors.push(`Latest review from ${reviewer} targets ${commitOid}, not current head ${headOid}.`);
+    if (!latestReviewerClearComment) {
+      errors.push(`Latest review from ${reviewer} targets ${commitOid}, not current head ${headOid}.`);
+    }
   }
   if (['REQUEST_CHANGES', 'CHANGES_REQUESTED'].includes(state)) {
     errors.push(`Latest review from ${reviewer} requested changes.`);
@@ -99,7 +138,9 @@ if (!latestReview) {
     errors.push(`Latest review from ${reviewer} contains ${markers.join('/')} findings; verify and address them before merge.`);
   }
   if (state === 'COMMENTED' && !isExplicitlyClear(body)) {
-    errors.push(`Latest COMMENTED review from ${reviewer} is not an explicit no-actionable-findings review.`);
+    if (!latestReviewerClearComment) {
+      errors.push(`Latest COMMENTED review from ${reviewer} is not an explicit no-actionable-findings review.`);
+    }
   }
 }
 

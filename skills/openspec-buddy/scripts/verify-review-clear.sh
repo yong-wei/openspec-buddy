@@ -19,7 +19,7 @@ review_comments_file="$tmp_dir/review-comments.json"
 review_threads_file="$tmp_dir/review-threads.json"
 reviewer="${OPENSPEC_BUDDY_PR_REVIEW_AUTHOR:-chatgpt-codex-connector}"
 
-gh pr view "$pr_ref" --json number,url,headRefOid,reviews > "$pr_file"
+gh pr view "$pr_ref" --json number,url,headRefOid,reviews,comments,commits > "$pr_file"
 pr_number="$(node -e 'const fs=require("fs"); const pr=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(String(pr.number));' "$pr_file")"
 repo_nwo="$(gh repo view --json nameWithOwner --jq '.nameWithOwner')"
 owner="${repo_nwo%%/*}"
