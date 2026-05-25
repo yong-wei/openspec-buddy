@@ -15,7 +15,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "test": "bash -n skills/openspec-buddy/scripts/*.sh && node --check src/cli.mjs && node --check bin/openspec-buddy.mjs && node --test test/*.test.mjs && bash skills/openspec-buddy/evals/load-config-dotenv.test.sh && node skills/openspec-buddy/evals/build-pr-development-note.test.mjs && node skills/openspec-buddy/evals/open-issue-claim.test.mjs && node skills/openspec-buddy-auto/evals/select-next-change.test.mjs",
+    "test": "bash -n skills/openspec-buddy/scripts/*.sh && node --check src/cli.mjs && node --check bin/openspec-buddy.mjs && node --test test/*.test.mjs && bash skills/openspec-buddy/evals/load-config-dotenv.test.sh && node skills/openspec-buddy/evals/build-pr-development-note.test.mjs && node skills/openspec-buddy/evals/build-pr-labels.test.mjs && node skills/openspec-buddy/evals/open-issue-claim.test.mjs && bash skills/openspec-buddy/evals/request-pr-review.test.sh && bash skills/openspec-buddy/evals/sync-base-branch.test.sh && node skills/openspec-buddy/evals/verify-pr-coordination.test.mjs && node skills/openspec-buddy-auto/evals/select-next-change.test.mjs",
     "check": "npm test && npm pack --dry-run",
     "pack:local": "npm pack",
     "publish:public": "npm publish --access public"

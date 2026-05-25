@@ -79,7 +79,7 @@ release_branch="$(ask "Release branch" "main")"
 project_owner="$(ask "GitHub Project owner" "$project_owner")"
 project_number="$(ask "GitHub Project number" "")"
 project_title="$(ask "GitHub Project title" "OpenSpec Buddy")"
-review_request="$(ask "Auto review request, optional" "")"
+review_request="$(ask "PR review request, optional" "")"
 
 for value_name in base_branch release_branch project_owner project_number project_title; do
   if [[ -z "${!value_name}" ]]; then

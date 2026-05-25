@@ -5,7 +5,7 @@ GitHub Issue metadata is the machine-readable task record.
 Prepared Buddy issues created by `propose` should use YAML front matter at the
 start of the issue body. Ordinary collaborator issues adopted through
 `claim-issue.sh` keep their human-readable body and receive a hidden metadata
-block instead:
+block in the same original issue instead:
 
 ```markdown
 <!-- openspec-buddy
@@ -24,7 +24,10 @@ area: workflow
 ```
 
 `parse-issue-metadata.mjs` accepts both forms. If both are present, front matter
-wins; avoid that mixed state unless repairing an old issue.
+wins; avoid that mixed state unless repairing an old issue. Do not create a
+second "Buddy" issue to mirror the original task; that breaks PR association
+and issue history. Complex issues may create child executable issues, but only
+after the original issue has been claimed and kept as the tracking parent.
 
 ## Required Fields
 

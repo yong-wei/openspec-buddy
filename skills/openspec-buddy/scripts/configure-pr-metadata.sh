@@ -37,7 +37,7 @@ pr_label_file="$tmp_dir/pr-labels.txt"
 body_file="$tmp_dir/body.md"
 development_link_file="$tmp_dir/development-link.json"
 
-gh issue view "$issue_number" --json id,number,url,labels,projectItems,body > "$issue_file"
+gh issue view "$issue_number" --json id,number,url,labels,assignees,projectItems,body > "$issue_file"
 gh pr view "$pr_ref" --json id,number,url,body,baseRefName,labels,isDraft > "$pr_file"
 
 issue_url="$(node -e 'const fs=require("fs"); const issue=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(issue.url);' "$issue_file")"
@@ -46,21 +46,7 @@ pr_number="$(node -e 'const fs=require("fs"); const pr=JSON.parse(fs.readFileSyn
 repo_nwo="$(gh repo view --json nameWithOwner --jq '.nameWithOwner')"
 default_branch="$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name')"
 
-node -e '
-const fs = require("fs");
-const issue = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-const pr = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
-const issueNumber = issue.number;
-const base = String(pr.baseRefName || "unknown")
-  .toLowerCase()
-  .replace(/[^a-z0-9-]+/g, "-")
-  .replace(/^-+|-+$/g, "") || "unknown";
-const issueLabels = (issue.labels || []).map((label) => label.name).filter(Boolean);
-const inherited = issueLabels.filter((name) => /^(area|series|risk):/.test(name));
-const labels = Array.from(new Set(["pr:openspec-buddy", `pr:base-${base}`, ...inherited]));
-fs.writeFileSync(process.argv[3], `${labels.join("\n")}\n`);
-fs.writeFileSync(process.argv[4], `${labels.filter((name) => name.startsWith("pr:")).join("\n")}\n`);
-' "$issue_file" "$pr_file" "$labels_file" "$pr_label_file"
+node "$script_dir/build-pr-labels.mjs" "$issue_file" "$pr_file" "$labels_file" "$pr_label_file"
 
 ensure_label() {
   local name="$1"
@@ -98,6 +84,28 @@ if [[ -s "$labels_file" ]]; then
       -X POST \
       --input "$labels_json_file" >/dev/null
   fi
+fi
+
+assignees_file="$tmp_dir/assignees.txt"
+node -e '
+const fs = require("fs");
+const issue = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+const assignees = (issue.assignees || []).map((assignee) => assignee.login).filter(Boolean);
+fs.writeFileSync(process.argv[2], `${assignees.join("\n")}${assignees.length ? "\n" : ""}`);
+' "$issue_file" "$assignees_file"
+
+if [[ -s "$assignees_file" ]]; then
+  if [[ "$dry_run" == "1" ]]; then
+    assignees_csv="$(node -e 'const fs=require("fs"); const assignees=fs.readFileSync(process.argv[1],"utf8").split(/\n/).filter(Boolean); process.stdout.write(assignees.join(","));' "$assignees_file")"
+    printf '[dry-run] add PR assignees to %s: %s\n' "$pr_url" "$assignees_csv"
+  else
+    while IFS= read -r assignee; do
+      [[ -z "$assignee" ]] && continue
+      gh pr edit "$pr_ref" --add-assignee "$assignee" >/dev/null
+    done < "$assignees_file"
+  fi
+else
+  echo "Issue #$issue_number has no assignee to mirror onto PR $pr_url." >&2
 fi
 
 gh project item-list "$project_number" \

@@ -6,12 +6,13 @@ Verify:
 
 ```bash
 git status --short --branch
-git fetch origin
-git switch "$OPENSPEC_BUDDY_BASE_BRANCH"
-git merge --ff-only "origin/$OPENSPEC_BUDDY_BASE_BRANCH"
+<openspec-buddy-skill-dir>/scripts/sync-base-branch.sh
 ```
 
-Stop if local unrelated changes exist.
+The helper fetches `origin`, switches to `$OPENSPEC_BUDDY_BASE_BRANCH`,
+fast-forwards it, and verifies that the local branch is not behind
+`origin/$OPENSPEC_BUDDY_BASE_BRANCH`. Stop if the worktree is dirty or the base
+branch cannot be synchronized cleanly.
 
 ## Claim
 
@@ -27,10 +28,12 @@ Project Status: In Progress
 Project Start: current local date
 ```
 
-If the claimed issue was an ordinary open issue, classify it before switching
-branches. Simple issues continue as one executable change. Complex issues are
-split into child issues; the source issue becomes a tracking parent only after
-the children exist and are linked.
+If the claimed issue was an ordinary open issue, the claim adopts the same
+original issue by prepending the hidden Buddy metadata block. Do not create a
+mirror issue just to preserve the original request. Classify it before
+switching branches. Simple issues continue as one executable change. Complex
+issues are split into child issues; the source issue becomes a tracking parent
+only after the children exist and are linked.
 
 Then switch to `<change_id>` for a simple or prepared change and mark
 `status:in-progress`; the Project `Status` must remain `In Progress`.
@@ -82,7 +85,6 @@ Open a formal PR:
 title: concise change title
 base: $OPENSPEC_BUDDY_BASE_BRANCH
 body: summary, verification, origin issue reference
-review request: $OPENSPEC_BUDDY_PR_REVIEW_REQUEST
 ```
 
 Do not let `gh pr create` fall back to the repository default branch; pass
@@ -90,22 +92,23 @@ Do not let `gh pr create` fall back to the repository default branch; pass
 Do not hand-write closing keywords in `gh pr create`. `configure-pr-metadata.sh`
 is responsible for the Development-link policy and verification.
 
-After the PR exists and before marking the issue in review, configure PR
-metadata:
+After the ready PR exists, call the core review marker:
 
 ```bash
-<openspec-buddy-skill-dir>/scripts/configure-pr-metadata.sh <issue-number> <pr-number-or-url>
+<openspec-buddy-skill-dir>/scripts/mark-review.sh <issue-number> <pr-number-or-url>
 ```
 
-This adds PR-scoped labels, copies the issue's area/series/risk labels, adds
-the PR to the same Project as the issue, sets the PR Project `Status` to
-`In Progress`, records the originating issue in the PR body, and either creates
-a verifiable PR Development link or reports that manual GitHub sidebar linking
-is required. If this fails, stop before review waiting; do not silently continue
-with an untracked PR.
+Auto mode must not reimplement PR metadata, label, assignee, Project, review
+request, or Development-link rules. `mark-review.sh` verifies the PR base and
+ready state, calls `configure-pr-metadata.sh`, posts
+`OPENSPEC_BUDDY_PR_REVIEW_REQUEST` through `request-pr-review.sh`, runs
+`verify-pr-coordination.sh`, and only then sets the issue to
+`status:in-review`. This must leave the issue and PR Project `Status` as
+`In Progress`. If any coordination step fails, stop before review waiting; do
+not silently continue with an untracked or unreviewed PR.
 
-Set issue to `status:in-review` with the PR URL; the Project `Status` must remain `In Progress`.
-Do this only after OpenSpec task progress is `complete == total`; otherwise finish or reconcile the local tasks first.
+Call `mark-review.sh` only after OpenSpec task progress is `complete == total`;
+otherwise finish or reconcile the local tasks first.
 
 ## Merge And Achieve
 

@@ -64,7 +64,7 @@ openspec-buddy init
 - GitHub Project owner
 - GitHub Project number
 - GitHub Project title
-- `openspec-buddy-auto` 使用的可选 review 请求语句
+- Buddy PR 进入 review 前要写入 PR 评论的 review 请求语句
 
 配置会写入当前项目的 `.env.openspec-buddy`。这个文件通常不提交到 Git；如需给团队提供模板，可参考 `.env.openspec-buddy.example`。
 
@@ -74,6 +74,16 @@ openspec-buddy init
 $HOME/.agents/skills/openspec-buddy/scripts/check-config.sh
 $HOME/.agents/skills/openspec-buddy/scripts/check-config.sh auto
 ```
+
+`OPENSPEC_BUDDY_PR_REVIEW_REQUEST` 不由包默认硬编码；每个项目应按自己的
+review 机制显式配置。需要 Codex 正式 review 的 Major 类项目可使用：
+
+```bash
+OPENSPEC_BUDDY_PR_REVIEW_REQUEST="@codex review 中文回复，即使没有重大问题也必须给出显式回复"
+```
+
+`mark-review.sh` 会把该字符串作为 PR 评论写入并做幂等检查；
+`openspec-buddy-auto` 只调用核心 helper，不另写一套 review 请求逻辑。
 
 ## 常用命令
 

@@ -70,6 +70,15 @@ Optional Development-link policy:
 - Use `manual` when PRs intentionally target a non-default Buddy base branch and
   humans will link the PR in GitHub's Development sidebar.
 
+Required PR review request:
+
+- Before a Buddy PR enters review, `OPENSPEC_BUDDY_PR_REVIEW_REQUEST` must be
+  configured. `mark-review.sh` posts that exact request as a PR comment through
+  `request-pr-review.sh` and verifies it before changing the issue to
+  `status:in-review`.
+- Projects that require Codex review should set the value explicitly, for
+  example: `@codex review 中文回复，即使没有重大问题也必须给出显式回复`.
+
 ## Core Rule
 
 One executable coordinated change maps to:
@@ -80,7 +89,7 @@ one GitHub Issue = one change_id = one claim branch = one OpenSpec change = one 
 
 The issue metadata must include `claim_branch`, and `claim_branch` must equal `change_id`.
 
-An ordinary open issue can be a source issue before it is adopted. The first Buddy action on that source issue is always `claim`: create the Development branch lock, assign the agent, add hidden Buddy metadata, and then decide whether the issue is simple enough to become one executable change or complex enough to become a tracking parent with child change issues.
+An ordinary open issue can be a source issue before it is adopted. The first Buddy action on that source issue is always `claim`: synchronize the configured base branch, create the Development branch lock, assign the agent, add hidden Buddy metadata to the same original issue, and then decide whether the issue is simple enough to become one executable change or complex enough to become a tracking parent with child change issues. Do not create a mirror issue just to hold Buddy metadata for an existing issue.
 
 ## Execution Retrospective Requirement
 
@@ -107,7 +116,7 @@ Steps:
    ```bash
    <openspec-buddy-skill-dir>/scripts/claim-issue.sh [issue-number]
    ```
-   The script lists open issues when no number is provided, skips series parents, issues assigned to another user, active or terminal status labels, and accepts unlabeled, `status:backlog`, or `status:ready` issues.
+   The script first runs `sync-base-branch.sh`, then lists open issues when no number is provided, skips series parents, issues assigned to another user, active or terminal status labels, and accepts unlabeled, `status:backlog`, or `status:ready` issues.
 2. If the selected issue already has valid Buddy metadata, the script delegates to `claim-change.sh`.
 3. If the selected issue is an ordinary open issue, the script derives `change_id` as `issue-<number>-<title-slug>`, creates `origin/<change_id>` through `gh issue develop`, verifies the issue Development branch link, prepends a hidden `<!-- openspec-buddy ... -->` metadata block, assigns the current GitHub viewer, sets `status:claimed`, syncs the GitHub Project to `In Progress`, and sets Project `Start`.
 4. Re-read the claimed issue and confirm:
@@ -117,7 +126,7 @@ Steps:
    - `parse-issue-metadata.mjs` parses either front matter or the hidden Buddy block
 5. Classify the claimed issue immediately:
    - Simple issue: keep the claimed issue as the single executable change, run `openspec-explore` only as needed, create the local OpenSpec change under `openspec/changes/<change_id>`, then continue with `apply`.
-   - Complex issue: keep the claim while decomposing. Create child executable issues with their own Buddy metadata, link them as sub-issues or dependencies, then convert the original issue to `type:series-parent` and `status:tracking` only after the child issues exist.
+   - Complex issue: keep the claim while decomposing. Create child executable issues with their own Buddy metadata, link them as sub-issues or dependencies, then convert the original issue to `type:series-parent` and `status:tracking` only after the child issues exist. The original issue remains the parent tracking record; do not create a second "original task" issue.
 6. If complexity is unclear after a bounded read of the issue and repository context, keep the issue claimed and ask the user whether to treat it as simple or decompose it. Do not release the claim merely because classification needs a human decision.
 
 When a complex issue is decomposed, the original issue is no longer an executable change. The child issues carry the one-issue/one-change mapping.
@@ -175,12 +184,16 @@ Use when the user wants to implement a GitHub-tracked OpenSpec change.
 Steps:
 
 1. Locate the issue by number, URL, or `change_id`.
-2. Read the issue body and labels.
-3. Validate metadata:
+2. Synchronize the configured Buddy base branch before editing files:
+   ```bash
+   <openspec-buddy-skill-dir>/scripts/sync-base-branch.sh
+   ```
+3. Read the issue body and labels.
+4. Validate metadata:
    ```bash
    <openspec-buddy-skill-dir>/scripts/parse-issue-metadata.mjs <issue-body-file>
    ```
-4. Verify:
+5. Verify:
    - issue has `status:ready` or is already `status:claimed` by the current viewer
    - issue is not labeled `type:series-parent`
    - native `blockedBy` has no open, unarchived issue
@@ -189,7 +202,7 @@ Steps:
    - `claim_branch` equals `change_id`
    - `base_branch` equals `$OPENSPEC_BUDDY_BASE_BRANCH`
    - execution mode and branch constraints are satisfiable
-5. If the issue is `status:ready`, claim it with a linked Development branch and remote branch lock:
+6. If the issue is `status:ready`, claim it with a linked Development branch and remote branch lock:
    ```bash
    <openspec-buddy-skill-dir>/scripts/claim-change.sh <issue-number>
    ```
@@ -201,15 +214,15 @@ Steps:
    issue and confirm that the current viewer is the assignee, `origin/<change_id>`
    exists, the issue Development branch list contains `<change_id>`, and the
    latest Buddy claim comment records the same branch.
-6. Confirm the claim id, assignee, status label, and branch lock.
-7. Use branch `<change_id>` for the implementation. For isolated work, create it from `base_branch`. For fixed-branch work, stop if the required branch is not the same as the declared claim branch.
-8. After entering the claim branch, mark the issue in progress:
+7. Confirm the claim id, assignee, status label, and branch lock.
+8. Use branch `<change_id>` for the implementation. For isolated work, create it from `base_branch`. For fixed-branch work, stop if the required branch is not the same as the declared claim branch.
+9. After entering the claim branch, mark the issue in progress:
    ```bash
    <openspec-buddy-skill-dir>/scripts/mark-in-progress.sh <issue-number>
    ```
    This must leave the Project `Status` as `In Progress`.
-9. Invoke `openspec-apply-change` for the matching local OpenSpec change.
-10. Before opening the PR, require
+10. Invoke `openspec-apply-change` for the matching local OpenSpec change.
+11. Before opening the PR, require
     `openspec instructions apply --change <change_id> --json` to report
     `remaining: 0`, then pre-archive the change on the claim branch:
     - create a main spec skeleton first when a delta introduces a new capability
@@ -218,34 +231,33 @@ Steps:
     - validate each affected main spec with `openspec validate <capability> --strict`
     The issue must remain `status:in-progress`; file-level pre-archive is not
     the same as GitHub issue archive.
-11. Commit code, tests, synced main specs, and the archived change directory
+12. Commit code, tests, synced main specs, and the archived change directory
     together.
-12. Open a ready PR against `$OPENSPEC_BUDDY_BASE_BRANCH`, never a draft PR.
+13. Open a ready PR against `$OPENSPEC_BUDDY_BASE_BRANCH`, never a draft PR.
     Do not hand-write the issue Development link; let the metadata helper apply
     the configured PR Development-link policy.
-13. After opening the ready PR, configure PR metadata before review:
-   ```bash
-   <openspec-buddy-skill-dir>/scripts/configure-pr-metadata.sh <issue-number> <pr-url>
-   ```
-   This must add PR-scoped labels such as `pr:openspec-buddy` and
-   `pr:base-<base-branch>`, copy the issue's `area:*`, `series:*`, and `risk:*`
-   labels to the PR, add the PR to the same Project as the issue, set the PR
-   Project `Status` to `In Progress`, and record the origin issue in the PR
-   body. When the PR base is the repository default branch and the policy is
-   `auto` or `keyword`, the helper writes a closing keyword such as `Closes
-   #123` and verifies GitHub reports the issue through `closingIssuesReferences`.
-   When the PR base is not the default branch, GitHub CLI cannot create a
-   verifiable PR Development link; the helper records a manual sidebar-link
-   requirement instead of pretending the link is complete.
-14. Mark the issue in review:
+14. Mark the ready PR and issue for review through the core review helper:
    ```bash
    <openspec-buddy-skill-dir>/scripts/mark-review.sh <issue-number> <pr-url>
    ```
    This first verifies the PR targets `$OPENSPEC_BUDDY_BASE_BRANCH`. If the PR
    targets `$OPENSPEC_BUDDY_RELEASE_BRANCH`, the script attempts to retarget it
    to the Buddy base branch; if retargeting fails, stop before review/merge.
-   The script also rejects draft PRs and runs the PR metadata configuration
-   helper. This must leave the issue Project `Status` as `In Progress`.
+   The script also rejects draft PRs, calls `configure-pr-metadata.sh`, posts
+   the configured PR review request, runs `verify-pr-coordination.sh`, and only
+   then moves the issue to review. The metadata step must add PR-scoped labels
+   such as `pr:openspec-buddy` and `pr:base-<base-branch>`, copy the issue's
+   non-status coordination labels (`type:*`, `level:*`, `area:*`, `series:*`,
+   `risk:*`, `mode:*`, and `coupling:*`) to the PR, mirror the issue assignee
+   onto the PR, add the PR to the same Project as the issue, set the PR Project
+   `Status` to `In Progress`, and record the origin issue in the PR body. When
+   the PR base is the repository default branch and the policy is `auto` or
+   `keyword`, the helper writes a closing keyword such as `Closes #123` and
+   verifies GitHub reports the issue through `closingIssuesReferences`. When the
+   PR base is not the default branch, GitHub CLI cannot create a verifiable PR
+   Development link; the helper records a manual sidebar-link requirement
+   instead of pretending the link is complete. This must leave the issue Project
+   `Status` as `In Progress`.
 
 If claim verification fails, stop before editing files. If the user is starting from an ordinary open issue rather than a prepared Buddy issue, run `claim` first so intake and adoption happen before implementation.
 
@@ -260,7 +272,8 @@ archive path only for older PRs that merged before this rule existed.
 Steps:
 
 1. Confirm the PR is merged.
-2. Confirm the target branch `$OPENSPEC_BUDDY_BASE_BRANCH` contains the merge.
+2. Synchronize `$OPENSPEC_BUDDY_BASE_BRANCH` with `origin` using
+   `sync-base-branch.sh`, then confirm the target branch contains the merge.
 3. Prefer the pre-archived path:
    - confirm the merged branch contains
      `openspec/changes/archive/YYYY-MM-DD-<change_id>/`
@@ -302,7 +315,10 @@ Read only the reference needed for the current mode:
 - Do not update `status:*` labels without the Buddy wrapper scripts; Project `Status` must stay synchronized for human-visible coordination.
 - Do not open, review, or merge Buddy PRs against `$OPENSPEC_BUDDY_RELEASE_BRANCH`. Retarget them to `$OPENSPEC_BUDDY_BASE_BRANCH` or stop.
 - Do not create or submit draft PRs for Buddy changes; PRs must be ready for review when they are handed to the review loop.
-- Do not leave Buddy PRs without PR-scoped labels, copied area/series/risk labels, the same Project as the originating issue, and an origin issue record.
+- Do not leave Buddy PRs without PR-scoped labels, copied non-status
+  coordination labels, mirrored issue assignees, the same Project as the
+  originating issue, an origin issue record, the configured review request
+  comment, and a successful `verify-pr-coordination.sh` check.
 - Do not hand-write PR Development links. Use `configure-pr-metadata.sh` so closing keywords are used only when GitHub can verify them through `closingIssuesReferences`.
 - Do not claim a PR Development link is complete when the PR targets a non-default base branch; use the manual GitHub sidebar link or report it as a remaining coordination step.
 - Do not set `status:archived`, Project `Done`, or Project `End` merely because files were pre-archived in a PR. Those GitHub states are set only after the PR merges and `mark-achieved.sh` runs.

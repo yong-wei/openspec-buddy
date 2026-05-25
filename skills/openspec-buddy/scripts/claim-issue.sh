@@ -6,6 +6,7 @@ issue_number="${1:-}"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/load-config.sh"
 openspec_buddy_require_core_config
+"$script_dir/sync-base-branch.sh"
 
 tmp_dir="$(mktemp -d)"
 created_branch_lock=""

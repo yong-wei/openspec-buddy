@@ -16,7 +16,7 @@ For ordinary open issues, use:
 
 The claim selector skips closed issues, issues assigned to another user, series
 parents, and issues labeled with active or terminal `status:*` values. Missing
-status, `status:backlog`, `status: ready`, and `status:ready` are claimable.
+status, `status:backlog`, and `status:ready` are claimable.
 Automatic selection uses the lowest issue number among those candidates.
 
 After claim, immediately classify the issue:
@@ -25,6 +25,11 @@ After claim, immediately classify the issue:
   apply flow.
 - Complex issue: keep the source issue claimed while creating child change
   issues, then make the source issue a `status:tracking` series parent.
+
+For an ordinary open issue, claim and normalize that original issue in place by
+adding Buddy metadata at the top. Do not create a second issue that mirrors the
+same task; child issues are only for executable pieces of a genuinely complex
+parent.
 
 ## Prepared Change Source
 
