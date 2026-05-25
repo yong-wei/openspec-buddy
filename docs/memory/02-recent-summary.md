@@ -1,7 +1,7 @@
 # Recent Summary
 
 状态: active
-最后更新: 2026-05-23
+最后更新: 2026-05-25
 摘要: 记录本仓库初始化后的最近稳定状态。
 上游:
 - [00-index.md](00-index.md)
@@ -18,6 +18,7 @@
 - npm CLI 提供 `install`、`init`、`doctor` 和 `version` 命令。
 - npm 包已发布；后续版本通过 GitHub Release 触发 npm Trusted Publishing。
 - `v0.2.0` 发布线引入 `openspec-buddy claim`，用于先领取普通开放 GitHub issue，再判断它是单个可执行 OpenSpec 变更，还是需要拆分为子 issue 的父跟踪项。
+- `v0.3.0` 发布线强化 PR 进入 review 前的协调检查：`mark-review.sh` 统一配置 PR 元数据、写入项目显式 review 请求，并通过 `verify-pr-coordination.sh` 校验标签、assignee、Project 状态、origin issue 和 Development-link 策略。
 
 ## 当前警惕点
 
