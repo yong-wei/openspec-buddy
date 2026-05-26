@@ -57,7 +57,7 @@ where a PR was merged before the OpenSpec archive landed.
 
 | Action | From | To | Required proof |
 | --- | --- | --- |
-| propose | none/backlog | ready | issue front matter and labels created |
+| propose | none/backlog | ready | local OpenSpec change, issue front matter, coordination labels, relationship links, and Project `Todo` created |
 | claim prepared change | ready | claimed | assignee and claim comment confirmed |
 | claim open issue | open/backlog/ready | claimed | branch lock, hidden metadata, assignee, status, and Project sync confirmed |
 | decompose complex claim | claimed | tracking parent + ready children | child issues exist and are linked |

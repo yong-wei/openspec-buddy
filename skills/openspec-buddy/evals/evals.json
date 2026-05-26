@@ -10,7 +10,7 @@
     {
       "id": 1,
       "prompt": "openspec-buddy propose：为竞技场排行榜筛选重构注册一个新的 change，要求使用 GitHub Issue 协调。",
-      "expected_output": "生成或确认 change_id，先检查 OPENSPEC_BUDDY_* 环境变量，使用 YAML front matter issue 模板，设置 claim_branch 等于 change_id 且 base_branch 等于配置的 Buddy base branch；若属于系列变更，创建或识别 series parent 并用 Add parent 关系关联；若存在依赖，用 blockedBy/blocking 关系登记；创建 issue 后加入配置的 GitHub Project，将 Project Status 设为 Todo，并说明不会开始实现。",
+      "expected_output": "生成或确认 change_id，先检查 OPENSPEC_BUDDY_* 环境变量，默认调用 openspec-propose 创建本地 OpenSpec change，确认本地路径为 openspec/changes/<change_id>；使用 YAML front matter issue 模板，设置 claim_branch 等于 change_id 且 base_branch 等于配置的 Buddy base branch；GitHub Issue 默认包含完整协作标签和协调状态，包括 status:ready、type:change、area、series、risk、mode、必要时的 level 和 coupling 标签、父子关系、blockedBy/blocking 依赖关系、GitHub Project membership 与 Project Status Todo；说明不会 claim 或开始实现。",
       "files": []
     },
     {

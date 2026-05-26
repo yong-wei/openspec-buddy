@@ -141,6 +141,17 @@ thread with the fix commit or evidence. Resolve the thread only after the reply
 exists. For non-actionable feedback, reply with the rationale and evidence
 before resolving. Silent thread resolution is not allowed.
 
+Use the core resolver helper for every thread resolve:
+
+```bash
+<openspec-buddy-skill-dir>/scripts/resolve-review-thread.sh <review-thread-node-id>
+```
+
+Do not call `resolveReviewThread` directly. The helper performs the mutation and
+then independently re-reads the same GitHub review thread. Treat any non-zero
+exit as a hard stop: the review loop is not clean until the helper confirms
+`isResolved=true` for that exact thread and `verify-review-clear.sh` passes.
+
 After resolving threads, perform another foreground review wait before
 checking again, unless the no-significant-issues exception applies.
 

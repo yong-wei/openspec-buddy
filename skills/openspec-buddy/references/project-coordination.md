@@ -81,6 +81,16 @@ This check reads review body, review comments, and GraphQL review threads; an
 empty `gh pr view --comments` result is not evidence that Codex review feedback
 is clear.
 
+When resolving a GitHub review thread, use:
+
+```bash
+<openspec-buddy-skill-dir>/scripts/resolve-review-thread.sh <review-thread-node-id>
+```
+
+Do not hand-write the `resolveReviewThread` GraphQL mutation. The helper runs
+the mutation and then re-queries the same thread; a non-zero exit means the
+thread is still not verified as resolved and the merge gate remains closed.
+
 GitHub CLI has no direct `gh issue link-pr` equivalent. For a PR to appear as a
 verifiable issue Development link through CLI, the PR body must contain a
 closing keyword such as `Closes #123` and the PR must target the repository

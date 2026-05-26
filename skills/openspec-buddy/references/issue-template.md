@@ -65,8 +65,11 @@ Labels to apply:
 
 ```text
 status:ready
+type:change
+level:<level> # when the project uses level labels
 area:<area>
 series:<series>
 risk:<low|medium|high>
 mode:<isolated|fixed-branch|stacked|docs-only>
+coupling:<coupling_group> # when coupling_group is not none
 ```

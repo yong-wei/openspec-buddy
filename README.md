@@ -8,7 +8,7 @@
 这两个技能不替代 OpenSpec 自身的设计和实现技能。推荐配合方式是：
 
 1. 对已有 GitHub issue，先用 `openspec-buddy claim [issue]` 建立 claim；不指定 issue 时会选择最小编号的可领取开放 issue。
-2. 对还没有 issue 的本机变更，用 OpenSpec 系列技能完成需求探索和提案，再用 `openspec-buddy propose` 登记 GitHub Issue。
+2. 对还没有 issue 的新变更，用 `openspec-buddy propose` 默认创建本地 OpenSpec change 并登记 GitHub Issue；该 issue 会带上协作标签、父子/依赖关系和 GitHub Project `Todo` 状态。需求探索仍可先用 OpenSpec 系列技能完成，但不再把本地提案创建留作额外步骤。
 3. 用 `openspec-buddy apply` 在已 claim 的 GitHub Issue 上完成代码、测试和 spec 同步。
 4. 用 `openspec-buddy achieve` 在 PR 合并后同步 GitHub Issue、GitHub Project 和 OpenSpec 归档记录。
 5. 需要连续处理一组开放 issue 或已登记变更时，再使用 `openspec-buddy-auto`，让它按 claim、依赖、状态、review 和 CI 闸门逐个推进。

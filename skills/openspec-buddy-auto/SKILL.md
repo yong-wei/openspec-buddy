@@ -179,7 +179,7 @@ Do not merge unless all are true:
   explicitly reports no significant issues. After review gates are clear, use
   foreground CI waiting such as `gh run watch --exit-status` when checks are
   still running.
-- Every review-thread resolve must be preceded by a reply in that same thread. The reply must state the fix commit or the reason the thread is non-actionable, plus the verification evidence. Do not silently resolve Codex review threads.
+- Every review-thread resolve must be preceded by a reply in that same thread. The reply must state the fix commit or the reason the thread is non-actionable, plus the verification evidence. Resolve through `openspec-buddy/scripts/resolve-review-thread.sh <thread-id>`, not a raw GraphQL mutation; the helper must independently confirm `isResolved=true` for that thread before the review loop can continue. Do not silently resolve Codex review threads.
 - Do not merge while CI is `IN_PROGRESS`, even when every review thread is resolved and the PR is mergeable.
 - OpenSpec Buddy automation targets `$OPENSPEC_BUDDY_BASE_BRANCH`, not `$OPENSPEC_BUDDY_RELEASE_BRANCH`. New changes use the configured base branch, PRs use that base branch, and pre-archived change files land through the same implementation PR. Merging the Buddy base branch to the release branch is a manual release action outside Buddy Auto unless the project configures otherwise.
 - Buddy PRs must pass the core `mark-review.sh` path before review waiting

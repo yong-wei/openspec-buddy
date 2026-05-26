@@ -133,47 +133,60 @@ When a complex issue is decomposed, the original issue is no longer an executabl
 
 ### propose
 
-Use when the user wants to register a new OpenSpec change in GitHub before implementation.
+Use when the user wants to create a new local OpenSpec change and register the
+matching GitHub Issue before implementation.
 
 Steps:
 
 1. Derive or confirm a kebab-case `change_id`.
-2. Prepare an issue body from `references/issue-template.md`.
-3. In issue front matter, keep empty list fields as `[]`, but write every
+2. Invoke `openspec-propose` to create the local OpenSpec change under
+   `openspec/changes/<change_id>` before creating the GitHub Issue. Use the
+   same `change_id` for the OpenSpec change, the issue metadata, and the future
+   claim branch. If `openspec-propose` cannot create that path or produces a
+   different change id, stop and resolve the mismatch before touching GitHub.
+3. Prepare an issue body from `references/issue-template.md`, using the local
+   OpenSpec proposal as the source of the goal, scope, tasks, and acceptance
+   criteria.
+4. In issue front matter, keep empty list fields as `[]`, but write every
    non-empty `depends_on`, `blocked_by`, or `blocking` field as a YAML block
    list. Do not use inline lists such as `[other-change]`; the metadata parser
    rejects those so dependency metadata cannot be misread.
-4. Set `claim_branch: <change_id>`.
-5. Set `base_branch` to `$OPENSPEC_BUDDY_BASE_BRANCH`. Do not create new Buddy
+5. Set `claim_branch: <change_id>`.
+6. Set `base_branch` to `$OPENSPEC_BUDDY_BASE_BRANCH`. Do not create new Buddy
    issues against `$OPENSPEC_BUDDY_RELEASE_BRANCH`; release from the Buddy base
    branch to the release branch is a manual action unless the project
    explicitly configures otherwise.
-6. Validate the prepared body before creating or updating the issue:
+7. Validate the prepared body before creating or updating the issue:
    ```bash
    <openspec-buddy-skill-dir>/scripts/parse-issue-metadata.mjs <issue-body-file>
    ```
-7. Add labels:
+8. Add all applicable coordination labels by default:
    - `status:ready`
+   - `type:change`
+   - `level:<level>` when the project uses level labels or the user supplied one
    - `area:<area>`
    - `series:<series>`
    - `risk:<low|medium|high>`
    - `mode:<isolated|fixed-branch|stacked|docs-only>`
-8. Create the issue with `gh issue create`.
-9. If this is a planned series, create or identify the series parent issue, then link the child issue:
+   - `coupling:<coupling_group>` when `coupling_group` is not `none`
+9. Create the issue with `gh issue create`.
+10. If this is a planned series, create or identify the series parent issue, then link the child issue:
    ```bash
    <openspec-buddy-skill-dir>/scripts/create-series-parent.sh <series>
    <openspec-buddy-skill-dir>/scripts/link-issue-parent.sh <parent-issue> <child-issue>
    ```
-10. If this issue depends on another change issue, link the native relationship:
+11. If this issue depends on another change issue, link the native relationship:
    ```bash
    <openspec-buddy-skill-dir>/scripts/link-issue-dependencies.sh <blocked-issue> <blocking-issue>
    ```
-11. Add the created issue to the default GitHub Project:
+12. Add the created issue to the default GitHub Project:
    ```bash
    <openspec-buddy-skill-dir>/scripts/add-issue-to-project.sh <issue-url>
    ```
-   The script also sets the Project `Status` to `Todo`.
-12. If the user also asked to create local OpenSpec artifacts, invoke `openspec-propose` after issue creation.
+   The script also sets the Project `Status` to `Todo`. The issue is not fully
+   registered until labels, parent/dependency relationships, Project membership,
+   and Project `Status` have all been applied or explicitly reported as already
+   present.
 
 Do not claim the issue or implement in `propose`.
 
