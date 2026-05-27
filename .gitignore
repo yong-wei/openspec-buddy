@@ -6,6 +6,7 @@ AGENTS.md
 .env
 .env.*
 !.env.openspec-buddy.example
+!.env.release-package.example
 .agents/
 .codex/
 .serena/

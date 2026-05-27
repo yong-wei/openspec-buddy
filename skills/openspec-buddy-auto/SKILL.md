@@ -93,12 +93,12 @@ still missing, ask the user for the review request string and append it to
     do not check the time, poll the shell, query GitHub, inspect files, send
     progress updates, or perform unrelated work. Do not use Codex automations,
     heartbeats, reminders, or background monitors for this wait.
-12. Check PR review, unresolved threads, requested changes, CI, mergeability, labels, Project membership, and origin issue traceability. Before any merge, run `openspec-buddy/scripts/verify-review-clear.sh <pr-url>`; do not infer review clearance from `gh pr view --comments`.
+12. Check PR review, unresolved threads, requested changes, CI, mergeability, labels, Project membership, and origin issue traceability. Before any merge, run `openspec-buddy/scripts/verify-review-clear.sh <pr-url>`; do not infer review clearance from `gh pr view --comments`. If the helper passes by using a top-level PR clear comment, read the clear comment excerpt and URL printed by the helper output and treat that returned excerpt as the human judgment record; do not make a second, text-only `gh pr view --comments` judgment.
 13. If new actionable review exists, including `P0`, `P1`, or `P2`, use `github:gh-address-comments` and `superpowers:receiving-code-review`, then push fixes or document the verified non-actionable rationale. Before resolving any review thread, reply in that thread with the fix or non-actionable rationale and evidence; then resolve the thread and repeat from step 11.
     If review feedback changes requirements, tasks, or specs, edit the archived
     change files and synced main specs in the same PR; do not restore the
     active `openspec/changes/<change_id>/` directory.
-14. If no new review appears for the configured number of quiet checks, `verify-review-clear.sh` passes, and checks are green, merge the PR without deleting the branch yet. If `verify-review-clear.sh` confirms the configured reviewer explicitly says there are no actionable findings, no significant issues, or no major problems, and all merge gates pass, it may be merged without waiting for the remaining quiet checks.
+14. If no new review appears for the configured number of quiet checks, `verify-review-clear.sh` passes, and checks are green, merge the PR without deleting the branch yet. If `verify-review-clear.sh` confirms the configured reviewer explicitly says there are no actionable findings, no significant issues, or no major problems for the current-head review cycle, and all merge gates pass, it may be merged without waiting for the remaining quiet checks.
 15. Fast-forward the claim branch to `origin/$OPENSPEC_BUDDY_BASE_BRANCH`.
 16. Run the post-merge achievement sync:
     - verify the merged PR contains `openspec/changes/archive/YYYY-MM-DD-<change_id>/`
@@ -157,11 +157,15 @@ Do not merge unless all are true:
 - `openspec-buddy/scripts/verify-review-clear.sh <pr>` passes. This gate must
   inspect the latest configured reviewer review, PR review comments, and
   GraphQL `reviewThreads`; `gh pr view --comments` being empty is not evidence
-  that review feedback is clear.
+  that review feedback is clear. When the gate passes through a top-level clear
+  comment rather than a formal review on the head commit, the helper must print
+  the matched current-head review request and clear comment excerpt. Use that
+  returned excerpt as the judgment record that the comment actually means
+  "no major issues" for the current cycle.
 - CI/checks have completed successfully or the repository has no required checks.
 - No unresolved review threads remain.
 - No reviewer has requested changes on the latest commit.
-- No new review/comment has appeared for three consecutive five-minute checks after the latest head commit or latest review-handling push, unless `verify-review-clear.sh` confirms the latest configured reviewer review explicitly says there are no actionable findings, no significant issues, or no major problems.
+- No new review/comment has appeared for three consecutive five-minute checks after the latest head commit or latest review-handling push, unless `verify-review-clear.sh` confirms the latest configured reviewer review, or a returned top-level clear comment after a current-head review request, explicitly says there are no actionable findings, no significant issues, or no major problems.
 - The implementation branch contains only the claimed change and required follow-up fixes.
 
 ## Learned Rules

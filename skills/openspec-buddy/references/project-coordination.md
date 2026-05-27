@@ -75,11 +75,17 @@ Before moving the issue to review, run:
 The review request must come from `OPENSPEC_BUDDY_PR_REVIEW_REQUEST`. For
 projects that require Codex review, configure that value explicitly, for
 example `@codex review 中文回复，即使没有重大问题也必须给出显式回复`.
+The helper treats an existing request as fresh only when it was posted after the
+current PR head commit; after a fix push, it appends a new request instead of
+reusing a stale one.
 Before merging after the review wait, run
 `<openspec-buddy-skill-dir>/scripts/verify-review-clear.sh <pr-number-or-url>`.
 This check reads review body, review comments, and GraphQL review threads; an
 empty `gh pr view --comments` result is not evidence that Codex review feedback
-is clear.
+is clear. If the helper passes through a top-level PR clear comment, it must
+print the matched current-head review request and the later clear comment
+excerpt, timestamp, and URL. Use that returned excerpt as the human judgment
+record for "no major issues"; do not rely on broad PR comment text matching.
 
 When resolving a GitHub review thread, use:
 

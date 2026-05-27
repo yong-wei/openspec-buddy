@@ -9,6 +9,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const helper = path.resolve(__dirname, '../scripts/verify-review-clear.mjs');
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openspec-buddy-review-clear-'));
 const reviewer = 'chatgpt-codex-connector';
+const reviewRequest = '@codex review 中文回复，即使没有重大问题也必须给出显式回复';
 
 function writeJson(name, value) {
   const file = path.join(tmpDir, name);
@@ -23,14 +24,19 @@ function runVerify({ pr, reviewComments = [], threads = { reviewThreads: [] } })
 
   return spawnSync(process.execPath, [helper, prFile, commentsFile, threadsFile, reviewer], {
     encoding: 'utf8',
+    env: {
+      ...process.env,
+      OPENSPEC_BUDDY_PR_REVIEW_REQUEST: reviewRequest,
+    },
   });
 }
 
-function basePr(review) {
+function basePr(review, overrides = {}) {
   return {
     number: 162,
     headRefOid: 'abc123',
     reviews: [review],
+    ...overrides,
   };
 }
 
@@ -87,6 +93,69 @@ try {
     }),
   });
   assert.equal(cleanReview.status, 0, cleanReview.stderr || cleanReview.stdout);
+  assert.match(cleanReview.stdout, /Clearance source: latest review state COMMENTED/);
+
+  const staleReviewWithUnrequestedClearComment = runVerify({
+    pr: basePr(
+      {
+        author: { login: reviewer },
+        state: 'COMMENTED',
+        body: '[P2] Please verify this edge case.',
+        commit: { oid: 'old456' },
+        submittedAt: '2026-01-01T00:01:00Z',
+      },
+      {
+        commits: [{ oid: 'abc123', committedDate: '2026-01-01T00:02:00Z' }],
+        comments: [
+          {
+            author: { login: reviewer },
+            body: 'No major issues.',
+            createdAt: '2026-01-01T00:05:00Z',
+            url: 'https://example.test/pr/162#issuecomment-clear',
+          },
+        ],
+      },
+    ),
+  });
+  assert.notEqual(staleReviewWithUnrequestedClearComment.status, 0);
+  assert.match(staleReviewWithUnrequestedClearComment.stderr, /no '@codex review/);
+
+  const staleReviewWithHeadRequestedClearComment = runVerify({
+    pr: basePr(
+      {
+        author: { login: reviewer },
+        state: 'COMMENTED',
+        body: '[P2] Please verify this edge case.',
+        commit: { oid: 'old456' },
+        submittedAt: '2026-01-01T00:01:00Z',
+      },
+      {
+        commits: [{ oid: 'abc123', committedDate: '2026-01-01T00:02:00Z' }],
+        comments: [
+          {
+            author: { login: 'YW' },
+            body: reviewRequest,
+            createdAt: '2026-01-01T00:03:00Z',
+            url: 'https://example.test/pr/162#issuecomment-request',
+          },
+          {
+            author: { login: reviewer },
+            body: 'No major issues after reviewing the latest commit.',
+            createdAt: '2026-01-01T00:05:00Z',
+            url: 'https://example.test/pr/162#issuecomment-clear',
+          },
+        ],
+      },
+    ),
+  });
+  assert.equal(
+    staleReviewWithHeadRequestedClearComment.status,
+    0,
+    staleReviewWithHeadRequestedClearComment.stderr || staleReviewWithHeadRequestedClearComment.stdout,
+  );
+  assert.match(staleReviewWithHeadRequestedClearComment.stdout, /top-level PR comment/);
+  assert.match(staleReviewWithHeadRequestedClearComment.stdout, /issuecomment-clear/);
+  assert.match(staleReviewWithHeadRequestedClearComment.stdout, /No major issues after reviewing the latest commit/);
 
   console.log('verify-review-clear tests passed');
 } finally {

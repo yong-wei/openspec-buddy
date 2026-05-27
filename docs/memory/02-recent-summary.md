@@ -21,6 +21,8 @@
 - `v0.3.0` 发布线强化 PR 进入 review 前的协调检查：`mark-review.sh` 统一配置 PR 元数据、写入项目显式 review 请求，并通过 `verify-pr-coordination.sh` 校验标签、assignee、Project 状态、origin issue 和 Development-link 策略。
 - `v0.3.1` 发布线修复 claim 阶段对工作树模式的限制，并新增 `verify-review-clear.sh` 合并前闸门，防止 Codex review body、review comments 或 unresolved threads 中的 `P0/P1/P2` 反馈被误判为可合并。
 - `v0.4.0` 发布线将 `openspec-buddy propose` 改为默认同时调用 `openspec-propose` 创建本地 OpenSpec change，并登记带完整协作标签、关系和 Project `Todo` 状态的 GitHub Issue。
+- `v0.5.0` 发布线强化 review 清场判断：`request-pr-review.sh` 会在新 head 后刷新 review request，`verify-review-clear.sh` 只有在当前 head 后的 request 之后出现明确清场评论时才接受顶层 clear comment，并输出评论摘要、时间和 URL 作为判断记录。
+- 本机项目目录新增被 git 忽略的 `.agents/skills/release-package/` 项目级发布技能：后续发布默认由代理判定 SemVer、维护 release notes 和相关文档，再用本地 `npm publish` token 文件完成 GitHub Release、npm 打包发布与发布后验证；`.agents/` 不放行进仓库。
 
 ## 当前警惕点
 

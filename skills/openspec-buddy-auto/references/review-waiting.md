@@ -118,6 +118,12 @@ itself. `P0`, `P1`, and `P2` findings all block merge. `P2` feedback must be
 verified and either fixed or justified with evidence before a later clean review
 state can pass the gate.
 
+If the helper passes by using a top-level PR clear comment, it must have matched
+a review-request comment for the current head commit first, then a later clear
+comment from the configured reviewer. Read the helper's returned clear comment
+excerpt, timestamp, and URL as the human judgment record. Do not separately
+infer clearance from broad PR comment text matching.
+
 ## Three-Check Merge Rule
 
 After the latest head commit or latest review-handling push, check for new
@@ -130,8 +136,11 @@ comment, requested-changes review, or follow-up fix push appears.
 
 Exception: if `verify-review-clear.sh` confirms that the latest configured
 reviewer explicitly says there are no actionable findings, no significant
-issues, no major problems, or equivalent wording, and all other merge gates
-pass, the PR may be merged without waiting for the remaining quiet checks.
+issues, no major problems, or equivalent wording for the current-head review
+cycle, and all other merge gates pass, the PR may be merged without waiting for
+the remaining quiet checks. For a top-level clear comment, the helper output
+itself is the review-cycle judgment record; use that returned excerpt directly
+instead of reopening the PR comments manually.
 
 ## Thread Resolution Rule
 

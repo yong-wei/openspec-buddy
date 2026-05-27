@@ -10,10 +10,12 @@ if (!prFile || !reviewCommentsFile || !reviewThreadsFile) {
 }
 
 const reviewer = reviewerArg || process.env.OPENSPEC_BUDDY_PR_REVIEW_AUTHOR || 'chatgpt-codex-connector';
+const configuredReviewRequest = String(process.env.OPENSPEC_BUDDY_PR_REVIEW_REQUEST || '').trim();
 const pr = JSON.parse(fs.readFileSync(prFile, 'utf8'));
 const reviewCommentsInput = JSON.parse(fs.readFileSync(reviewCommentsFile, 'utf8'));
 const reviewThreadsInput = JSON.parse(fs.readFileSync(reviewThreadsFile, 'utf8'));
 const errors = [];
+let topLevelClearUsed = false;
 
 function authorLogin(entry) {
   const value = entry?.author ?? entry?.user;
@@ -85,6 +87,18 @@ function isExplicitlyClear(text) {
   return /no actionable findings|no significant issues|no major problems|no major issues|did(?:n't| not) find any major issues|no findings|nothing actionable/i.test(String(text || ''));
 }
 
+function isReviewRequest(text) {
+  const body = String(text || '');
+  if (configuredReviewRequest) return body.includes(configuredReviewRequest);
+  return /@codex\s+review\b/i.test(body);
+}
+
+function excerpt(text, maxLength = 240) {
+  const normalized = String(text || '').replace(/\s+/g, ' ').trim();
+  if (normalized.length <= maxLength) return normalized;
+  return `${normalized.slice(0, maxLength - 1)}...`;
+}
+
 function issueLabel(thread) {
   const path = thread.path || 'unknown path';
   const line = thread.line || thread.startLine || thread.originalLine || '';
@@ -101,12 +115,33 @@ reviewerReviews.sort((left, right) => {
 });
 
 const headCommitTime = latestHeadCommitTime(pr);
-const reviewerClearComments = normalizeIssueComments(pr)
+const issueComments = normalizeIssueComments(pr);
+const headReviewRequests = issueComments
+  .filter((comment) => isReviewRequest(comment?.body || ''))
+  .filter((comment) => {
+    const commentCreatedAt = entryTime(comment);
+    return headCommitTime !== null && commentCreatedAt !== null && commentCreatedAt >= headCommitTime;
+  })
+  .sort((left, right) => {
+    const leftTime = entryTime(left) ?? 0;
+    const rightTime = entryTime(right) ?? 0;
+    return leftTime - rightTime;
+  });
+const latestHeadReviewRequest = headReviewRequests.at(-1);
+
+const topLevelClearCandidates = issueComments
   .filter((comment) => authorLogin(comment) === reviewer)
   .filter((comment) => isExplicitlyClear(comment?.body || ''))
   .filter((comment) => {
     const commentCreatedAt = entryTime(comment);
-    return headCommitTime === null || (commentCreatedAt !== null && commentCreatedAt >= headCommitTime);
+    return headCommitTime !== null && commentCreatedAt !== null && commentCreatedAt >= headCommitTime;
+  });
+const reviewerClearComments = topLevelClearCandidates
+  .filter((comment) => {
+    if (!latestHeadReviewRequest) return false;
+    const commentCreatedAt = entryTime(comment);
+    const requestCreatedAt = entryTime(latestHeadReviewRequest);
+    return commentCreatedAt !== null && requestCreatedAt !== null && commentCreatedAt >= requestCreatedAt;
   });
 const latestReviewerClearComment = reviewerClearComments.sort((left, right) => {
   const leftTime = entryTime(left) ?? 0;
@@ -114,10 +149,24 @@ const latestReviewerClearComment = reviewerClearComments.sort((left, right) => {
   return leftTime - rightTime;
 }).at(-1);
 
+function topLevelClearBlocker() {
+  if (topLevelClearCandidates.length === 0) return '';
+  if (headCommitTime === null) {
+    return 'A top-level clear comment exists, but the current head commit time is unavailable, so the comment cannot prove freshness.';
+  }
+  if (!latestHeadReviewRequest) {
+    const requestHint = configuredReviewRequest || '@codex review';
+    return `A top-level clear comment exists, but no '${requestHint}' review request comment after the current head commit was found.`;
+  }
+  return 'A top-level clear comment exists, but it is older than the latest review request for the current head commit.';
+}
+
 const latestReview = reviewerReviews.at(-1);
 if (!latestReview) {
   if (!latestReviewerClearComment) {
-    errors.push(`No review found from ${reviewer}.`);
+    errors.push(topLevelClearBlocker() || `No review found from ${reviewer}.`);
+  } else {
+    topLevelClearUsed = true;
   }
 } else {
   const state = String(latestReview.state || '').toUpperCase();
@@ -125,21 +174,35 @@ if (!latestReview) {
   const markers = priorityMarkers(body);
   const commitOid = reviewCommitOid(latestReview);
   const headOid = pr.headRefOid || pr.headOid || pr.head?.oid || '';
+  const reviewTargetsOlderCommit = Boolean(headOid && commitOid && commitOid !== headOid);
+  const olderReviewCanBeSuperseded = Boolean(reviewTargetsOlderCommit && latestReviewerClearComment);
 
-  if (headOid && commitOid && commitOid !== headOid) {
+  if (reviewTargetsOlderCommit) {
     if (!latestReviewerClearComment) {
-      errors.push(`Latest review from ${reviewer} targets ${commitOid}, not current head ${headOid}.`);
+      errors.push(topLevelClearBlocker() || `Latest review from ${reviewer} targets ${commitOid}, not current head ${headOid}.`);
+    } else {
+      topLevelClearUsed = true;
     }
   }
   if (['REQUEST_CHANGES', 'CHANGES_REQUESTED'].includes(state)) {
-    errors.push(`Latest review from ${reviewer} requested changes.`);
+    if (olderReviewCanBeSuperseded) {
+      topLevelClearUsed = true;
+    } else {
+      errors.push(`Latest review from ${reviewer} requested changes.`);
+    }
   }
   if (markers.length > 0) {
-    errors.push(`Latest review from ${reviewer} contains ${markers.join('/')} findings; verify and address them before merge.`);
+    if (olderReviewCanBeSuperseded) {
+      topLevelClearUsed = true;
+    } else {
+      errors.push(`Latest review from ${reviewer} contains ${markers.join('/')} findings; verify and address them before merge.`);
+    }
   }
   if (state === 'COMMENTED' && !isExplicitlyClear(body)) {
     if (!latestReviewerClearComment) {
-      errors.push(`Latest COMMENTED review from ${reviewer} is not an explicit no-actionable-findings review.`);
+      errors.push(topLevelClearBlocker() || `Latest COMMENTED review from ${reviewer} is not an explicit no-actionable-findings review.`);
+    } else {
+      topLevelClearUsed = true;
     }
   }
 }
@@ -174,4 +237,19 @@ if (errors.length > 0) {
   process.exit(1);
 }
 
-process.stdout.write(`Review clearance verified for PR #${pr.number || 'unknown'} using reviewer ${reviewer}.\n`);
+const lines = [`Review clearance verified for PR #${pr.number || 'unknown'} using reviewer ${reviewer}.`];
+if (topLevelClearUsed && latestReviewerClearComment) {
+  lines.push('Clearance source: top-level PR comment after a current-head review request.');
+  lines.push(`Review request createdAt: ${latestHeadReviewRequest?.createdAt || latestHeadReviewRequest?.created_at || 'unknown'}`);
+  if (latestHeadReviewRequest?.url) lines.push(`Review request url: ${latestHeadReviewRequest.url}`);
+  lines.push(`Clear comment createdAt: ${latestReviewerClearComment.createdAt || latestReviewerClearComment.created_at || 'unknown'}`);
+  if (latestReviewerClearComment.url) lines.push(`Clear comment url: ${latestReviewerClearComment.url}`);
+  lines.push(`Clear comment excerpt: ${excerpt(latestReviewerClearComment.body)}`);
+  lines.push('Human gate: use this returned clear comment as the judgment record that the script matched a no-major-issues review cycle.');
+} else if (latestReview) {
+  lines.push(`Clearance source: latest review state ${String(latestReview.state || 'UNKNOWN').toUpperCase()}.`);
+  lines.push(`Latest review commit: ${reviewCommitOid(latestReview) || 'unknown'}`);
+  const latestSubmittedAt = latestReview.submittedAt || latestReview.submitted_at || latestReview.createdAt || latestReview.created_at || 'unknown';
+  lines.push(`Latest review submittedAt: ${latestSubmittedAt}`);
+}
+process.stdout.write(`${lines.join('\n')}\n`);
