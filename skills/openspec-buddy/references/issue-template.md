@@ -73,3 +73,7 @@ risk:<low|medium|high>
 mode:<isolated|fixed-branch|stacked|docs-only>
 coupling:<coupling_group> # when coupling_group is not none
 ```
+
+Before creating the issue, verify each planned label exists in the repository.
+Create missing Buddy-required labels or stop and report the exact missing label;
+do not silently omit labels or substitute a different coordination label.

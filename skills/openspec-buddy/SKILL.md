@@ -169,17 +169,24 @@ Steps:
    - `risk:<low|medium|high>`
    - `mode:<isolated|fixed-branch|stacked|docs-only>`
    - `coupling:<coupling_group>` when `coupling_group` is not `none`
-9. Create the issue with `gh issue create`.
-10. If this is a planned series, create or identify the series parent issue, then link the child issue:
+9. Before creating the issue, verify every planned label exists in the target
+   repository with `gh label list`. If a required Buddy label such as
+   `status:ready`, `type:change`, `area:<area>`, `series:<series>`,
+   `risk:<risk>`, or `mode:<mode>` is missing, create the missing label or stop
+   and report the exact missing label. Do not silently omit labels or substitute
+   a different risk/area/series/mode label without saying so in the final
+   retrospective. Re-run the label check after creating any missing label.
+10. Create the issue with `gh issue create`.
+11. If this is a planned series, create or identify the series parent issue, then link the child issue:
    ```bash
    <openspec-buddy-skill-dir>/scripts/create-series-parent.sh <series>
    <openspec-buddy-skill-dir>/scripts/link-issue-parent.sh <parent-issue> <child-issue>
    ```
-11. If this issue depends on another change issue, link the native relationship:
+12. If this issue depends on another change issue, link the native relationship:
    ```bash
    <openspec-buddy-skill-dir>/scripts/link-issue-dependencies.sh <blocked-issue> <blocking-issue>
    ```
-12. Add the created issue to the default GitHub Project:
+13. Add the created issue to the default GitHub Project:
    ```bash
    <openspec-buddy-skill-dir>/scripts/add-issue-to-project.sh <issue-url>
    ```
