@@ -23,6 +23,23 @@ function authorLogin(entry) {
   return value?.login || value?.name || '';
 }
 
+function normalizeReviewerLogin(login) {
+  return String(login || '').trim().toLowerCase().replace(/\[bot\]$/i, '');
+}
+
+function isConfiguredReviewer(entry) {
+  const normalizedLogin = normalizeReviewerLogin(authorLogin(entry));
+  const normalizedReviewer = normalizeReviewerLogin(reviewer);
+  if (!normalizedLogin || !normalizedReviewer) return false;
+
+  const codexConnector = 'chatgpt-codex-connector';
+  if (normalizedReviewer.includes(codexConnector)) {
+    return normalizedLogin.includes(codexConnector);
+  }
+
+  return normalizedLogin === normalizedReviewer;
+}
+
 function normalizeReviews(input) {
   const reviews = Array.isArray(input?.reviews) ? input.reviews : input?.reviews?.nodes || [];
   return reviews.map((review, index) => ({ ...review, __index: index }));
@@ -106,7 +123,7 @@ function issueLabel(thread) {
 }
 
 const reviews = normalizeReviews(pr);
-const reviewerReviews = reviews.filter((review) => authorLogin(review) === reviewer);
+const reviewerReviews = reviews.filter((review) => isConfiguredReviewer(review));
 reviewerReviews.sort((left, right) => {
   const leftTime = submittedTime(left);
   const rightTime = submittedTime(right);
@@ -130,7 +147,7 @@ const headReviewRequests = issueComments
 const latestHeadReviewRequest = headReviewRequests.at(-1);
 
 const topLevelClearCandidates = issueComments
-  .filter((comment) => authorLogin(comment) === reviewer)
+  .filter((comment) => isConfiguredReviewer(comment))
   .filter((comment) => isExplicitlyClear(comment?.body || ''))
   .filter((comment) => {
     const commentCreatedAt = entryTime(comment);
@@ -222,7 +239,7 @@ const reviewComments = normalizeReviewComments(reviewCommentsInput);
 const hasThreadData = reviewThreads.length > 0 || JSON.stringify(reviewThreadsInput).includes('reviewThreads');
 if (!hasThreadData) {
   for (const comment of reviewComments) {
-    if (authorLogin(comment) !== reviewer) continue;
+    if (!isConfiguredReviewer(comment)) continue;
     const markers = priorityMarkers(comment?.body || '');
     const commentCommit = comment?.commit_id || comment?.commitId || '';
     const headOid = pr.headRefOid || pr.headOid || pr.head?.oid || '';

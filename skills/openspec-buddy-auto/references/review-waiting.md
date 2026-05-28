@@ -1,29 +1,31 @@
 # PR Review Waiting
 
-Use a serial foreground wait for each configured review pause. The wait must
-be completely silent: no time checks, shell polling, GitHub queries, file
-inspection, progress updates, or unrelated work may happen while the wait is
-running. Do not use Codex automations, heartbeat automations, reminders, or
+Use a serial foreground wait for each configured review pause. The agent-facing
+wait must be completely silent: no time checks, shell polling, GitHub queries,
+file inspection, progress updates, or unrelated work may happen while the wait
+is running. Do not use Codex automations, heartbeat automations, reminders, or
 background monitors: they run in parallel and can break the one-change-at-a-time
 workflow.
 
-The wait should block the current execution flow with exactly one command, for
-example:
+The wait should block the current execution flow with exactly one command:
 
 ```bash
-sleep "$OPENSPEC_BUDDY_REVIEW_WAIT_SECONDS"
+<openspec-buddy-skill-dir>/scripts/wait-for-review-clear.sh <pr-number-or-url>
 ```
 
-If the project configures `OPENSPEC_BUDDY_COMMAND_PREFIX`, prefix the command:
+If the project configures `OPENSPEC_BUDDY_COMMAND_PREFIX`, prefix that single
+helper invocation:
 
 ```bash
-$OPENSPEC_BUDDY_COMMAND_PREFIX sleep "$OPENSPEC_BUDDY_REVIEW_WAIT_SECONDS"
+$OPENSPEC_BUDDY_COMMAND_PREFIX <openspec-buddy-skill-dir>/scripts/wait-for-review-clear.sh <pr-number-or-url>
 ```
 
-When using a shell tool that can return before the process exits, set the
-foreground wait long enough for the sleep to finish in the same tool call. For
-the default five-minute pause, use a wait window slightly above 300 seconds
-instead of repeatedly polling the shell session.
+The helper preserves the main-thread silence rule while avoiding fixed idle
+rounds. It sleeps for `OPENSPEC_BUDDY_REVIEW_INITIAL_WAIT_SECONDS` first
+(default `300`), then checks every `OPENSPEC_BUDDY_REVIEW_POLL_SECONDS`
+(default `120`) until `OPENSPEC_BUDDY_REVIEW_MAX_WAIT_SECONDS` is reached
+(default `900`). During helper execution, do not call `write_stdin` to poll the
+shell session; wait for the command to finish in one foreground wait window.
 
 Forbidden during this phase:
 
@@ -44,7 +46,7 @@ Before waiting, record:
 pr_number
 head_sha
 last_seen_review_ids
-last_seen_review_thread_ids
+last_seen_review_comment_ids
 last_seen_comment_ids
 review_round
 quiet_review_checks
@@ -95,6 +97,20 @@ If the script cannot retarget the PR to `$OPENSPEC_BUDDY_BASE_BRANCH`, stop and
 mark the issue `status:needs-human` rather than merging a Buddy change to the
 release branch.
 
+## Helper Query Rule
+
+`wait-for-review-clear.sh` may query GitHub internally, but the main agent must
+not. The helper uses low-frequency REST checks for PR head, issue comments,
+review comments, and reviews. It invokes `verify-review-clear.sh` only on the
+first post-initial-wait check, when that lightweight state changes, or at the
+max-wait boundary. Since `verify-review-clear.sh` is the only path that calls
+GraphQL reviewThreads, idle polling does not repeatedly spend GraphQL quota.
+
+If the helper exits `0`, use its printed verifier output as the current-head
+clearance record. If it exits non-zero with actionable review diagnostics,
+handle review feedback. If it exits `124`, the review wait timed out; do not
+merge by timeout.
+
 ## Thread-Aware Review Rule
 
 Use `reviewThreads.nodes[].isResolved` from GitHub GraphQL as the review gate.
@@ -118,6 +134,11 @@ itself. `P0`, `P1`, and `P2` findings all block merge. `P2` feedback must be
 verified and either fixed or justified with evidence before a later clean review
 state can pass the gate.
 
+GitHub REST and GraphQL surfaces may render app authors differently, for example
+`chatgpt-codex-connector` versus `chatgpt-codex-connector[bot]`. Review gates
+must normalize that suffix and treat logins containing `chatgpt-codex-connector`
+as the configured Codex reviewer.
+
 If the helper passes by using a top-level PR clear comment, it must have matched
 a review-request comment for the current head commit first, then a later clear
 comment from the configured reviewer. Read the helper's returned clear comment
@@ -126,10 +147,12 @@ infer clearance from broad PR comment text matching.
 
 ## Three-Check Merge Rule
 
-After the latest head commit or latest review-handling push, check for new
-review after each configured foreground wait. Merge only after the configured
-number of consecutive checks with no new review, no new review comments, and no
-new unresolved threads.
+After the latest head commit or latest review-handling push, run the foreground
+wait helper. Merge may proceed as soon as the helper, through
+`verify-review-clear.sh`, returns a current-head explicit clean review record
+and the other merge gates pass. If no explicit clean record appears, merge only
+after the configured fallback quiet checks with no new review, no new review
+comments, and no new unresolved threads.
 
 Reset `quiet_review_checks` to `0` whenever a new review, review comment, PR
 comment, requested-changes review, or follow-up fix push appears.

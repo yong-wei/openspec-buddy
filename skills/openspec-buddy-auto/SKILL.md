@@ -88,12 +88,16 @@ still missing, ask the user for the review request string and append it to
     Development-link policy, posts `OPENSPEC_BUDDY_PR_REVIEW_REQUEST`, verifies
     coordination, and then marks the issue `status:in-review`.
     The Project `Status` must remain `In Progress`.
-11. Wait five minutes in the same foreground workflow with a single blocking
-    sleep command, then check again. During the wait, stay completely silent:
-    do not check the time, poll the shell, query GitHub, inspect files, send
-    progress updates, or perform unrelated work. Do not use Codex automations,
-    heartbeats, reminders, or background monitors for this wait.
-12. Check PR review, unresolved threads, requested changes, CI, mergeability, labels, Project membership, and origin issue traceability. Before any merge, run `openspec-buddy/scripts/verify-review-clear.sh <pr-url>`; do not infer review clearance from `gh pr view --comments`. If the helper passes by using a top-level PR clear comment, read the clear comment excerpt and URL printed by the helper output and treat that returned excerpt as the human judgment record; do not make a second, text-only `gh pr view --comments` judgment.
+11. Wait for the configured reviewer in the same foreground workflow by running
+    `openspec-buddy/scripts/wait-for-review-clear.sh <pr-url>` as the single
+    blocking wait command. The helper sleeps for the initial wait window
+    (default 300 seconds), then checks every poll window (default 120 seconds)
+    until the total max wait (default 900 seconds). During the helper run, stay
+    completely silent: do not check the time, poll the shell, query GitHub,
+    inspect files, send progress updates, or perform unrelated work. Do not use
+    Codex automations, heartbeats, reminders, or background monitors for this
+    wait. The helper may silently perform its own low-frequency GitHub checks.
+12. Check PR review, unresolved threads, requested changes, CI, mergeability, labels, Project membership, and origin issue traceability. Before any merge, run `openspec-buddy/scripts/verify-review-clear.sh <pr-url>` unless `wait-for-review-clear.sh` already returned a successful clearance record for the current head; do not infer review clearance from `gh pr view --comments`. If either helper passes by using a top-level PR clear comment, read the clear comment excerpt and URL printed by the helper output and treat that returned excerpt as the human judgment record; do not make a second, text-only `gh pr view --comments` judgment.
 13. If new actionable review exists, including `P0`, `P1`, or `P2`, use `github:gh-address-comments` and `superpowers:receiving-code-review`, then push fixes or document the verified non-actionable rationale. Before resolving any review thread, reply in that thread with the fix or non-actionable rationale and evidence; then resolve the thread and repeat from step 11.
     If review feedback changes requirements, tasks, or specs, edit the archived
     change files and synced main specs in the same PR; do not restore the
@@ -165,7 +169,14 @@ Do not merge unless all are true:
 - CI/checks have completed successfully or the repository has no required checks.
 - No unresolved review threads remain.
 - No reviewer has requested changes on the latest commit.
-- No new review/comment has appeared for three consecutive five-minute checks after the latest head commit or latest review-handling push, unless `verify-review-clear.sh` confirms the latest configured reviewer review, or a returned top-level clear comment after a current-head review request, explicitly says there are no actionable findings, no significant issues, or no major problems.
+- `wait-for-review-clear.sh` has returned a current-head clean review record,
+  or no new review/comment has appeared for the configured fallback quiet
+  checks after the latest head commit or latest review-handling push. The
+  clean-review exception applies when `verify-review-clear.sh`, or the wait
+  helper through that verifier, confirms the latest configured reviewer review
+  or a returned top-level clear comment after a current-head review request
+  explicitly says there are no actionable findings, no significant issues, or
+  no major problems.
 - The implementation branch contains only the claimed change and required follow-up fixes.
 
 ## Learned Rules
@@ -176,13 +187,14 @@ Do not merge unless all are true:
   blocks merge. `P2` is not automatically mergeable; it must be verified,
   addressed or explicitly justified, and followed by a clear review state.
 - Keep the review wait separate from CI waiting. Use exactly one foreground
-  sleep for `$OPENSPEC_BUDDY_REVIEW_WAIT_SECONDS` per review pause; do not
-  poll with `date`, `time`, `gh`, `git`, `write_stdin`, or any other tool
-  during the sleep. Require `$OPENSPEC_BUDDY_REVIEW_QUIET_CHECKS` consecutive
-  quiet review checks before merging unless the configured reviewer policy
-  explicitly reports no significant issues. After review gates are clear, use
-  foreground CI waiting such as `gh run watch --exit-status` when checks are
-  still running.
+  `wait-for-review-clear.sh` invocation per review pause; do not poll with
+  `date`, `time`, `gh`, `git`, `write_stdin`, or any other main-thread tool
+  while the helper is running. The helper may silently do low-frequency REST
+  checks and invokes GraphQL only through `verify-review-clear.sh` on the first
+  post-wait check, on detected review-state changes, or at timeout. Require the
+  configured fallback quiet checks only when no explicit clean review record is
+  available. After review gates are clear, use foreground CI waiting such as
+  `gh run watch --exit-status` when checks are still running.
 - Every review-thread resolve must be preceded by a reply in that same thread. The reply must state the fix commit or the reason the thread is non-actionable, plus the verification evidence. Resolve through `openspec-buddy/scripts/resolve-review-thread.sh <thread-id>`, not a raw GraphQL mutation; the helper must independently confirm `isResolved=true` for that thread before the review loop can continue. Do not silently resolve Codex review threads.
 - Do not merge while CI is `IN_PROGRESS`, even when every review thread is resolved and the PR is mergeable.
 - OpenSpec Buddy automation targets `$OPENSPEC_BUDDY_BASE_BRANCH`, not `$OPENSPEC_BUDDY_RELEASE_BRANCH`. New changes use the configured base branch, PRs use that base branch, and pre-archived change files land through the same implementation PR. Merging the Buddy base branch to the release branch is a manual release action outside Buddy Auto unless the project configures otherwise.

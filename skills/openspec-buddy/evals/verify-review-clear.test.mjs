@@ -95,6 +95,17 @@ try {
   assert.equal(cleanReview.status, 0, cleanReview.stderr || cleanReview.stdout);
   assert.match(cleanReview.stdout, /Clearance source: latest review state COMMENTED/);
 
+  const cleanBotReview = runVerify({
+    pr: basePr({
+      author: { login: `${reviewer}[bot]` },
+      state: 'COMMENTED',
+      body: 'No actionable findings.',
+      commit: { oid: 'abc123' },
+    }),
+  });
+  assert.equal(cleanBotReview.status, 0, cleanBotReview.stderr || cleanBotReview.stdout);
+  assert.match(cleanBotReview.stdout, /Clearance source: latest review state COMMENTED/);
+
   const staleReviewWithUnrequestedClearComment = runVerify({
     pr: basePr(
       {
@@ -156,6 +167,42 @@ try {
   assert.match(staleReviewWithHeadRequestedClearComment.stdout, /top-level PR comment/);
   assert.match(staleReviewWithHeadRequestedClearComment.stdout, /issuecomment-clear/);
   assert.match(staleReviewWithHeadRequestedClearComment.stdout, /No major issues after reviewing the latest commit/);
+
+  const staleBotReviewWithHeadRequestedBotClearComment = runVerify({
+    pr: basePr(
+      {
+        author: { login: `${reviewer}[bot]` },
+        state: 'COMMENTED',
+        body: '[P2] Please verify this edge case.',
+        commit: { oid: 'old456' },
+        submittedAt: '2026-01-01T00:01:00Z',
+      },
+      {
+        commits: [{ oid: 'abc123', committedDate: '2026-01-01T00:02:00Z' }],
+        comments: [
+          {
+            author: { login: 'YW' },
+            body: reviewRequest,
+            createdAt: '2026-01-01T00:03:00Z',
+            url: 'https://example.test/pr/162#issuecomment-request',
+          },
+          {
+            author: { login: `${reviewer}[bot]` },
+            body: "Didn't find any major issues.",
+            createdAt: '2026-01-01T00:05:00Z',
+            url: 'https://example.test/pr/162#issuecomment-bot-clear',
+          },
+        ],
+      },
+    ),
+  });
+  assert.equal(
+    staleBotReviewWithHeadRequestedBotClearComment.status,
+    0,
+    staleBotReviewWithHeadRequestedBotClearComment.stderr || staleBotReviewWithHeadRequestedBotClearComment.stdout,
+  );
+  assert.match(staleBotReviewWithHeadRequestedBotClearComment.stdout, /top-level PR comment/);
+  assert.match(staleBotReviewWithHeadRequestedBotClearComment.stdout, /issuecomment-bot-clear/);
 
   console.log('verify-review-clear tests passed');
 } finally {
