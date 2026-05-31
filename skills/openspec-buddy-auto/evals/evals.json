@@ -10,7 +10,7 @@
     {
       "id": 2,
       "prompt": "在 goal 模式下自动处理所有剩余 OpenSpec change。",
-      "expected_output": "每轮只 claim 一个 change；一旦开始某个 series，后续优先处理同 series 可执行 issue；实现和验证完成后先在 claim branch 上归档 OpenSpec change，把代码、测试、主 spec 与 archive 目录放入同一个 PR；PR 合并后只同步 issue 为 status:archived、Project Status 为 Done 且设置 End，重新 fetch 配置的 Buddy base branch 并重算候选；无可执行项或预算耗尽时停止。",
+      "expected_output": "每轮只 claim 一个 change；一旦开始某个 series，后续优先处理同 series 可执行 issue；实现和验证完成后先在 claim branch 上运行 openspec validate <change_id> --strict 校验 active change/delta spec，再归档 OpenSpec change，把代码、测试、主 spec 与 archive 目录放入同一个 PR；PR 合并后只同步 issue 为 status:archived、Project Status 为 Done 且设置 End，重新 fetch 配置的 Buddy base branch 并重算候选；无可执行项或预算耗尽时停止。",
       "files": []
     },
     {

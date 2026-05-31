@@ -63,15 +63,21 @@ Required sequence:
    adds a capability and `openspec/specs/<capability>/spec.md` does not exist,
    create the main spec file with `## Purpose` and `## Requirements` before
    archiving.
-3. Run:
+3. Validate the active change before it is moved to the archive:
+   ```bash
+   openspec validate <change_id> --strict
+   ```
+   This catches invalid delta spec format that main-spec validation after
+   archive can no longer see.
+4. Run:
    ```bash
    openspec archive <change_id> --yes
    ```
-4. Validate every affected main spec, for example:
+5. Validate every affected main spec, for example:
    ```bash
    openspec validate <capability> --strict
    ```
-5. Commit the implementation and archive together.
+6. Commit the implementation and archive together.
 
 Do not mark the GitHub issue `status:archived` during pre-archive. The issue
 stays `status:in-progress` until the PR is opened, then `status:in-review`

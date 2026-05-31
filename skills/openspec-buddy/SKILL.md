@@ -245,9 +245,12 @@ Steps:
 10. Invoke `openspec-apply-change` for the matching local OpenSpec change.
 11. Before opening the PR, require
     `openspec instructions apply --change <change_id> --json` to report
-    `remaining: 0`, then pre-archive the change on the claim branch:
+    `remaining: 0`, then run `openspec validate <change_id> --strict` on the
+    active change before pre-archiving it on the claim branch:
     - create a main spec skeleton first when a delta introduces a new capability
       and `openspec/specs/<capability>/spec.md` does not exist
+    - run `openspec validate <change_id> --strict` to catch invalid delta spec
+      format before `openspec archive` moves the change
     - run `openspec archive <change_id> --yes`
     - validate each affected main spec with `openspec validate <capability> --strict`
     The issue must remain `status:in-progress`; file-level pre-archive is not

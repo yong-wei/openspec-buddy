@@ -16,11 +16,20 @@ poll_wait="${OPENSPEC_BUDDY_REVIEW_POLL_SECONDS:-120}"
 max_wait="${OPENSPEC_BUDDY_REVIEW_MAX_WAIT_SECONDS:-900}"
 reviewer="${OPENSPEC_BUDDY_PR_REVIEW_AUTHOR:-chatgpt-codex-connector}"
 verify_helper="${OPENSPEC_BUDDY_VERIFY_REVIEW_CLEAR_HELPER:-$script_dir/verify-review-clear.sh}"
+command_timeout="${OPENSPEC_BUDDY_REVIEW_COMMAND_TIMEOUT_SECONDS:-60}"
 
-if ! [[ "$initial_wait" =~ ^[0-9]+$ && "$poll_wait" =~ ^[0-9]+$ && "$max_wait" =~ ^[0-9]+$ ]]; then
+if ! [[ "$initial_wait" =~ ^[0-9]+$ && "$poll_wait" =~ ^[0-9]+$ && "$max_wait" =~ ^[0-9]+$ && "$command_timeout" =~ ^[0-9]+$ ]]; then
   echo "Review wait values must be non-negative integer seconds." >&2
   exit 2
 fi
+
+run_with_timeout() {
+  if [[ "$command_timeout" -gt 0 ]] && command -v timeout >/dev/null 2>&1; then
+    timeout "$command_timeout"s "$@"
+  else
+    "$@"
+  fi
+}
 
 resolve_pr_number() {
   local ref="$1"
@@ -32,7 +41,7 @@ resolve_pr_number() {
     printf '%s\n' "${BASH_REMATCH[1]}"
     return 0
   fi
-  gh pr view "$ref" --json number --jq '.number'
+  run_with_timeout gh pr view "$ref" --json number --jq '.number'
 }
 
 resolve_repo_nwo() {
@@ -48,7 +57,7 @@ resolve_repo_nwo() {
     printf '%s\n' "${remote_url%.git}"
     return 0
   fi
-  gh repo view --json nameWithOwner --jq '.nameWithOwner'
+  run_with_timeout gh repo view --json nameWithOwner --jq '.nameWithOwner'
 }
 
 tmp_dir="$(mktemp -d)"
@@ -66,10 +75,10 @@ light_state_signature() {
   local review_comments_file="$tmp_dir/review-comments.json"
   local reviews_file="$tmp_dir/reviews.json"
 
-  gh api "repos/$repo_nwo/pulls/$pr_number" > "$pr_file"
-  gh api "repos/$repo_nwo/issues/$pr_number/comments?per_page=100" > "$issue_comments_file"
-  gh api "repos/$repo_nwo/pulls/$pr_number/comments?per_page=100" > "$review_comments_file"
-  gh api "repos/$repo_nwo/pulls/$pr_number/reviews?per_page=100" > "$reviews_file"
+  run_with_timeout gh api "repos/$repo_nwo/pulls/$pr_number" > "$pr_file"
+  run_with_timeout gh api "repos/$repo_nwo/issues/$pr_number/comments?per_page=100" > "$issue_comments_file"
+  run_with_timeout gh api "repos/$repo_nwo/pulls/$pr_number/comments?per_page=100" > "$review_comments_file"
+  run_with_timeout gh api "repos/$repo_nwo/pulls/$pr_number/reviews?per_page=100" > "$reviews_file"
 
   node -e '
 const fs = require("node:fs");
@@ -94,7 +103,13 @@ process.stdout.write(JSON.stringify(signature));
 
 is_waitable_review_failure() {
   local output="$1"
-  if grep -E 'No review found|no .*review request comment after the current head|top-level clear comment exists|targets .* not current head' <<<"$output" >/dev/null; then
+  if grep -E 'targets .*,? not current head' <<<"$output" >/dev/null; then
+    return 0
+  fi
+  if grep -E 'unresolved review thread|contains P[0-2]|requested changes|Latest COMMENTED review .*not an explicit' <<<"$output" >/dev/null; then
+    return 1
+  fi
+  if grep -E 'No review found|no .*review request comment after the current head|top-level clear comment exists|targets .*,? not current head' <<<"$output" >/dev/null; then
     return 0
   fi
   return 1
@@ -102,9 +117,15 @@ is_waitable_review_failure() {
 
 run_clear_gate() {
   local output_file="$tmp_dir/verify-output.txt"
-  if "$verify_helper" "$pr_number" > "$output_file" 2>&1; then
+  if run_with_timeout "$verify_helper" "$pr_number" > "$output_file" 2>&1; then
     cat "$output_file"
     return 0
+  fi
+  local status="$?"
+  if [[ "$status" -eq 124 ]]; then
+    echo "Review clearance verifier timed out after ${command_timeout}s." >&2
+    cat "$output_file" >&2
+    return 2
   fi
 
   if is_waitable_review_failure "$(cat "$output_file")"; then
@@ -121,6 +142,18 @@ sleep_if_needed() {
     sleep "$seconds"
   fi
 }
+
+set +e
+run_clear_gate
+gate_status="$?"
+set -e
+
+if [[ "$gate_status" -eq 0 ]]; then
+  exit 0
+fi
+if [[ "$gate_status" -eq 2 ]]; then
+  exit 1
+fi
 
 sleep_if_needed "$initial_wait"
 

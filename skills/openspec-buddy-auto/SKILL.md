@@ -73,6 +73,8 @@ still missing, ask the user for the review request string and append it to
    - if a delta spec introduces a capability whose main spec does not exist,
      create `openspec/specs/<capability>/spec.md` with `## Purpose` and
      `## Requirements` before archiving
+   - run `openspec validate <change_id> --strict` against the active change so
+     malformed delta specs fail before `openspec archive` moves the change
    - run `openspec archive <change_id> --yes`
    - validate each affected main spec with `openspec validate <capability> --strict`
    - keep the issue in `status:in-progress`; do not mark it `status:archived`

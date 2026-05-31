@@ -22,7 +22,7 @@
     {
       "id": 4,
       "prompt": "openspec-buddy apply #123：实现完成并已打开 PR，请进入 review。",
-      "expected_output": "PR 必须是 ready 且 base 为 OPENSPEC_BUDDY_BASE_BRANCH；通过 mark-review.sh 统一处理 PR 协调，不手写分散逻辑；该 helper 应调用 configure-pr-metadata.sh 复制 pr:* 和 issue 的非 status 协作标签 type/level/area/series/risk/mode/coupling，镜像 issue assignee，把 PR 加入同一 Project 且 Status 为 In Progress，记录 origin issue 与 Development-link 策略；随后通过 request-pr-review.sh 幂等写入 OPENSPEC_BUDDY_PR_REVIEW_REQUEST，再运行 verify-pr-coordination.sh，通过后才把 issue 置为 status:in-review。",
+      "expected_output": "PR 必须是 ready 且 base 为 OPENSPEC_BUDDY_BASE_BRANCH；进入 review 前必须确认实现 PR 已在 archive 前运行 openspec validate <change_id> --strict 校验 active change/delta spec，并把代码、测试、同步后的主 spec 与 archive 目录放在同一个 PR；通过 mark-review.sh 统一处理 PR 协调，不手写分散逻辑；该 helper 应调用 configure-pr-metadata.sh 复制 pr:* 和 issue 的非 status 协作标签 type/level/area/series/risk/mode/coupling，镜像 issue assignee，把 PR 加入同一 Project 且 Status 为 In Progress，记录 origin issue 与 Development-link 策略；随后通过 request-pr-review.sh 幂等写入 OPENSPEC_BUDDY_PR_REVIEW_REQUEST，再运行 verify-pr-coordination.sh，通过后才把 issue 置为 status:in-review。",
       "files": []
     },
     {

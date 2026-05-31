@@ -112,6 +112,11 @@ printf '%s\n' \
   '#!/usr/bin/env bash' \
   'set -euo pipefail' \
   'printf "%s\n" "$*" >> "${VERIFY_LOG_FILE:?}"' \
+  'if [[ "${VERIFY_MODE:-clean}" == "waitable" ]]; then' \
+  '  echo "Review clearance verification failed:" >&2' \
+  '  echo "- No review found from chatgpt-codex-connector." >&2' \
+  '  exit 1' \
+  'fi' \
   'echo "Review clearance verified for PR #$1 using reviewer chatgpt-codex-connector."' \
   'echo "Clearance source: top-level PR comment after a current-head review request."' \
   > "$tmp_dir/verify-review-clear.sh"
@@ -129,6 +134,35 @@ fi
 verify_count="$(wc -l < "$VERIFY_LOG_FILE" | tr -d ' ')"
 if [[ "$verify_count" -ne 1 ]]; then
   echo "wait-for-review-clear.sh should call the heavy verifier only once in this clean case" >&2
+  exit 1
+fi
+
+export OPENSPEC_BUDDY_REVIEW_INITIAL_WAIT_SECONDS=5
+export OPENSPEC_BUDDY_REVIEW_POLL_SECONDS=1
+export OPENSPEC_BUDDY_REVIEW_MAX_WAIT_SECONDS=5
+export VERIFY_LOG_FILE="$tmp_dir/verify-immediate.log"
+if ! timeout 2s "$helper" 123 > "$tmp_dir/immediate-output.txt"; then
+  echo "wait-for-review-clear.sh slept before the first verifier check despite an already-clear review" >&2
+  exit 1
+fi
+if ! grep -F 'Review clearance verified for PR #123' "$tmp_dir/immediate-output.txt" >/dev/null; then
+  echo "wait-for-review-clear.sh did not return the immediate verifier clearance output" >&2
+  exit 1
+fi
+
+export VERIFY_MODE=waitable
+export VERIFY_LOG_FILE="$tmp_dir/verify-waitable.log"
+set +e
+timeout 2s "$helper" 123 > "$tmp_dir/waitable-output.txt" 2> "$tmp_dir/waitable-err.txt"
+waitable_status="$?"
+set -e
+if [[ "$waitable_status" -eq 0 ]]; then
+  echo "wait-for-review-clear.sh should keep waiting after a fresh request with no review yet" >&2
+  exit 1
+fi
+if [[ "$waitable_status" -ne 124 ]]; then
+  echo "wait-for-review-clear.sh returned a non-timeout status before the initial wait elapsed" >&2
+  cat "$tmp_dir/waitable-err.txt" >&2
   exit 1
 fi
 

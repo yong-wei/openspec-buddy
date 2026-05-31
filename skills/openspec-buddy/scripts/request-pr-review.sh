@@ -27,6 +27,59 @@ if [[ -z "$review_request" ]]; then
   exit 2
 fi
 
+command_timeout="${OPENSPEC_BUDDY_REVIEW_COMMAND_TIMEOUT_SECONDS:-60}"
+verify_helper="${OPENSPEC_BUDDY_VERIFY_REVIEW_CLEAR_HELPER:-$script_dir/verify-review-clear.sh}"
+
+if ! [[ "$command_timeout" =~ ^[0-9]+$ ]]; then
+  echo "OPENSPEC_BUDDY_REVIEW_COMMAND_TIMEOUT_SECONDS must be a non-negative integer." >&2
+  exit 2
+fi
+
+run_with_timeout() {
+  if [[ "$command_timeout" -gt 0 ]] && command -v timeout >/dev/null 2>&1; then
+    timeout "$command_timeout"s "$@"
+  else
+    "$@"
+  fi
+}
+
+is_waitable_review_failure() {
+  local output="$1"
+  if grep -E 'unresolved review thread|contains P[0-2]|requested changes|Latest COMMENTED review .*not an explicit' <<<"$output" >/dev/null; then
+    return 1
+  fi
+  if grep -E 'No review found|no .*review request comment after the current head|top-level clear comment exists|targets .*,? not current head' <<<"$output" >/dev/null; then
+    return 0
+  fi
+  return 1
+}
+
+run_review_request_gate() {
+  local output_file
+  output_file="$(mktemp)"
+  local status
+  if run_with_timeout "$verify_helper" "$pr_ref" > "$output_file" 2>&1; then
+    cat "$output_file"
+    rm -f "$output_file"
+    return 0
+  fi
+  status="$?"
+
+  local output
+  output="$(cat "$output_file")"
+  rm -f "$output_file"
+  if [[ "$status" -eq 124 ]]; then
+    echo "Review request gate timed out after ${command_timeout}s while checking existing review state." >&2
+    return 2
+  fi
+  if is_waitable_review_failure "$output"; then
+    return 1
+  fi
+
+  printf '%s\n' "$output" >&2
+  return 2
+}
+
 resolve_pr_number() {
   local ref="$1"
   if [[ "$ref" =~ ^[0-9]+$ ]]; then
@@ -62,9 +115,9 @@ load_pr_json() {
   if parsed_pr_number="$(resolve_pr_number "$pr_ref")" && repo_nwo="$(resolve_repo_nwo)"; then
     local tmp_dir
     tmp_dir="$(mktemp -d)"
-    gh api "repos/$repo_nwo/pulls/$parsed_pr_number" > "$tmp_dir/pr.json"
-    gh api "repos/$repo_nwo/pulls/$parsed_pr_number/commits?per_page=100" > "$tmp_dir/commits.json"
-    gh api "repos/$repo_nwo/issues/$parsed_pr_number/comments?per_page=100" > "$tmp_dir/comments.json"
+    run_with_timeout gh api "repos/$repo_nwo/pulls/$parsed_pr_number" > "$tmp_dir/pr.json"
+    run_with_timeout gh api "repos/$repo_nwo/pulls/$parsed_pr_number/commits?per_page=100" > "$tmp_dir/commits.json"
+    run_with_timeout gh api "repos/$repo_nwo/issues/$parsed_pr_number/comments?per_page=100" > "$tmp_dir/comments.json"
     node -e '
 const fs = require("node:fs");
 const [prFile, commitsFile, commentsFile] = process.argv.slice(1);
@@ -93,17 +146,32 @@ process.stdout.write(JSON.stringify(output));
     return 0
   fi
 
-  gh pr view "$pr_ref" --json comments,commits,headRefOid 2>/dev/null || true
+  run_with_timeout gh pr view "$pr_ref" --json comments,commits,headRefOid 2>/dev/null || true
 }
 
+set +e
+run_review_request_gate
+gate_status="$?"
+set -e
+if [[ "$gate_status" -eq 0 ]]; then
+  printf 'PR review already clear for %s; no review request added.\n' "$pr_ref"
+  exit 0
+fi
+if [[ "$gate_status" -eq 2 ]]; then
+  exit 1
+fi
+
 pr_json="$(load_pr_json)"
+pr_json_file="$(mktemp)"
+trap 'rm -f "$pr_json_file"' EXIT
+printf '%s\n' "$pr_json" > "$pr_json_file"
 request_state="$(
   node -e '
 const fs = require("node:fs");
-const reviewRequest = process.argv[1];
+const [reviewRequest, prFile] = process.argv.slice(1);
 let pr = {};
 try {
-  const raw = fs.readFileSync(0, "utf8").trim();
+  const raw = fs.readFileSync(prFile, "utf8").trim();
   pr = raw ? JSON.parse(raw) : {};
 } catch {
   pr = {};
@@ -139,7 +207,7 @@ const freshRequest = matchingRequests.some((comment) => {
 });
 
 process.stdout.write(freshRequest ? "present-current-head" : "missing-current-head");
-' "$review_request" <<<"$pr_json"
+' "$review_request" "$pr_json_file"
 )"
 
 if [[ "$request_state" == "present-current-head" || "$request_state" == "present-unknown-head" ]]; then
@@ -150,6 +218,6 @@ fi
 if [[ "$dry_run" == "1" ]]; then
   printf '[dry-run] add PR review request to %s: %s\n' "$pr_ref" "$review_request"
 else
-  gh pr comment "$pr_ref" --body "$review_request" >/dev/null
+  run_with_timeout gh pr comment "$pr_ref" --body "$review_request" >/dev/null
   printf 'PR review request added to %s.\n' "$pr_ref"
 fi
