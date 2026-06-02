@@ -59,15 +59,35 @@ Do not claim issue A while its `blockedBy` relationship contains any open, unarc
 
 ## Relationship Verification
 
-Use the relationship list and verifier when diagnosing drift:
+Use the batch verifier after `propose` creates or updates parent and dependency
+relationships:
+
+```bash
+<openspec-buddy-skill-dir>/scripts/verify-issue-relationships.sh --require-parent <parent-issue> <child-issue>...
+<openspec-buddy-skill-dir>/scripts/verify-issue-relationships.sh <blocked-issue> <blocking-issue>...
+<openspec-buddy-skill-dir>/scripts/verify-issue-relationships.sh --require-parent <parent-issue> <child-issue> <blocking-issue>...
+```
+
+The shell helper accepts issue numbers, `#123` references, or issue URLs. It
+deduplicates the listed issues, batch-fetches parent/sub-issue and
+blockedBy/blocking edges in one GraphQL request, then pipes normalized JSON to
+the lower-level verifier. Use it instead of hand-written GraphQL in normal
+`propose` relationship checks. Include every relationship endpoint you expect
+to verify; the verifier fails when a fetched parent, blocker, or blocked issue
+is missing from the batch input because the reverse edge cannot be proven.
+
+Use the relationship list and lower-level stdin verifier when diagnosing drift
+from an exported relationship file:
 
 ```bash
 <openspec-buddy-skill-dir>/scripts/list-ready-change-relationships.sh 100
 node <openspec-buddy-skill-dir>/scripts/verify-issue-relationships.mjs < relationships.json
 ```
 
-The verifier is a consistency check. The claim gate still uses GitHub native `blockedBy` relationships, not metadata alone.
-Pass `requireParent: true` in the input JSON only when auditing a newly registered series that should already have parent links; older issues may not have that relationship.
+Both verifiers are consistency checks. The claim gate still uses GitHub native
+`blockedBy` relationships, not metadata alone. Pass `--require-parent` or
+`requireParent: true` only when auditing a newly registered series that should
+already have parent links; older issues may not have that relationship.
 
 ## Project Dates
 

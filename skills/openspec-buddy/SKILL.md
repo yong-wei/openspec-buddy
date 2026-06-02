@@ -194,6 +194,26 @@ Steps:
    registered until labels, parent/dependency relationships, Project membership,
    and Project `Status` have all been applied or explicitly reported as already
    present.
+14. Verify parent and dependency relationships with the batch verifier before
+   reporting registration complete:
+   ```bash
+   <openspec-buddy-skill-dir>/scripts/verify-issue-relationships.sh --require-parent <parent-issue> <child-issue>...
+   ```
+   For dependency-only changes without a required series parent, omit
+   `--require-parent` and pass the blocked issue plus all blocking issues:
+   ```bash
+   <openspec-buddy-skill-dir>/scripts/verify-issue-relationships.sh <blocked-issue> <blocking-issue>...
+   ```
+   If a proposed issue has both a series parent and dependencies, run one
+   combined verification with the parent, the child, and every blocking issue:
+   ```bash
+   <openspec-buddy-skill-dir>/scripts/verify-issue-relationships.sh --require-parent <parent-issue> <child-issue> <blocking-issue>...
+   ```
+   Prefer this helper for propose relationship checks. It batch-fetches native
+   GitHub parent/sub-issue and blockedBy/blocking edges in one GraphQL request,
+   then validates both directions. Do not hand-write GraphQL for normal propose
+   relationship verification; only inspect GraphQL manually when the helper
+   fails and the failure itself is under investigation.
 
 Do not claim the issue or implement in `propose`.
 

@@ -111,7 +111,7 @@ fi
 gh project item-list "$project_number" \
   --owner "$project_owner" \
   --format json \
-  --limit 200 > "$project_file"
+  --limit 1000 > "$project_file"
 
 issue_project_item="$(
   node -e '

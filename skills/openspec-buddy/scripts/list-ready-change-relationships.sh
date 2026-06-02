@@ -20,6 +20,7 @@ query($owner: String!, $name: String!, $limit: Int!) {
         body
         labels(first: 40) { nodes { name } }
         parent { number title url state labels(first: 40) { nodes { name } } }
+        subIssues(first: 100) { nodes { number title url state labels(first: 40) { nodes { name } } } }
         blockedBy(first: 40) { nodes { number title url state labels(first: 40) { nodes { name } } } }
         blocking(first: 40) { nodes { number title url state labels(first: 40) { nodes { name } } } }
       }
