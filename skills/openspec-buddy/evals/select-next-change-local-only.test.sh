@@ -14,6 +14,22 @@ cat >"$stub_bin/openspec" <<'EOF'
 set -euo pipefail
 
 if [[ "${1:-}" == "list" && "${2:-}" == "--json" ]]; then
+  if [[ "${OPEN_SPEC_MODE:-local-only}" == "mixed" ]]; then
+    cat <<'JSON'
+{
+  "changes": [
+    "issue-backed-change",
+    {
+      "change_id": "local-only-refactor",
+      "no_issue": true,
+      "series": "local",
+      "risk": "low"
+    }
+  ]
+}
+JSON
+    exit 0
+  fi
   cat <<'JSON'
 {
   "changes": [
@@ -76,3 +92,36 @@ if [[ "$output_with_core" != *'"change_id": "local-only-refactor"'* ]]; then
   printf 'Expected local-only selector output with full core config.\n\nOutput:\n%s\n' "$output_with_core" >&2
   exit 1
 fi
+
+set +e
+mixed_stdout="$(
+  env -i \
+    PATH="$stub_bin:$PATH" \
+    HOME="$HOME" \
+    OPEN_SPEC_MODE=mixed \
+    OPENSPEC_BUDDY_BASE_BRANCH=integration \
+    OPENSPEC_BUDDY_RELEASE_BRANCH=main \
+    OPENSPEC_BUDDY_PROJECT_OWNER=example \
+    OPENSPEC_BUDDY_PROJECT_NUMBER=1 \
+    OPENSPEC_BUDDY_PROJECT_TITLE="Example Project" \
+    bash "$selector" 2>"$tmp_dir/mixed.err"
+)"
+mixed_status="$?"
+set -e
+
+if [[ "$mixed_status" -ne 0 ]]; then
+  printf 'Expected mixed local-only fallback to succeed.\n\nStderr:\n%s\n' "$(cat "$tmp_dir/mixed.err")" >&2
+  exit 1
+fi
+
+if [[ "$mixed_stdout" != *'"change_id": "local-only-refactor"'* ]]; then
+  printf 'Expected local-only fallback output in mixed mode.\n\nOutput:\n%s\n' "$mixed_stdout" >&2
+  exit 1
+fi
+
+if ! grep -F 'issue-backed candidates were not fully evaluated' "$tmp_dir/mixed.err" >/dev/null; then
+  printf 'Expected warning for mixed local-only and issue-backed fallback.\n\nStderr:\n%s\n' "$(cat "$tmp_dir/mixed.err")" >&2
+  exit 1
+fi
+
+echo "select-next-change local-only tests passed"

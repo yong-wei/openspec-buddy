@@ -36,7 +36,9 @@ if [[ "${#refs[@]}" -eq 0 ]]; then
 fi
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-repo="$(gh repo view --json owner,name --jq '.owner.login + "/" + .name')"
+# shellcheck source=./github-fetch.sh
+source "$script_dir/github-fetch.sh"
+repo="$(buddy_repo_nwo)"
 owner="${repo%%/*}"
 name="${repo#*/}"
 
@@ -55,35 +57,11 @@ for ref in "${refs[@]}"; do
   fi
 done
 
-issue_fields='
-        id
-        number
-        title
-        url
-        state
-        labels(first: 40) { nodes { name } }
-        parent { number title url state labels(first: 40) { nodes { name } } }
-        subIssues(first: 100) { nodes { number title url state labels(first: 40) { nodes { name } } } }
-        blockedBy(first: 40) { nodes { number title url state labels(first: 40) { nodes { name } } } }
-        blocking(first: 40) { nodes { number title url state labels(first: 40) { nodes { name } } } }
-'
+relationships="$(buddy_issue_relationships_graphql "$owner" "$name" "${numbers[@]}")"
 
-query='query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) {'
-for index in "${!numbers[@]}"; do
-  query+=" issue${index}: issue(number: ${numbers[$index]}) { ${issue_fields} }"
-done
-query+=' } }'
-
-response="$(gh api graphql \
-  -f query="$query" \
-  -f owner="$owner" \
-  -f name="$name")"
-
-printf '%s' "$response" | node -e '
+printf '%s' "$relationships" | node -e '
 const fs = require("node:fs");
-const response = JSON.parse(fs.readFileSync(0, "utf8"));
-const repository = response.data?.repository || {};
-const issues = Object.values(repository).filter(Boolean);
+const issues = JSON.parse(fs.readFileSync(0, "utf8"));
 process.stdout.write(JSON.stringify({
   issues,
   requireParent: process.argv[1] === "true"

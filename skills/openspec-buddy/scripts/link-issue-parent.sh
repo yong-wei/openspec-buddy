@@ -10,8 +10,13 @@ if [[ -z "$parent_ref" || -z "$child_ref" ]]; then
   exit 2
 fi
 
-parent_json="$(gh issue view "$parent_ref" --json id,number,url)"
-child_json="$(gh issue view "$child_ref" --json id,number,url)"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=./github-fetch.sh
+source "$script_dir/github-fetch.sh"
+repo_nwo="$(buddy_repo_nwo)"
+
+parent_json="$(gh issue view -R "$repo_nwo" "$parent_ref" --json id,number,url)"
+child_json="$(gh issue view -R "$repo_nwo" "$child_ref" --json id,number,url)"
 parent_id="$(node -e 'const data=JSON.parse(process.argv[1]); process.stdout.write(data.id);' "$parent_json")"
 child_id="$(node -e 'const data=JSON.parse(process.argv[1]); process.stdout.write(data.id);' "$child_json")"
 parent_number="$(node -e 'const data=JSON.parse(process.argv[1]); process.stdout.write(String(data.number));' "$parent_json")"

@@ -8,13 +8,17 @@ if [[ -z "$issue_ref" ]]; then
 fi
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$script_dir/load-config.sh"
+# shellcheck source=./github-fetch.sh
+source "$script_dir/github-fetch.sh"
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
 issue_file="$tmp_dir/issue.json"
 parent_file="$tmp_dir/parent.json"
+repo_nwo="$(buddy_repo_nwo)"
 
-issue_id="$(gh issue view "$issue_ref" --json id --jq '.id')"
+issue_id="$(gh issue view -R "$repo_nwo" "$issue_ref" --json id --jq '.id')"
 
 gh api graphql \
   -f id="$issue_id" \
@@ -135,11 +139,11 @@ body="$(node -e 'const data = JSON.parse(process.argv[1]); process.stdout.write(
 "$script_dir/set-status-label.sh" "$parent_number" "status:archived"
 "$script_dir/set-project-date.sh" "$parent_number" "End" "$(date +%F)"
 
-state="$(gh issue view "$parent_number" --json state --jq '.state')"
+state="$(gh issue view -R "$repo_nwo" "$parent_number" --json state --jq '.state')"
 if [[ "$state" == "OPEN" ]]; then
-  gh issue close "$parent_number" --comment "$body"
+  gh issue close -R "$repo_nwo" "$parent_number" --comment "$body"
 else
-  gh issue comment "$parent_number" --body "$body"
+  gh issue comment -R "$repo_nwo" "$parent_number" --body "$body"
 fi
 
 echo "Series parent #$parent_number finalized."

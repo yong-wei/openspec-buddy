@@ -10,21 +10,38 @@ trap 'rm -rf "$tmp_dir"' EXIT
 
 openspec list --json > "$tmp_dir/openspec.json"
 
-has_local_only="$(
+change_coordination_state="$(
 node -e '
 const fs = require("fs");
 const active = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
 const activeChanges = active.changes || active;
-const hasLocalOnly = activeChanges.some((entry) => {
-  if (!entry || typeof entry === "string") return false;
-  if (entry.no_issue === true || entry.noIssue === true) return true;
-  if (entry.issue === false) return true;
+let hasLocalOnly = false;
+let hasIssueBacked = false;
+for (const entry of activeChanges) {
+  if (!entry) continue;
+  if (typeof entry === "string") {
+    hasIssueBacked = true;
+    continue;
+  }
+  let isLocalOnly = false;
+  if (entry.no_issue === true || entry.noIssue === true) isLocalOnly = true;
+  if (entry.issue === false) isLocalOnly = true;
   const coordination = String(entry.coordination || "").toLowerCase();
-  return coordination === "local" || coordination === "no-issue" || coordination === "no_issue";
-});
-process.stdout.write(hasLocalOnly ? "1" : "0");
+  if (coordination === "local" || coordination === "no-issue" || coordination === "no_issue") {
+    isLocalOnly = true;
+  }
+  if (isLocalOnly) {
+    hasLocalOnly = true;
+  } else {
+    hasIssueBacked = true;
+  }
+}
+process.stdout.write(JSON.stringify({ hasLocalOnly, hasIssueBacked }));
 ' "$tmp_dir/openspec.json"
 )"
+
+has_local_only="$(node -e 'const data = JSON.parse(process.argv[1]); process.stdout.write(data.hasLocalOnly ? "1" : "0");' "$change_coordination_state")"
+has_issue_backed="$(node -e 'const data = JSON.parse(process.argv[1]); process.stdout.write(data.hasIssueBacked ? "1" : "0");' "$change_coordination_state")"
 
 if [[ "$has_local_only" == "1" ]] && ! openspec_buddy_has_core_config; then
   openspec_buddy_require_local_only_config
@@ -33,6 +50,10 @@ else
   openspec_buddy_require_core_config
   if ! "$script_dir/list-ready-change-relationships.sh" "$limit" > "$tmp_dir/issues.json" 2>"$tmp_dir/issues.err"; then
     if [[ "$has_local_only" == "1" ]]; then
+      if [[ "$has_issue_backed" == "1" ]]; then
+        cat "$tmp_dir/issues.err" >&2
+        echo "Warning: GitHub relationship lookup failed. Local-only changes remain selectable, but issue-backed candidates were not fully evaluated in this run." >&2
+      fi
       printf '{"issues":[]}\n' > "$tmp_dir/issues.json"
     else
       cat "$tmp_dir/issues.err" >&2

@@ -9,6 +9,8 @@ fi
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/load-config.sh"
+# shellcheck source=./github-fetch.sh
+source "$script_dir/github-fetch.sh"
 openspec_buddy_require_auto_config
 
 initial_wait="${OPENSPEC_BUDDY_REVIEW_INITIAL_WAIT_SECONDS:-300}"
@@ -44,27 +46,12 @@ resolve_pr_number() {
   run_with_timeout gh pr view "$ref" --json number --jq '.number'
 }
 
-resolve_repo_nwo() {
-  local remote_url
-  remote_url="$(git remote get-url origin 2>/dev/null || true)"
-  if [[ "$remote_url" == git@github.com:* ]]; then
-    remote_url="${remote_url#git@github.com:}"
-    printf '%s\n' "${remote_url%.git}"
-    return 0
-  fi
-  if [[ "$remote_url" == https://github.com/* ]]; then
-    remote_url="${remote_url#https://github.com/}"
-    printf '%s\n' "${remote_url%.git}"
-    return 0
-  fi
-  run_with_timeout gh repo view --json nameWithOwner --jq '.nameWithOwner'
-}
-
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
 pr_number="$(resolve_pr_number "$pr_ref")"
-repo_nwo="$(resolve_repo_nwo)"
+repo_nwo="$(buddy_repo_nwo)"
+cache_dir="$(buddy_cache_dir "$tmp_dir/gh-cache")"
 last_signature=""
 first_check=1
 started_at="$SECONDS"
@@ -74,11 +61,19 @@ light_state_signature() {
   local issue_comments_file="$tmp_dir/issue-comments.json"
   local review_comments_file="$tmp_dir/review-comments.json"
   local reviews_file="$tmp_dir/reviews.json"
+  local commits_file="$tmp_dir/commits.json"
 
   run_with_timeout gh api "repos/$repo_nwo/pulls/$pr_number" > "$pr_file"
   run_with_timeout gh api "repos/$repo_nwo/issues/$pr_number/comments?per_page=100" > "$issue_comments_file"
   run_with_timeout gh api "repos/$repo_nwo/pulls/$pr_number/comments?per_page=100" > "$review_comments_file"
   run_with_timeout gh api "repos/$repo_nwo/pulls/$pr_number/reviews?per_page=100" > "$reviews_file"
+  run_with_timeout gh api "repos/$repo_nwo/pulls/$pr_number/commits?per_page=100" > "$commits_file"
+  cp "$pr_file" "$cache_dir/pr-rest-$pr_number.json"
+  cp "$issue_comments_file" "$cache_dir/issue-comments-$pr_number.json"
+  cp "$review_comments_file" "$cache_dir/review-comments-$pr_number.json"
+  cp "$reviews_file" "$cache_dir/reviews-$pr_number.json"
+  cp "$commits_file" "$cache_dir/commits-$pr_number.json"
+  rm -f "$cache_dir/review-threads-$pr_number.json"
 
   node -e '
 const fs = require("node:fs");
@@ -117,11 +112,13 @@ is_waitable_review_failure() {
 
 run_clear_gate() {
   local output_file="$tmp_dir/verify-output.txt"
-  if run_with_timeout "$verify_helper" "$pr_number" > "$output_file" 2>&1; then
+  local status=0
+  OPENSPEC_BUDDY_GH_CACHE_DIR="$cache_dir" run_with_timeout "$verify_helper" "$pr_number" > "$output_file" 2>&1 || status="$?"
+
+  if [[ "$status" -eq 0 ]]; then
     cat "$output_file"
     return 0
   fi
-  local status="$?"
   if [[ "$status" -eq 124 ]]; then
     echo "Review clearance verifier timed out after ${command_timeout}s." >&2
     cat "$output_file" >&2

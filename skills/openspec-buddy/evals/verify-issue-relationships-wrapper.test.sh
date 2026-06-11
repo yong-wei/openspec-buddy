@@ -51,4 +51,80 @@ if grep -q 'issue2:' "$GH_QUERY_FILE"; then
   exit 1
 fi
 
+cat > "$tmp_dir/gh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+case "$1 $2" in
+  "repo view")
+    printf 'owner/repo\n'
+    ;;
+  "api graphql")
+    printf 'api graphql\n' >> "$GH_CALL_LOG"
+    previous=''
+    for arg in "$@"; do
+      if [[ "$previous" == "-f" && "$arg" == query=* ]]; then
+        printf '%s\n---\n' "${arg#query=}" >> "$GH_QUERY_FILE"
+      fi
+      previous="$arg"
+    done
+    python3 - "$@" <<'PY'
+import json
+import re
+import sys
+
+query = ""
+args = sys.argv[1:]
+for i, arg in enumerate(args):
+    if arg == "-f" and i + 1 < len(args) and args[i + 1].startswith("query="):
+        query = args[i + 1][6:]
+        break
+
+numbers = [int(match) for match in re.findall(r'issue\d+: issue\(number: (\d+)\)', query)]
+repository = {}
+for index, number in enumerate(numbers):
+    repository[f"issue{index}"] = {
+        "number": number,
+        "labels": {"nodes": [{"name": "type:change"}]},
+        "subIssues": {"nodes": []},
+        "blockedBy": {"nodes": []},
+        "blocking": {"nodes": []},
+    }
+print(json.dumps({"data": {"repository": repository}}))
+PY
+    ;;
+  *)
+    echo "unexpected gh command: $*" >&2
+    exit 1
+    ;;
+esac
+EOF
+chmod +x "$tmp_dir/gh"
+: > "$GH_CALL_LOG"
+: > "$GH_QUERY_FILE"
+
+refs=()
+for number in $(seq 1 30); do
+  refs+=("$number")
+done
+
+output="$("$repo_root/skills/openspec-buddy/scripts/verify-issue-relationships.sh" "${refs[@]}")"
+[[ "$output" == "Issue relationships verified." ]]
+
+api_calls="$(grep -c '^api graphql$' "$GH_CALL_LOG")"
+if [[ "$api_calls" != "2" ]]; then
+  echo "expected batched GraphQL calls for 30 issues" >&2
+  exit 1
+fi
+
+if ! grep -q 'issue24: issue(number: 25)' "$GH_QUERY_FILE"; then
+  echo "expected first batch to include issue 25" >&2
+  exit 1
+fi
+
+if grep -q 'issue25: issue(number: 26)' "$GH_QUERY_FILE"; then
+  echo "expected first batch to stop at 25 issues" >&2
+  exit 1
+fi
+
 echo "verify issue relationships wrapper eval passed"

@@ -9,6 +9,8 @@ fi
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/load-config.sh"
+# shellcheck source=./github-fetch.sh
+source "$script_dir/github-fetch.sh"
 openspec_buddy_require_core_config
 
 tmp_dir="$(mktemp -d)"
@@ -36,32 +38,18 @@ resolve_pr_number() {
   gh pr view "$ref" --json number --jq '.number'
 }
 
-resolve_repo_nwo() {
-  local remote_url
-  remote_url="$(git remote get-url origin 2>/dev/null || true)"
-  if [[ "$remote_url" == git@github.com:* ]]; then
-    remote_url="${remote_url#git@github.com:}"
-    printf '%s\n' "${remote_url%.git}"
-    return 0
-  fi
-  if [[ "$remote_url" == https://github.com/* ]]; then
-    remote_url="${remote_url#https://github.com/}"
-    printf '%s\n' "${remote_url%.git}"
-    return 0
-  fi
-  gh repo view --json nameWithOwner --jq '.nameWithOwner'
-}
-
 pr_number="$(resolve_pr_number "$pr_ref")"
-repo_nwo="$(resolve_repo_nwo)"
+repo_nwo="$(buddy_repo_nwo)"
 owner="${repo_nwo%%/*}"
 repo="${repo_nwo#*/}"
+cache_dir="$(buddy_cache_dir "$tmp_dir/gh-cache")"
 
-gh api "repos/$repo_nwo/pulls/$pr_number" > "$pr_rest_file"
-gh api "repos/$repo_nwo/pulls/$pr_number/reviews?per_page=100" > "$reviews_file"
-gh api "repos/$repo_nwo/pulls/$pr_number/commits?per_page=100" > "$commits_file"
-gh api "repos/$repo_nwo/issues/$pr_number/comments?per_page=100" > "$issue_comments_file"
-gh api "repos/$repo_nwo/pulls/$pr_number/comments" --paginate > "$review_comments_file"
+buddy_pr_rest_bundle "$repo_nwo" "$pr_number" "$cache_dir"
+cp "$BUDDY_PR_REST_FILE" "$pr_rest_file"
+cp "$BUDDY_REVIEWS_FILE" "$reviews_file"
+cp "$BUDDY_COMMITS_FILE" "$commits_file"
+cp "$BUDDY_ISSUE_COMMENTS_FILE" "$issue_comments_file"
+cp "$BUDDY_REVIEW_COMMENTS_FILE" "$review_comments_file"
 
 node -e '
 const fs = require("node:fs");
@@ -111,32 +99,7 @@ const output = {
 fs.writeFileSync(prFile, `${JSON.stringify(output)}\n`);
 ' "$pr_rest_file" "$reviews_file" "$commits_file" "$issue_comments_file" "$pr_file"
 
-gh api graphql \
-  -f query='
-query($owner: String!, $repo: String!, $number: Int!) {
-  repository(owner: $owner, name: $repo) {
-    pullRequest(number: $number) {
-      reviewThreads(first: 100) {
-        nodes {
-          isResolved
-          path
-          line
-          startLine
-          originalLine
-          comments(first: 50) {
-            nodes {
-              author { login }
-              body
-              url
-            }
-          }
-        }
-      }
-    }
-  }
-}' \
-  -f owner="$owner" \
-  -f repo="$repo" \
-  -F number="$pr_number" > "$review_threads_file"
+buddy_review_threads_graphql "$owner" "$repo" "$pr_number" "$cache_dir" >/dev/null
+cp "$BUDDY_REVIEW_THREADS_FILE" "$review_threads_file"
 
 node "$script_dir/verify-review-clear.mjs" "$pr_file" "$review_comments_file" "$review_threads_file" "$reviewer"
