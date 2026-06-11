@@ -8,10 +8,10 @@
 这两个技能不替代 OpenSpec 自身的设计和实现技能。推荐配合方式是：
 
 1. 对已有 GitHub issue，先用 `openspec-buddy claim [issue]` 建立 claim；不指定 issue 时会选择最小编号的可领取开放 issue。
-2. 对还没有 issue 的新变更，用 `openspec-buddy propose` 默认创建本地 OpenSpec change 并登记 GitHub Issue；该 issue 会带上协作标签、父子/依赖关系和 GitHub Project `Todo` 状态。需求探索仍可先用 OpenSpec 系列技能完成，但不再把本地提案创建留作额外步骤。
+2. 对还没有 issue 的新变更，用 `openspec-buddy propose` 默认创建本地 OpenSpec change 并登记 GitHub Issue；该 issue 会带上协作标签、父子/依赖关系和 GitHub Project `Todo` 状态。若明确希望单人本地推进，不登记 GitHub，可使用 `openspec-buddy propose --no-issue`，此时只创建 `openspec/changes/<change_id>`，不创建或更新 GitHub Issue。
 3. 用 `openspec-buddy apply` 在已 claim 的 GitHub Issue 上完成代码、测试和 spec 同步。
 4. 用 `openspec-buddy achieve` 在 PR 合并后同步 GitHub Issue、GitHub Project 和 OpenSpec 归档记录。
-5. 需要连续处理一组开放 issue 或已登记变更时，再使用 `openspec-buddy-auto`，让它按 claim、依赖、状态、review 和 CI 闸门逐个推进。
+5. 需要连续处理一组开放 issue 或已登记变更时，再使用 `openspec-buddy-auto`，让它按 claim、依赖、状态、review 和 CI 闸门逐个推进。对于 `--no-issue` 创建的本地 change，auto 应先识别本地候选再执行；`openspec-buddy-auto --no-pr` 只适用于这类 local-only change，只做本地 review、验证与合并，不开 PR。对 GitHub issue-backed change，仍保持一变更一 PR 的协调闭环。
 
 核心约束是：一个可执行协调变更对应一个 GitHub Issue、一个 `change_id`、一个声明分支、一个 OpenSpec change 和一个 PR。复杂开放 issue 会先被 claim，再拆分成多个子 issue；原 issue 只作为跟踪父 issue。GitHub 负责跨分支、跨代理、跨工作树的协作状态；OpenSpec 仍然是需求、任务和 spec 的本地事实源。
 
@@ -74,6 +74,17 @@ openspec-buddy init
 $HOME/.agents/skills/openspec-buddy/scripts/check-config.sh
 $HOME/.agents/skills/openspec-buddy/scripts/check-config.sh auto
 ```
+
+若仅使用 `openspec-buddy propose --no-issue` 或配合
+`openspec-buddy-auto --no-pr` 走本地最小路径，可只准备
+`OPENSPEC_BUDDY_BASE_BRANCH`，并使用：
+
+```bash
+$HOME/.agents/skills/openspec-buddy/scripts/check-config.sh local
+```
+
+这一路径不要求 GitHub Project 字段，也不要求
+`OPENSPEC_BUDDY_PR_REVIEW_REQUEST`。
 
 `OPENSPEC_BUDDY_PR_REVIEW_REQUEST` 不由包默认硬编码；每个项目应按自己的
 review 机制显式配置。需要 Codex 正式 review 的 Major 类项目可使用：

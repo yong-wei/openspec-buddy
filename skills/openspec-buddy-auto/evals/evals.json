@@ -8,6 +8,12 @@
       "files": []
     },
     {
+      "id": 4,
+      "prompt": "使用 openspec-buddy-auto 处理一个通过 openspec-buddy propose --no-issue 创建的本地 change，并启用 --no-pr。",
+      "expected_output": "先读取 openspec list --json 等本地 active change 信息，识别显式 no-issue/noIssue/issue:false/coordination:local 的变更；该路径不调用 openspec-buddy claim，不创建 GitHub Issue、Project 状态、Development 分支锁或远端 claim branch，而是直接在本地执行实现、验证与 OpenSpec 归档。若启用 --no-pr，则不开 PR、不等待 GitHub review、不调用 mark-review.sh 或 mark-achieved.sh，而是在本地完成高质量审核、修复、复核与合并，并报告最终本地 merge 结果。",
+      "files": []
+    },
+    {
       "id": 2,
       "prompt": "在 goal 模式下自动处理所有剩余 OpenSpec change。",
       "expected_output": "每轮只 claim 一个 change；一旦开始某个 series，后续优先处理同 series 可执行 issue；实现和验证完成后先在 claim branch 上运行 openspec validate <change_id> --strict 校验 active change/delta spec，再归档 OpenSpec change，把代码、测试、主 spec 与 archive 目录放入同一个 PR；PR 合并后只同步 issue 为 status:archived、Project Status 为 Done 且设置 End，重新 fetch 配置的 Buddy base branch 并重算候选；无可执行项或预算耗尽时停止。",

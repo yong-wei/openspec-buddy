@@ -142,6 +142,31 @@ openspec_buddy_require_core_config() {
   openspec_buddy_print_missing_and_exit
 }
 
+openspec_buddy_require_local_only_config() {
+  openspec_buddy_missing_config=()
+  openspec_buddy_apply_optional_defaults
+  openspec_buddy_require_var OPENSPEC_BUDDY_BASE_BRANCH
+  openspec_buddy_print_missing_and_exit
+}
+
+openspec_buddy_has_core_config() {
+  local required=(
+    OPENSPEC_BUDDY_BASE_BRANCH
+    OPENSPEC_BUDDY_RELEASE_BRANCH
+    OPENSPEC_BUDDY_PROJECT_OWNER
+    OPENSPEC_BUDDY_PROJECT_NUMBER
+    OPENSPEC_BUDDY_PROJECT_TITLE
+  )
+  local name
+  for name in "${required[@]}"; do
+    if [[ -z "${!name:-}" ]]; then
+      return 1
+    fi
+  done
+  openspec_buddy_apply_optional_defaults
+  return 0
+}
+
 openspec_buddy_require_auto_config() {
   openspec_buddy_require_core_config
   openspec_buddy_missing_config=()

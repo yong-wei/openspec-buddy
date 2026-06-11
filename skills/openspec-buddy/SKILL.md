@@ -6,10 +6,16 @@ compatibility: Requires openspec CLI and GitHub CLI.
 
 # OpenSpec Buddy
 
-OpenSpec Buddy is the coordination layer for GitHub-tracked OpenSpec work.
-GitHub Issues are the cross-worktree task record. OpenSpec remains the local specification and execution package.
+OpenSpec Buddy is the coordination layer for OpenSpec work that is usually
+GitHub-tracked. GitHub Issues are the default cross-worktree task record, but
+`openspec-buddy propose --no-issue` may intentionally keep a change local-only.
+OpenSpec remains the local specification and execution package.
 
-Use this skill only when the user explicitly asks for `openspec-buddy claim`, `openspec-buddy propose`, `openspec-buddy apply`, `openspec-buddy achieve`, or asks to coordinate OpenSpec changes through GitHub Issues.
+Use this skill only when the user explicitly asks for `openspec-buddy claim`,
+`openspec-buddy propose`, `openspec-buddy apply`, `openspec-buddy achieve`, or
+asks to coordinate OpenSpec changes through GitHub Issues. The one exception is
+`openspec-buddy propose --no-issue`, which creates a local-only OpenSpec change
+without creating or updating any GitHub Issue.
 
 ## Required Configuration
 
@@ -28,7 +34,7 @@ root before checking the process environment. Set `OPENSPEC_BUDDY_ENV_FILE` to
 use a different dotenv-style file. Non-empty process environment values override
 file values.
 
-Required variables are:
+Default GitHub-coordinated Buddy flows require:
 
 - `OPENSPEC_BUDDY_BASE_BRANCH`
 - `OPENSPEC_BUDDY_RELEASE_BRANCH`
@@ -38,6 +44,9 @@ Required variables are:
 
 If any required variable is missing after file loading, stop and ask the user
 for the value. Do not fall back to another project's branch or GitHub Project.
+`openspec-buddy propose --no-issue` is the local-only exception: require only
+`OPENSPEC_BUDDY_BASE_BRANCH` to keep the change aligned with the intended local
+base, and do not block that mode on GitHub Project fields.
 On first use in a project, ask for these basic values, generate
 `.env.openspec-buddy`, then rerun the config check:
 
@@ -133,8 +142,8 @@ When a complex issue is decomposed, the original issue is no longer an executabl
 
 ### propose
 
-Use when the user wants to create a new local OpenSpec change and register the
-matching GitHub Issue before implementation.
+Use when the user wants to create a new local OpenSpec change and, by default,
+register the matching GitHub Issue before implementation.
 
 Steps:
 
@@ -144,23 +153,30 @@ Steps:
    same `change_id` for the OpenSpec change, the issue metadata, and the future
    claim branch. If `openspec-propose` cannot create that path or produces a
    different change id, stop and resolve the mismatch before touching GitHub.
-3. Prepare an issue body from `references/issue-template.md`, using the local
+3. If the user invoked `openspec-buddy propose --no-issue`, stop after the
+   local OpenSpec change exists. Record that the change is intentionally local
+   only, without creating or updating any GitHub Issue, claim branch, parent or
+   dependency link, Project item, or Buddy coordination label. Report the local
+   `openspec/changes/<change_id>` path and note that `openspec-buddy-auto` may
+   execute it later as a no-issue local run. In this path, require
+   `OPENSPEC_BUDDY_BASE_BRANCH` but do not require GitHub Project fields.
+4. Prepare an issue body from `references/issue-template.md`, using the local
    OpenSpec proposal as the source of the goal, scope, tasks, and acceptance
    criteria.
-4. In issue front matter, keep empty list fields as `[]`, but write every
+5. In issue front matter, keep empty list fields as `[]`, but write every
    non-empty `depends_on`, `blocked_by`, or `blocking` field as a YAML block
    list. Do not use inline lists such as `[other-change]`; the metadata parser
    rejects those so dependency metadata cannot be misread.
-5. Set `claim_branch: <change_id>`.
-6. Set `base_branch` to `$OPENSPEC_BUDDY_BASE_BRANCH`. Do not create new Buddy
+6. Set `claim_branch: <change_id>`.
+7. Set `base_branch` to `$OPENSPEC_BUDDY_BASE_BRANCH`. Do not create new Buddy
    issues against `$OPENSPEC_BUDDY_RELEASE_BRANCH`; release from the Buddy base
    branch to the release branch is a manual action unless the project
    explicitly configures otherwise.
-7. Validate the prepared body before creating or updating the issue:
+8. Validate the prepared body before creating or updating the issue:
    ```bash
    <openspec-buddy-skill-dir>/scripts/parse-issue-metadata.mjs <issue-body-file>
    ```
-8. Add all applicable coordination labels by default:
+9. Add all applicable coordination labels by default:
    - `status:ready`
    - `type:change`
    - `level:<level>` when the project uses level labels or the user supplied one
@@ -169,24 +185,24 @@ Steps:
    - `risk:<low|medium|high>`
    - `mode:<isolated|fixed-branch|stacked|docs-only>`
    - `coupling:<coupling_group>` when `coupling_group` is not `none`
-9. Before creating the issue, verify every planned label exists in the target
+10. Before creating the issue, verify every planned label exists in the target
    repository with `gh label list`. If a required Buddy label such as
    `status:ready`, `type:change`, `area:<area>`, `series:<series>`,
    `risk:<risk>`, or `mode:<mode>` is missing, create the missing label or stop
    and report the exact missing label. Do not silently omit labels or substitute
    a different risk/area/series/mode label without saying so in the final
    retrospective. Re-run the label check after creating any missing label.
-10. Create the issue with `gh issue create`.
-11. If this is a planned series, create or identify the series parent issue, then link the child issue:
+11. Create the issue with `gh issue create`.
+12. If this is a planned series, create or identify the series parent issue, then link the child issue:
    ```bash
    <openspec-buddy-skill-dir>/scripts/create-series-parent.sh <series>
    <openspec-buddy-skill-dir>/scripts/link-issue-parent.sh <parent-issue> <child-issue>
    ```
-12. If this issue depends on another change issue, link the native relationship:
+13. If this issue depends on another change issue, link the native relationship:
    ```bash
    <openspec-buddy-skill-dir>/scripts/link-issue-dependencies.sh <blocked-issue> <blocking-issue>
    ```
-13. Add the created issue to the default GitHub Project:
+14. Add the created issue to the default GitHub Project:
    ```bash
    <openspec-buddy-skill-dir>/scripts/add-issue-to-project.sh <issue-url>
    ```
@@ -194,7 +210,7 @@ Steps:
    registered until labels, parent/dependency relationships, Project membership,
    and Project `Status` have all been applied or explicitly reported as already
    present.
-14. Verify parent and dependency relationships with the batch verifier before
+15. Verify parent and dependency relationships with the batch verifier before
    reporting registration complete:
    ```bash
    <openspec-buddy-skill-dir>/scripts/verify-issue-relationships.sh --require-parent <parent-issue> <child-issue>...
@@ -215,7 +231,9 @@ Steps:
    relationship verification; only inspect GraphQL manually when the helper
    fails and the failure itself is under investigation.
 
-Do not claim the issue or implement in `propose`.
+Default `propose` creates the GitHub Issue. `openspec-buddy propose --no-issue`
+is the only local-only exception. Do not claim the issue or implement in
+`propose`.
 
 ### apply
 

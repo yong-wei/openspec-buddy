@@ -15,12 +15,33 @@ function normalizeLabels(labels) {
 }
 
 function normalizeActiveChanges(activeChanges) {
-  return new Set(
-    (activeChanges || []).map((entry) => {
-      if (typeof entry === "string") return entry;
-      return entry.change_id || entry.name || entry.id;
-    }).filter(Boolean),
-  );
+  const ids = new Set();
+  const entries = new Map();
+  const localOnly = [];
+
+  for (const entry of activeChanges || []) {
+    const normalized = typeof entry === "string"
+      ? { change_id: entry }
+      : { ...entry, change_id: entry.change_id || entry.name || entry.id };
+
+    if (!normalized.change_id) continue;
+    ids.add(normalized.change_id);
+    entries.set(normalized.change_id, normalized);
+
+    if (isLocalOnlyChange(normalized)) {
+      localOnly.push(normalized);
+    }
+  }
+
+  return { ids, entries, localOnly };
+}
+
+function isLocalOnlyChange(entry) {
+  if (!entry || typeof entry === "string") return false;
+  if (entry.no_issue === true || entry.noIssue === true) return true;
+  if (entry.issue === false) return true;
+  const coordination = String(entry.coordination || "").toLowerCase();
+  return coordination === "local" || coordination === "no-issue" || coordination === "no_issue";
 }
 
 function parseMetadata(issue) {
@@ -46,6 +67,24 @@ function parseMetadata(issue) {
   const result = { metadata: JSON.parse(parsed.stdout) };
   metadataCache.set(issue.number, result);
   return result;
+}
+
+function extractChangeIdHint(issue) {
+  if (!issue?.body) return "";
+
+  const metadataSections = [
+    issue.body.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/),
+    issue.body.match(/<!--\s*openspec-buddy\s*\r?\n([\s\S]*?)\r?\n\s*-->/),
+  ].filter(Boolean);
+
+  for (const section of metadataSections) {
+    const changeIdMatch = section[1].match(/^\s*change_id:\s*(.+)\s*$/m);
+    if (changeIdMatch) {
+      return String(changeIdMatch[1]).trim().replace(/^['"]|['"]$/g, "");
+    }
+  }
+
+  return "";
 }
 
 function relationshipNodes(issue, field) {
@@ -97,11 +136,17 @@ function transitiveBlockingCount(candidate, issuesByNumber) {
   return seen.size;
 }
 
-const activeChanges = normalizeActiveChanges(input.activeChanges);
+const activeState = normalizeActiveChanges(input.activeChanges);
+const activeChanges = activeState.ids;
 const issues = input.issues || [];
 const issuesByNumber = new Map(issues.map((issue) => [issue.number, issue]));
 const issuesByChange = new Map();
+const issueHintsByChange = new Map();
 for (const issue of issues) {
+  const hintedChangeId = extractChangeIdHint(issue);
+  if (hintedChangeId) {
+    issueHintsByChange.set(hintedChangeId, issue);
+  }
   const parsed = parseMetadata(issue);
   if (parsed.metadata?.change_id) {
     issuesByChange.set(parsed.metadata.change_id, issue);
@@ -194,6 +239,40 @@ scored.sort((left, right) => {
 });
 
 if (scored.length === 0) {
+  const localOnlyCandidates = activeState.localOnly.filter((entry) => !issueHintsByChange.has(entry.change_id));
+  if (localOnlyCandidates.length > 0) {
+    const localScored = localOnlyCandidates.map((entry) => ({
+      entry,
+      sameSeriesScore: currentSeries && entry.series === currentSeries ? 1 : 0,
+      riskScore: riskRank(entry.risk),
+    }));
+
+    localScored.sort((left, right) => (
+      right.sameSeriesScore - left.sameSeriesScore ||
+      left.riskScore - right.riskScore ||
+      String(left.entry.change_id).localeCompare(String(right.entry.change_id))
+    ));
+
+    const winner = localScored[0];
+    process.stdout.write(`${JSON.stringify({
+      selected: {
+        number: null,
+        title: winner.entry.title || winner.entry.change_id,
+        url: null,
+        change_id: winner.entry.change_id,
+        claim_branch: null,
+        series: winner.entry.series || "",
+        risk: winner.entry.risk || "medium",
+        blocking_count: 0,
+        same_series: Boolean(winner.sameSeriesScore),
+        local_only: true,
+        no_issue: true,
+      },
+      rejected,
+    }, null, 2)}\n`);
+    process.exit(0);
+  }
+
   process.stdout.write(`${JSON.stringify({ selected: null, reason: "No executable OpenSpec Buddy issue.", rejected }, null, 2)}\n`);
   process.exit(0);
 }

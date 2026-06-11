@@ -1,17 +1,22 @@
 ---
 name: openspec-buddy-auto
-description: Use when the user asks to automatically process GitHub Issue-backed OpenSpec changes end to end, including selecting executable changes, claiming work, implementing, opening PRs, handling review loops, merging, archiving, or iterating through all available changes.
+description: Use when the user asks to automatically process GitHub Issue-backed or explicitly local-only OpenSpec changes end to end, including selecting executable changes, claiming work, implementing, opening PRs, handling review loops, merging, archiving, or iterating through all available changes.
 compatibility: Requires openspec CLI, GitHub CLI, OpenSpec Buddy, and a foreground shell wait for review pauses.
 ---
 
 # OpenSpec Buddy Auto
 
-OpenSpec Buddy Auto is the high-permission execution layer for GitHub-tracked OpenSpec changes.
-It orchestrates one claimed issue from intake to merged, archived result. It does not replace `openspec-buddy`; it calls `openspec-buddy` for issue, claim, branch, and archive state.
+OpenSpec Buddy Auto is the high-permission execution layer for OpenSpec changes.
+Its default path is GitHub-tracked, but it must also recognize explicitly
+local-only changes created through `openspec-buddy propose --no-issue`. It does
+not replace `openspec-buddy`; it calls `openspec-buddy` for issue, claim,
+branch, and archive state when GitHub coordination exists.
 
 ## When To Use
 
-Use this skill only when the user explicitly asks to auto-run OpenSpec Buddy changes, process the next executable change, or iterate through all available changes in goal mode.
+Use this skill only when the user explicitly asks to auto-run OpenSpec Buddy
+changes, process the next executable change, or iterate through all available
+changes in goal mode.
 
 Do not use for ordinary `openspec-propose`, manual `openspec-apply-change`, or isolated PR review tasks.
 
@@ -37,9 +42,20 @@ Resolve `<openspec-buddy-skill-dir>` to the directory containing
 `openspec-buddy/SKILL.md`; do not paste the placeholder literally.
 
 On first use in a project, follow OpenSpec Buddy's core first-run configuration
-protocol. If auto mode is requested and `OPENSPEC_BUDDY_PR_REVIEW_REQUEST` is
-still missing, ask the user for the review request string and append it to
-`.env.openspec-buddy` before continuing.
+protocol. If GitHub-backed auto mode is requested and
+`OPENSPEC_BUDDY_PR_REVIEW_REQUEST` is still missing, ask the user for the
+review request string and append it to `.env.openspec-buddy` before
+continuing. Do not require that variable for the combined local-only
+`openspec-buddy propose --no-issue` plus `openspec-buddy-auto --no-pr` path.
+
+The local-only path is narrower. When the selected change is an explicit
+`openspec-buddy propose --no-issue` change and the user also requested
+`openspec-buddy-auto --no-pr`, do not block on GitHub Project fields or
+`OPENSPEC_BUDDY_PR_REVIEW_REQUEST`. That path still needs
+`OPENSPEC_BUDDY_BASE_BRANCH`, but it does not create GitHub issue, Project, or
+review state.
+If the selected change is GitHub issue-backed, `--no-pr` is not a valid escape
+hatch: keep the normal PR, review, and issue/project synchronization flow.
 
 ## One-Change Run
 
@@ -50,18 +66,26 @@ still missing, ask the user for the review request string and append it to
    must not switch branches; it succeeds only when current `HEAD` matches
    `origin/$OPENSPEC_BUDDY_BASE_BRANCH`, unless the current branch itself is the
    base branch and can be fast-forwarded.
-3. Run `openspec-buddy claim` for the user-specified issue, or with no issue number to select the smallest claimable open issue.
-4. Re-read the claimed issue. If the claim adopted an ordinary open issue, classify it immediately:
+3. Check whether the user explicitly pointed to a local-only change, or whether
+   selection over `openspec list --json` produces an active change explicitly
+   marked for local-only coordination.
+4. If selection returns a local-only active change that was created through
+   `openspec-buddy propose --no-issue`, skip `claim`, GitHub Project mutation,
+   and issue-state synchronization. Execute the change entirely in the local
+   repository: implement, verify, archive, and finish on the configured Buddy
+   base branch with no GitHub Issue.
+5. Otherwise run `openspec-buddy claim` for the user-specified issue, or with no issue number to select the smallest claimable open issue.
+6. Re-read the claimed issue. If the claim adopted an ordinary open issue, classify it immediately:
    - Simple issue: create or confirm the matching local OpenSpec change and continue.
    - Complex issue: create child change issues, link them, convert the source issue to a tracking parent, then stop this iteration or claim the first child in the next iteration.
-5. For an already prepared Buddy issue with an active OpenSpec change, use `references/selection-rules.md` only after claim to decide whether it is executable now. Relationship-aware selection must ignore series parent issues, skip issues with open `blockedBy`, prefer the current series when one is already in progress, and prefer issues that unblock downstream changes.
-6. Continue the `openspec-buddy apply` flow for the claimed executable issue:
+7. For an already prepared Buddy issue with an active OpenSpec change, use `references/selection-rules.md` only after claim to decide whether it is executable now. Relationship-aware selection must ignore series parent issues, skip issues with open `blockedBy`, prefer the current series when one is already in progress, and prefer issues that unblock downstream changes.
+8. Continue the `openspec-buddy apply` flow for the claimed executable issue:
    - verify the linked issue Development branch and remote branch lock
    - switch to branch `<change_id>`
    - set Project `Start`
    - set issue status to `status:in-progress`
    - set Project `Status` to `In Progress`
-7. Implement with the relevant OpenSpec and superpowers skills:
+9. Implement with the relevant OpenSpec and superpowers skills:
    - `openspec-apply-change`
    - `superpowers:test-driven-development` when adding behavior
    - `superpowers:systematic-debugging` when failures occur
@@ -69,7 +93,7 @@ still missing, ask the user for the review request string and append it to
    - `superpowers:requesting-code-review` before or after PR creation when applicable
    Before opening a PR, `openspec instructions apply --change <change_id> --json`
    must report `remaining: 0`; finish or explicitly reconcile incomplete tasks first.
-8. Pre-archive the completed OpenSpec change on the claim branch before the implementation commit:
+10. Pre-archive the completed OpenSpec change on the claim branch before the implementation commit:
    - if a delta spec introduces a capability whose main spec does not exist,
      create `openspec/specs/<capability>/spec.md` with `## Purpose` and
      `## Requirements` before archiving
@@ -81,16 +105,26 @@ still missing, ask the user for the review request string and append it to
      before the PR merges
    The implementation PR must include code, tests, completed tasks, synced main
    specs, and `openspec/changes/archive/YYYY-MM-DD-<change_id>/`.
-9. Commit, push, and open a ready PR against `$OPENSPEC_BUDDY_BASE_BRANCH`.
-   Do not hand-write the PR Development link; the metadata helper applies the
-   configured policy.
-10. Call `openspec-buddy/scripts/mark-review.sh <issue-number> <pr-url>`.
+11. Commit, push, and open a ready PR against `$OPENSPEC_BUDDY_BASE_BRANCH`.
+    Do not hand-write the PR Development link; the metadata helper applies the
+    configured policy.
+    If the user invoked `openspec-buddy-auto --no-pr` for a selected local-only
+    `openspec-buddy propose --no-issue` change, do not push, do not open
+    a Pull Request, and do not create any GitHub review state. Instead run a
+    local review pass in the same repository, address findings, rerun the full
+    verification commands, and merge or fast-forward the verified result onto
+    `$OPENSPEC_BUDDY_BASE_BRANCH` locally. In that mode, stop the GitHub flow
+    here: do not call `mark-review.sh`, `wait-for-review-clear.sh`,
+    `verify-review-clear.sh`, `mark-achieved.sh`, or any other PR/issue helper
+    that requires a GitHub record. If the selected change is GitHub issue-backed,
+    do not use `--no-pr`; keep the normal GitHub-backed flow.
+12. GitHub-backed path only: call `openspec-buddy/scripts/mark-review.sh <issue-number> <pr-url>`.
     Auto mode must not reimplement PR metadata or review-request logic; the
     Buddy helper configures PR labels, assignees, Project state, origin issue,
     Development-link policy, posts `OPENSPEC_BUDDY_PR_REVIEW_REQUEST`, verifies
     coordination, and then marks the issue `status:in-review`.
     The Project `Status` must remain `In Progress`.
-11. Wait for the configured reviewer in the same foreground workflow by running
+13. GitHub-backed path only: wait for the configured reviewer in the same foreground workflow by running
     `openspec-buddy/scripts/wait-for-review-clear.sh <pr-url>` as the single
     blocking wait command. The helper sleeps for the initial wait window
     (default 300 seconds), then checks every poll window (default 120 seconds)
@@ -99,14 +133,18 @@ still missing, ask the user for the review request string and append it to
     inspect files, send progress updates, or perform unrelated work. Do not use
     Codex automations, heartbeats, reminders, or background monitors for this
     wait. The helper may silently perform its own low-frequency GitHub checks.
-12. Check PR review, unresolved threads, requested changes, CI, mergeability, labels, Project membership, and origin issue traceability. Before any merge, run `openspec-buddy/scripts/verify-review-clear.sh <pr-url>` unless `wait-for-review-clear.sh` already returned a successful clearance record for the current head; do not infer review clearance from `gh pr view --comments`. If either helper passes by using a top-level PR clear comment, read the clear comment excerpt and URL printed by the helper output and treat that returned excerpt as the human judgment record; do not make a second, text-only `gh pr view --comments` judgment.
-13. If new actionable review exists, including `P0`, `P1`, or `P2`, use `github:gh-address-comments` and `superpowers:receiving-code-review`, then push fixes or document the verified non-actionable rationale. Before resolving any review thread, reply in that thread with the fix or non-actionable rationale and evidence; then resolve the thread and repeat from step 11.
+14. GitHub-backed path only: check PR review, unresolved threads, requested changes, CI, mergeability, labels, Project membership, and origin issue traceability. Before any merge, run `openspec-buddy/scripts/verify-review-clear.sh <pr-url>` unless `wait-for-review-clear.sh` already returned a successful clearance record for the current head; do not infer review clearance from `gh pr view --comments`. If either helper passes by using a top-level PR clear comment, read the clear comment excerpt and URL printed by the helper output and treat that returned excerpt as the human judgment record; do not make a second, text-only `gh pr view --comments` judgment.
+15. GitHub-backed path only: if new actionable review exists, including `P0`, `P1`, or `P2`, use `github:gh-address-comments` and `superpowers:receiving-code-review`, then push fixes or document the verified non-actionable rationale. Before resolving any review thread, reply in that thread with the fix or non-actionable rationale and evidence; then resolve the thread and repeat from step 13.
     If review feedback changes requirements, tasks, or specs, edit the archived
     change files and synced main specs in the same PR; do not restore the
     active `openspec/changes/<change_id>/` directory.
-14. If no new review appears for the configured number of quiet checks, `verify-review-clear.sh` passes, and checks are green, merge the PR without deleting the branch yet. If `verify-review-clear.sh` confirms the configured reviewer explicitly says there are no actionable findings, no significant issues, or no major problems for the current-head review cycle, and all merge gates pass, it may be merged without waiting for the remaining quiet checks.
-15. Fast-forward the claim branch to `origin/$OPENSPEC_BUDDY_BASE_BRANCH`.
-16. Run the post-merge achievement sync:
+16. GitHub-backed path only: if no new review appears for the configured number of quiet checks, `verify-review-clear.sh` passes, and checks are green, merge the PR without deleting the branch yet. If `verify-review-clear.sh` confirms the configured reviewer explicitly says there are no actionable findings, no significant issues, or no major problems for the current-head review cycle, and all merge gates pass, it may be merged without waiting for the remaining quiet checks.
+    In `openspec-buddy-auto --no-pr` mode for a selected local-only change,
+    replace this with a local review gate:
+    obtain a high-reasoning review in-process, fix every actionable finding,
+    rerun verification, and only then merge locally without opening a PR.
+17. GitHub-backed path only: fast-forward the claim branch to `origin/$OPENSPEC_BUDDY_BASE_BRANCH`.
+18. GitHub-backed path only: run the post-merge achievement sync:
     - verify the merged PR contains `openspec/changes/archive/YYYY-MM-DD-<change_id>/`
       and synced main specs
     - read the archived `tasks.md` and require no unchecked tasks
@@ -117,9 +155,9 @@ still missing, ask the user for the review request string and append it to
     If the archived issue belongs to a series parent and all sibling changes are
     also archived, finalize the parent issue as `status:archived`, Project
     `Status: Done`, Project `End` set, and closed.
-17. Delete the local and remote claim branch.
-18. Return to the coordination branch and fast-forward it to `$OPENSPEC_BUDDY_BASE_BRANCH`.
-19. Write an execution retrospective before final reporting.
+19. GitHub-backed path only: delete the local and remote claim branch.
+20. Return to the coordination branch and fast-forward it to `$OPENSPEC_BUDDY_BASE_BRANCH`.
+21. Write an execution retrospective before final reporting.
 
 ## Goal Mode
 
@@ -127,6 +165,7 @@ When the user asks to process all available changes, repeat one-change runs with
 
 - Claim only one issue per iteration.
 - If no issue is specified, every iteration starts with the smallest currently claimable open issue. Do not keep using a cached issue list after another agent may have claimed work.
+- If a local-only `--no-issue` change is selected, process it before asking GitHub for another issue and report that the iteration had no issue number.
 - After every merge and post-merge issue sync, fetch `origin/$OPENSPEC_BUDDY_BASE_BRANCH` and recalculate executable changes.
 - If the previous iteration completed a series issue, prefer the same series until no issue in that series is executable.
 - Skip `status:blocked`, `status:claimed`, `status:in-progress`, `status:stale-claim`, `status:needs-human`, and `status:failed`.
@@ -147,6 +186,10 @@ max_elapsed_hours: 24
 If the limit is reached, set the issue to `status:needs-human`, comment with the evidence, and stop. Do not merge by exhaustion.
 
 ## Merge Gates
+
+These GitHub merge gates apply only when a PR exists. In `openspec-buddy-auto
+--no-pr` mode, require an equivalent local review-and-verification pass and do
+not open a PR.
 
 Do not merge unless all are true:
 

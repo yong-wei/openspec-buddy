@@ -4,9 +4,10 @@ Recalculate candidates at the start of every iteration.
 
 ## Candidate Source
 
-`openspec-buddy claim` is the first action. If the user supplies an issue
-number, claim that issue. If not, select the smallest claimable open issue
-number and claim it before doing deeper exploration or decomposition.
+For GitHub-coordinated changes, `openspec-buddy claim` is the first action. If
+the user supplies an issue number, claim that issue. If not, select the
+smallest claimable open issue number and claim it before doing deeper
+exploration or decomposition.
 
 For ordinary open issues, use:
 
@@ -70,6 +71,27 @@ origin/<claim_branch> does not exist
 depends_on entries are not active unfinished OpenSpec changes
 same coupling_group has no claimed or in-progress issue
 ```
+
+## Local-Only Prepared Change Source
+
+If `openspec list --json` returns an active change explicitly marked as local
+only, such as `no_issue: true`, `noIssue: true`, `issue: false`, or
+`coordination: local`, treat it as a no-issue candidate. This path exists only
+for changes intentionally created by `openspec-buddy propose --no-issue`.
+
+For local-only changes:
+
+- evaluate this path before any GitHub claim step
+- do not call `claim`
+- do not require GitHub issue metadata, labels, Project membership, or branch locks
+- do not synthesize a placeholder issue
+- prefer the current series when that metadata exists locally
+- fall back to local-only selection only when no executable issue-backed change
+  is ready or when the user explicitly asked for the local-only change
+
+The selector wrapper must preserve structured `openspec list --json` entries
+instead of collapsing every active change to a plain string, otherwise the
+no-issue marker is lost before selection.
 
 If any condition is unclear, mark the issue `status:blocked` or `status:needs-human` with a comment rather than guessing.
 

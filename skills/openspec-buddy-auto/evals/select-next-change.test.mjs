@@ -134,4 +134,80 @@ const baseInput = {
   assert.match(result.rejected[0].reason, /base_branch must be develop/);
 }
 
+{
+  const result = runSelector({
+    activeChanges: [
+      {
+        change_id: "local-only-refactor",
+        no_issue: true,
+        series: "local",
+        risk: "low",
+      },
+    ],
+    issues: [],
+  });
+  assert.equal(result.selected.change_id, "local-only-refactor");
+  assert.equal(result.selected.number, null);
+  assert.equal(result.selected.local_only, true);
+}
+
+{
+  const result = runSelector({
+    activeChanges: [
+      { change_id: "local-no-issue-flag", noIssue: true, series: "local", risk: "low" },
+      { change_id: "local-issue-false", issue: false, series: "local", risk: "low" },
+      { change_id: "local-coordination", coordination: "local", series: "local", risk: "low" },
+    ],
+    issues: [],
+  });
+  assert.equal(result.selected.local_only, true);
+  assert.match(result.selected.change_id, /^local-/);
+}
+
+{
+  const result = runSelector({
+    activeChanges: [
+      {
+        change_id: "local-only-refactor",
+        no_issue: true,
+        series: "local",
+        risk: "low",
+      },
+    ],
+    issues: [
+      {
+        number: 21,
+        title: "Broken metadata issue",
+        state: "OPEN",
+        url: "https://github.example.test/issues/21",
+        labels: [{ name: "status:ready" }],
+        body: `---
+change_id: local-only-refactor
+claim_branch:
+---`,
+        blockedBy: { nodes: [] },
+        blocking: { nodes: [] },
+      },
+    ],
+  });
+  assert.equal(result.selected, null);
+  assert.match(result.reason, /No executable/);
+}
+
+{
+  const result = runSelector({
+    activeChanges: [
+      {
+        change_id: "unknown-issue-marker",
+        issue: null,
+        series: "local",
+        risk: "low",
+      },
+    ],
+    issues: [],
+  });
+  assert.equal(result.selected, null);
+  assert.match(result.reason, /No executable/);
+}
+
 console.log("select-next-change tests passed");

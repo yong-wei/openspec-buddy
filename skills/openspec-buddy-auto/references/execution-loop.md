@@ -18,8 +18,9 @@ is dirty or the current `HEAD` is not aligned with the base branch.
 
 ## Claim
 
-Use `openspec-buddy claim [issue-number]`. If no issue number is supplied, it
-must select the smallest claimable open issue number. The claim must create:
+For GitHub-coordinated changes, use `openspec-buddy claim [issue-number]`. If
+no issue number is supplied, it must select the smallest claimable open issue
+number. The claim must create:
 
 ```text
 origin/<change_id>
@@ -36,6 +37,13 @@ mirror issue just to preserve the original request. Classify it before
 switching branches. Simple issues continue as one executable change. Complex
 issues are split into child issues; the source issue becomes a tracking parent
 only after the children exist and are linked.
+
+If selection returns a local-only change created through
+`openspec-buddy propose --no-issue`, take that branch before any GitHub claim
+step. Skip claim entirely. There is no GitHub Issue, no Development branch
+link, no Project item, and no remote branch lock in this path. Execute and
+archive the change locally on `$OPENSPEC_BUDDY_BASE_BRANCH` or a local topic
+branch derived from it.
 
 Then switch to `<change_id>` for a simple or prepared change and mark
 `status:in-progress`; the Project `Status` must remain `In Progress`.
@@ -117,6 +125,15 @@ not silently continue with an untracked or unreviewed PR.
 
 Call `mark-review.sh` only after OpenSpec task progress is `complete == total`;
 otherwise finish or reconcile the local tasks first.
+
+If the user invoked `openspec-buddy-auto --no-pr`, stop before any `gh pr`
+operation. Run local review and verification only, fix findings in the same
+branch, and merge locally onto `$OPENSPEC_BUDDY_BASE_BRANCH` without opening a
+PR. In this mode, skip `mark-review.sh`, `wait-for-review-clear.sh`,
+`verify-review-clear.sh`, and `mark-achieved.sh` because no GitHub review or
+issue state exists. This exception applies only to a selected local-only change
+created through `openspec-buddy propose --no-issue`; issue-backed changes keep
+the standard PR and issue synchronization flow.
 
 ## Merge And Achieve
 

@@ -14,6 +14,12 @@
       "files": []
     },
     {
+      "id": 5,
+      "prompt": "openspec-buddy propose --no-issue：先在本地创建一个不走 GitHub 的变更。",
+      "expected_output": "生成或确认 change_id，至少确认 OPENSPEC_BUDDY_BASE_BRANCH，调用 openspec-propose 创建本地 OpenSpec change，确认本地路径为 openspec/changes/<change_id>；这是显式 no-issue 路径，不创建 GitHub Issue，不写 Buddy issue metadata，不建立 claim_branch、Project item、父子关系或 blockedBy/blocking 依赖，也不要求 GitHub Project 配置字段，只报告本地 change 路径，并说明后续可由 openspec-buddy-auto 作为无 issue 变更在本地执行。",
+      "files": []
+    },
+    {
       "id": 2,
       "prompt": "openspec-buddy apply #123：开始实现这个 OpenSpec change。",
       "expected_output": "先调用 sync-base-branch.sh 校验当前 worktree 与 origin/Buddy base branch 对齐；只有当前分支就是 Buddy base branch 时才允许快进，worktree/topic 分支不得被切换或自动快进；再读取并校验 Issue metadata、labels 和 GitHub blockedBy 关系，拒绝 parent issue 与仍被阻塞的 issue，检查耦合组、claim_branch；若 issue 是 status:ready，则通过 gh issue develop 创建 issue Development 分支链接、远端同名分支锁和结构化 claim comment 抢占，并同步 Project Status 为 In Progress 与 Start 日期；若已由当前用户 status:claimed，则校验 assignee、Development 分支、远端分支锁和 claim comment 后继续；claim 校验失败时停止，不修改代码。",
