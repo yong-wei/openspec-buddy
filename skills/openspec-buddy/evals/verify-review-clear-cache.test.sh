@@ -25,28 +25,26 @@ cat > "$cache_dir/review-comments-123.json" <<'JSON'
 []
 JSON
 
-cat > "$tmp_dir/gh" <<'EOF'
-#!/bin/bash
-set -euo pipefail
-printf '%s\n' "$*" >> "$GH_LOG_FILE"
-if [[ "$1" == "api" && "$2" == "graphql" ]]; then
-  cat <<'JSON'
+cat > "$tmp_dir/gh-env.sh" <<'EOF'
+gh() {
+  printf '%s\n' "$*" >> "$GH_LOG_FILE"
+  if [[ "$1" == "api" && "$2" == "graphql" ]]; then
+    cat <<'JSON'
 {"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}
 JSON
-  exit 0
-fi
-if [[ "$1" == "api" && "$2" == "rate_limit" ]]; then
-  cat <<'JSON'
+    return 0
+  fi
+  if [[ "$1" == "api" && "$2" == "rate_limit" ]]; then
+    cat <<'JSON'
 {"remaining":1000,"resetAt":"2026-06-12T00:30:00Z"}
 JSON
-  exit 0
-fi
-echo "unexpected gh call: $*" >&2
-exit 99
+    return 0
+  fi
+  echo "unexpected gh call: $*" >&2
+  return 99
+}
+export -f gh
 EOF
-chmod +x "$tmp_dir/gh"
-
-export PATH="$tmp_dir:$PATH"
 export GH_LOG_FILE="$tmp_dir/gh.log"
 export OPENSPEC_BUDDY_BASE_BRANCH=integration
 export OPENSPEC_BUDDY_RELEASE_BRANCH=main
@@ -56,7 +54,7 @@ export OPENSPEC_BUDDY_PROJECT_TITLE=Repo
 export OPENSPEC_BUDDY_PR_REVIEW_REQUEST="@codex review 中文回复，即使没有重大问题也必须给出显式回复"
 export OPENSPEC_BUDDY_GH_CACHE_DIR="$cache_dir"
 
-output="$("$helper" 123)"
+output="$(BASH_ENV="$tmp_dir/gh-env.sh" bash "$helper" 123)"
 
 if [[ "$output" != *'Review clearance verified for PR #123'* ]]; then
   echo "expected verify-review-clear success output" >&2
@@ -77,29 +75,29 @@ fi
 cat > "$cache_dir/review-threads-123.json" <<'JSON'
 {"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}
 JSON
-cat > "$tmp_dir/gh" <<'EOF'
-#!/bin/bash
-set -euo pipefail
-printf '%s\n' "$*" >> "$GH_LOG_FILE"
-if [[ "$1" == "api" && "$2" == "graphql" ]]; then
-  cat <<'JSON'
+cat > "$tmp_dir/gh-env.sh" <<'EOF'
+gh() {
+  printf '%s\n' "$*" >> "$GH_LOG_FILE"
+  if [[ "$1" == "api" && "$2" == "graphql" ]]; then
+    cat <<'JSON'
 {"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"isResolved":false,"path":"src/demo.js","line":12,"comments":{"nodes":[{"author":{"login":"chatgpt-codex-connector"},"body":"P1: still broken","url":"https://example.test/thread"}]}}]}}}}}
 JSON
-  exit 0
-fi
-if [[ "$1" == "api" && "$2" == "rate_limit" ]]; then
-  cat <<'JSON'
+    return 0
+  fi
+  if [[ "$1" == "api" && "$2" == "rate_limit" ]]; then
+    cat <<'JSON'
 {"remaining":1000,"resetAt":"2026-06-12T00:30:00Z"}
 JSON
-  exit 0
-fi
-echo "unexpected gh call: $*" >&2
-exit 99
+    return 0
+  fi
+  echo "unexpected gh call: $*" >&2
+  return 99
+}
+export -f gh
 EOF
-chmod +x "$tmp_dir/gh"
 
 set +e
-"$helper" 123 >"$tmp_dir/stale-out.txt" 2>"$tmp_dir/stale-err.txt"
+BASH_ENV="$tmp_dir/gh-env.sh" bash "$helper" 123 >"$tmp_dir/stale-out.txt" 2>"$tmp_dir/stale-err.txt"
 stale_status="$?"
 set -e
 
