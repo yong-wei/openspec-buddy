@@ -62,6 +62,7 @@ output="$(
   env -i \
     PATH="$stub_bin:$PATH" \
     HOME="$HOME" \
+    OPENSPEC_BUDDY_GH_CACHE_DIR="$tmp_dir/cache-local-only" \
     OPENSPEC_BUDDY_BASE_BRANCH=integration \
     bash "$selector"
 )"
@@ -80,6 +81,7 @@ output_with_core="$(
   env -i \
     PATH="$stub_bin:$PATH" \
     HOME="$HOME" \
+    OPENSPEC_BUDDY_GH_CACHE_DIR="$tmp_dir/cache-local-only-with-core" \
     OPENSPEC_BUDDY_BASE_BRANCH=integration \
     OPENSPEC_BUDDY_RELEASE_BRANCH=main \
     OPENSPEC_BUDDY_PROJECT_OWNER=example \
@@ -98,6 +100,7 @@ mixed_stdout="$(
   env -i \
     PATH="$stub_bin:$PATH" \
     HOME="$HOME" \
+    OPENSPEC_BUDDY_GH_CACHE_DIR="$tmp_dir/cache-mixed" \
     OPEN_SPEC_MODE=mixed \
     OPENSPEC_BUDDY_BASE_BRANCH=integration \
     OPENSPEC_BUDDY_RELEASE_BRANCH=main \

@@ -9,6 +9,7 @@ fi
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/load-config.sh"
+source "$script_dir/github-fetch.sh"
 openspec_buddy_require_core_config
 "$script_dir/sync-base-branch.sh"
 tmp_dir="$(mktemp -d)"
@@ -56,26 +57,18 @@ if node -e 'const fs=require("fs"); const issue=JSON.parse(fs.readFileSync(proce
   exit 1
 fi
 
-issue_id="$(node -e 'const fs=require("fs"); const issue=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(issue.id);' "$issue_file")"
+repo_nwo="$(buddy_repo_nwo)"
+owner="${repo_nwo%%/*}"
+repo_name="${repo_nwo#*/}"
 blocked_by_file="$tmp_dir/blocked-by.json"
-gh api graphql \
-  -f query='
-query($id: ID!) {
-  node(id: $id) {
-    ... on Issue {
-      blockedBy(first: 40) {
-        nodes { number title state labels(first: 40) { nodes { name } } }
-      }
-    }
-  }
-}' \
-  -f id="$issue_id" > "$blocked_by_file"
+buddy_issue_relationships_graphql "$owner" "$repo_name" "$issue_number" > "$blocked_by_file"
 
 if ! node -e '
 const fs = require("fs");
 const data = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-const blockers = data.data.node.blockedBy.nodes.filter((issue) => {
-  const labels = issue.labels.nodes.map((label) => label.name.replace(/^status:\s+/, "status:"));
+const issue = Array.isArray(data) ? data[0] : null;
+const blockers = (issue?.blockedBy?.nodes || []).filter((issue) => {
+  const labels = (issue.labels?.nodes || []).map((label) => label.name.replace(/^status:\s+/, "status:"));
   return issue.state !== "CLOSED" && !labels.includes("status:archived") && !labels.includes("status:merged");
 });
 if (blockers.length > 0) {

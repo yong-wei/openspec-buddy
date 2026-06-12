@@ -9,31 +9,23 @@ fi
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/load-config.sh"
+source "$script_dir/github-fetch.sh"
 openspec_buddy_require_core_config
 
 project_owner="$OPENSPEC_BUDDY_PROJECT_OWNER"
 project_number="$OPENSPEC_BUDDY_PROJECT_NUMBER"
 project_title="$OPENSPEC_BUDDY_PROJECT_TITLE"
 
-tmp_file="$(mktemp)"
-trap 'rm -f "$tmp_file"' EXIT
+tmp_dir="$(mktemp -d)"
+trap 'rm -rf "$tmp_dir"' EXIT
+cache_dir="$(buddy_cache_dir)"
+subject_file="$tmp_dir/issue.json"
 
-gh project item-list "$project_number" \
-  --owner "$project_owner" \
-  --format json \
-  --limit 200 > "$tmp_file"
+buddy_issue_json "$issue_url" "$cache_dir" "$subject_file"
+existing_id="$(buddy_project_item_id_from_subject_file "$subject_file" "$project_title")"
+existing_present="$(buddy_project_item_present_in_subject_file "$subject_file" "$project_title")"
 
-existing_id="$(
-  node -e '
-const fs = require("fs");
-const data = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-const issueUrl = process.argv[2];
-const item = (data.items || []).find((entry) => entry.content && entry.content.url === issueUrl);
-if (item) process.stdout.write(item.id);
-' "$tmp_file" "$issue_url"
-)"
-
-if [[ -n "$existing_id" ]]; then
+if [[ -n "$existing_id" || "$existing_present" == "1" ]]; then
   printf 'Issue already present in project "%s": %s\n' "$project_title" "$existing_id"
   "$script_dir/set-project-status.sh" "$issue_url" "status:ready"
   exit 0
@@ -48,4 +40,7 @@ item_id="$(
 )"
 
 printf 'Added issue to project "%s": %s\n' "$project_title" "$item_id"
+buddy_invalidate_cache "$(buddy_cache_path project project "$cache_dir")"
+issue_number="$(node -e 'const fs=require("node:fs"); const subject=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(String(subject.number || ""));' "$subject_file")"
+[[ -n "$issue_number" ]] && buddy_invalidate_cache "$(buddy_cache_path issue "$issue_number" "$cache_dir")"
 "$script_dir/set-project-status.sh" "$issue_url" "status:ready"

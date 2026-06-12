@@ -20,31 +20,35 @@ fi
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/load-config.sh"
+source "$script_dir/github-fetch.sh"
 openspec_buddy_require_core_config
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
+cache_dir="$(buddy_cache_dir)"
 
 project_owner="$OPENSPEC_BUDDY_PROJECT_OWNER"
 project_number="$OPENSPEC_BUDDY_PROJECT_NUMBER"
 project_title="$OPENSPEC_BUDDY_PROJECT_TITLE"
 development_link_mode="$OPENSPEC_BUDDY_PR_DEVELOPMENT_LINK_MODE"
+pr_cache_file=""
+pr_mutated=0
 
 issue_file="$tmp_dir/issue.json"
 pr_file="$tmp_dir/pr.json"
-project_file="$tmp_dir/project.json"
 labels_file="$tmp_dir/labels.txt"
 pr_label_file="$tmp_dir/pr-labels.txt"
 body_file="$tmp_dir/body.md"
 development_link_file="$tmp_dir/development-link.json"
 
-gh issue view "$issue_number" --json id,number,url,labels,assignees,projectItems,body > "$issue_file"
-gh pr view "$pr_ref" --json id,number,url,body,baseRefName,labels,isDraft > "$pr_file"
+buddy_issue_json "$issue_number" "$cache_dir" "$issue_file"
+buddy_pr_json "$pr_ref" "$cache_dir" "$pr_file"
 
 issue_url="$(node -e 'const fs=require("fs"); const issue=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(issue.url);' "$issue_file")"
 pr_url="$(node -e 'const fs=require("fs"); const pr=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(pr.url);' "$pr_file")"
 pr_number="$(node -e 'const fs=require("fs"); const pr=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(String(pr.number));' "$pr_file")"
-repo_nwo="$(gh repo view --json nameWithOwner --jq '.nameWithOwner')"
-default_branch="$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name')"
+repo_nwo="$(buddy_repo_nwo)"
+default_branch="$(buddy_repo_default_branch "$cache_dir")"
+pr_cache_file="$(buddy_cache_path pr "$pr_number" "$cache_dir")"
 
 node "$script_dir/build-pr-labels.mjs" "$issue_file" "$pr_file" "$labels_file" "$pr_label_file"
 
@@ -83,6 +87,7 @@ if [[ -s "$labels_file" ]]; then
     gh api "repos/$repo_nwo/issues/$pr_number/labels" \
       -X POST \
       --input "$labels_json_file" >/dev/null
+    pr_mutated=1
   fi
 fi
 
@@ -102,56 +107,41 @@ if [[ -s "$assignees_file" ]]; then
     while IFS= read -r assignee; do
       [[ -z "$assignee" ]] && continue
       gh pr edit "$pr_ref" --add-assignee "$assignee" >/dev/null
+      pr_mutated=1
     done < "$assignees_file"
   fi
 else
   echo "Issue #$issue_number has no assignee to mirror onto PR $pr_url." >&2
 fi
 
-gh project item-list "$project_number" \
-  --owner "$project_owner" \
-  --format json \
-  --limit 1000 > "$project_file"
+issue_project_item="$(buddy_project_item_id_from_subject_file "$issue_file" "$project_title")"
+issue_project_present="$(buddy_project_item_present_in_subject_file "$issue_file" "$project_title")"
 
-issue_project_item="$(
-  node -e '
-const fs = require("fs");
-const data = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-const url = process.argv[2];
-const item = (data.items || []).find((entry) => entry.content && entry.content.url === url);
-if (item) process.stdout.write(item.id);
-' "$project_file" "$issue_url"
-)"
-
-if [[ -z "$issue_project_item" ]]; then
+if [[ -z "$issue_project_item" && "$issue_project_present" != "1" ]]; then
   echo "Issue #$issue_number is not in project \"$project_title\"; cannot add PR to the same project." >&2
   exit 1
 fi
 
-pr_project_item="$(
-  node -e '
-const fs = require("fs");
-const data = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-const url = process.argv[2];
-const item = (data.items || []).find((entry) => entry.content && entry.content.url === url);
-if (item) process.stdout.write(item.id);
-' "$project_file" "$pr_url"
-)"
+pr_project_item="$(buddy_project_item_id_from_subject_file "$pr_file" "$project_title")"
+pr_project_present="$(buddy_project_item_present_in_subject_file "$pr_file" "$project_title")"
 
 if [[ "$dry_run" == "1" ]]; then
-  if [[ -n "$pr_project_item" ]]; then
+  if [[ -n "$pr_project_item" || "$pr_project_present" == "1" ]]; then
     printf '[dry-run] PR already present in project "%s": %s\n' "$project_title" "$pr_project_item"
   else
     printf '[dry-run] add PR to project "%s": %s\n' "$project_title" "$pr_url"
   fi
   printf '[dry-run] set PR project Status to In Progress\n'
 else
-  if [[ -z "$pr_project_item" ]]; then
+  if [[ -z "$pr_project_item" && "$pr_project_present" != "1" ]]; then
     gh project item-add "$project_number" \
       --owner "$project_owner" \
       --url "$pr_url" \
       --format json \
       --jq '.id' >/dev/null
+    buddy_invalidate_cache "$(buddy_cache_path project project "$cache_dir")"
+    buddy_invalidate_cache "$(buddy_cache_path pr "$pr_number" "$cache_dir")"
+    pr_mutated=1
   fi
   "$script_dir/set-project-status.sh" "$pr_url" "status:in-review"
 fi
@@ -174,6 +164,7 @@ fs.writeFileSync(process.argv[2], JSON.stringify({ body }));
     gh api "repos/$repo_nwo/pulls/$pr_number" \
       -X PATCH \
       --input "$body_json_file" >/dev/null
+    pr_mutated=1
   fi
 elif [[ "$body_status" == "2" ]]; then
   printf 'PR body already records origin issue #%s.\n' "$issue_number"
@@ -197,6 +188,10 @@ if [[ "$link_mode" == "keyword" && "$dry_run" != "1" ]]; then
   fi
 elif [[ "$link_mode" == "manual" ]]; then
   echo "PR Development link requires manual GitHub sidebar linking because this PR does not target the repository default branch." >&2
+fi
+
+if [[ "$pr_mutated" == "1" ]]; then
+  buddy_invalidate_cache "$pr_cache_file"
 fi
 
 printf 'Configured PR metadata for %s from issue #%s.\n' "$pr_url" "$issue_number"

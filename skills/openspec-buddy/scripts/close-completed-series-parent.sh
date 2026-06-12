@@ -20,7 +20,7 @@ repo_nwo="$(buddy_repo_nwo)"
 
 issue_id="$(gh issue view -R "$repo_nwo" "$issue_ref" --json id --jq '.id')"
 
-gh api graphql \
+buddy_graphql_api \
   -f id="$issue_id" \
   -f query='
 query($id: ID!) {
@@ -64,7 +64,7 @@ if [[ -z "$parent_id" ]]; then
   exit 0
 fi
 
-gh api graphql \
+buddy_graphql_api \
   -f id="$parent_id" \
   -f query='
 query($id: ID!) {

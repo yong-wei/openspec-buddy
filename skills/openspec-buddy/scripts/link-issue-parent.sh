@@ -14,6 +14,7 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=./github-fetch.sh
 source "$script_dir/github-fetch.sh"
 repo_nwo="$(buddy_repo_nwo)"
+cache_dir="$(buddy_cache_dir)"
 
 parent_json="$(gh issue view -R "$repo_nwo" "$parent_ref" --json id,number,url)"
 child_json="$(gh issue view -R "$repo_nwo" "$child_ref" --json id,number,url)"
@@ -22,7 +23,7 @@ child_id="$(node -e 'const data=JSON.parse(process.argv[1]); process.stdout.writ
 parent_number="$(node -e 'const data=JSON.parse(process.argv[1]); process.stdout.write(String(data.number));' "$parent_json")"
 child_number="$(node -e 'const data=JSON.parse(process.argv[1]); process.stdout.write(String(data.number));' "$child_json")"
 
-gh api graphql \
+buddy_graphql_api \
   -f query='
 mutation($parent: ID!, $child: ID!, $replaceParent: Boolean!) {
   addSubIssue(input: {issueId: $parent, subIssueId: $child, replaceParent: $replaceParent}) {
@@ -34,5 +35,12 @@ mutation($parent: ID!, $child: ID!, $replaceParent: Boolean!) {
   -f child="$child_id" \
   -F replaceParent="$replace_parent" \
   --jq '.data.addSubIssue | "Linked issue #\(.subIssue.number) to parent #\(.issue.number)."'
+
+if [[ "$replace_parent" == "true" ]]; then
+  buddy_invalidate_all_relationship_cache "$cache_dir"
+else
+  buddy_invalidate_issue_relationship_cache "$cache_dir" "$parent_number" "$child_number"
+  buddy_invalidate_ready_scan_cache "$cache_dir"
+fi
 
 printf 'Parent relationship confirmed: #%s -> #%s\n' "$parent_number" "$child_number"

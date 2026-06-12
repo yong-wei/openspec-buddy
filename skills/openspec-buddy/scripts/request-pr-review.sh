@@ -19,6 +19,7 @@ fi
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/load-config.sh"
+source "$script_dir/github-fetch.sh"
 openspec_buddy_require_core_config
 
 review_request="${OPENSPEC_BUDDY_PR_REVIEW_REQUEST:-}"
@@ -28,7 +29,6 @@ if [[ -z "$review_request" ]]; then
 fi
 
 command_timeout="${OPENSPEC_BUDDY_REVIEW_COMMAND_TIMEOUT_SECONDS:-60}"
-verify_helper="${OPENSPEC_BUDDY_VERIFY_REVIEW_CLEAR_HELPER:-$script_dir/verify-review-clear.sh}"
 
 if ! [[ "$command_timeout" =~ ^[0-9]+$ ]]; then
   echo "OPENSPEC_BUDDY_REVIEW_COMMAND_TIMEOUT_SECONDS must be a non-negative integer." >&2
@@ -41,43 +41,6 @@ run_with_timeout() {
   else
     "$@"
   fi
-}
-
-is_waitable_review_failure() {
-  local output="$1"
-  if grep -E 'unresolved review thread|contains P[0-2]|requested changes|Latest COMMENTED review .*not an explicit' <<<"$output" >/dev/null; then
-    return 1
-  fi
-  if grep -E 'No review found|no .*review request comment after the current head|top-level clear comment exists|targets .*,? not current head' <<<"$output" >/dev/null; then
-    return 0
-  fi
-  return 1
-}
-
-run_review_request_gate() {
-  local output_file
-  output_file="$(mktemp)"
-  local status
-  if run_with_timeout "$verify_helper" "$pr_ref" > "$output_file" 2>&1; then
-    cat "$output_file"
-    rm -f "$output_file"
-    return 0
-  fi
-  status="$?"
-
-  local output
-  output="$(cat "$output_file")"
-  rm -f "$output_file"
-  if [[ "$status" -eq 124 ]]; then
-    echo "Review request gate timed out after ${command_timeout}s while checking existing review state." >&2
-    return 2
-  fi
-  if is_waitable_review_failure "$output"; then
-    return 1
-  fi
-
-  printf '%s\n' "$output" >&2
-  return 2
 }
 
 resolve_pr_number() {
@@ -93,39 +56,24 @@ resolve_pr_number() {
   return 1
 }
 
-resolve_repo_nwo() {
-  local remote_url
-  remote_url="$(git remote get-url origin 2>/dev/null || true)"
-  if [[ "$remote_url" == git@github.com:* ]]; then
-    remote_url="${remote_url#git@github.com:}"
-    printf '%s\n' "${remote_url%.git}"
-    return 0
-  fi
-  if [[ "$remote_url" == https://github.com/* ]]; then
-    remote_url="${remote_url#https://github.com/}"
-    printf '%s\n' "${remote_url%.git}"
-    return 0
-  fi
-  return 1
+cache_dir="$(buddy_cache_dir)"
+repo_nwo="$(buddy_repo_nwo)"
+pr_number="$(resolve_pr_number "$pr_ref")" || {
+  echo "Could not resolve pull request number from: $pr_ref" >&2
+  exit 1
 }
 
-load_pr_json() {
-  local parsed_pr_number
-  local repo_nwo
-  if parsed_pr_number="$(resolve_pr_number "$pr_ref")" && repo_nwo="$(resolve_repo_nwo)"; then
-    local tmp_dir
-    tmp_dir="$(mktemp -d)"
-    run_with_timeout gh api "repos/$repo_nwo/pulls/$parsed_pr_number" > "$tmp_dir/pr.json"
-    run_with_timeout gh api "repos/$repo_nwo/pulls/$parsed_pr_number/commits?per_page=100" > "$tmp_dir/commits.json"
-    run_with_timeout gh api "repos/$repo_nwo/issues/$parsed_pr_number/comments?per_page=100" > "$tmp_dir/comments.json"
-    node -e '
+OPENSPEC_BUDDY_CACHE_REFRESH=1 buddy_pr_rest_bundle "$repo_nwo" "$pr_number" "$cache_dir"
+pr_json_file="$(mktemp)"
+trap 'rm -f "$pr_json_file"' EXIT
+node -e '
 const fs = require("node:fs");
 const [prFile, commitsFile, commentsFile] = process.argv.slice(1);
 const pr = JSON.parse(fs.readFileSync(prFile, "utf8"));
 const commits = JSON.parse(fs.readFileSync(commitsFile, "utf8"));
 const comments = JSON.parse(fs.readFileSync(commentsFile, "utf8"));
 const output = {
-  headRefOid: pr.head?.sha || "",
+  headRefOid: pr.head?.sha || pr.headRefOid || "",
   commits: Array.isArray(commits)
     ? commits.map((commit) => ({
         oid: commit.sha,
@@ -141,30 +89,7 @@ const output = {
     : [],
 };
 process.stdout.write(JSON.stringify(output));
-' "$tmp_dir/pr.json" "$tmp_dir/commits.json" "$tmp_dir/comments.json"
-    rm -rf "$tmp_dir"
-    return 0
-  fi
-
-  run_with_timeout gh pr view "$pr_ref" --json comments,commits,headRefOid 2>/dev/null || true
-}
-
-set +e
-run_review_request_gate
-gate_status="$?"
-set -e
-if [[ "$gate_status" -eq 0 ]]; then
-  printf 'PR review already clear for %s; no review request added.\n' "$pr_ref"
-  exit 0
-fi
-if [[ "$gate_status" -eq 2 ]]; then
-  exit 1
-fi
-
-pr_json="$(load_pr_json)"
-pr_json_file="$(mktemp)"
-trap 'rm -f "$pr_json_file"' EXIT
-printf '%s\n' "$pr_json" > "$pr_json_file"
+' "$BUDDY_PR_REST_FILE" "$BUDDY_COMMITS_FILE" "$BUDDY_ISSUE_COMMENTS_FILE" > "$pr_json_file"
 request_state="$(
   node -e '
 const fs = require("node:fs");
@@ -219,5 +144,6 @@ if [[ "$dry_run" == "1" ]]; then
   printf '[dry-run] add PR review request to %s: %s\n' "$pr_ref" "$review_request"
 else
   run_with_timeout gh pr comment "$pr_ref" --body "$review_request" >/dev/null
+  buddy_invalidate_cache "$(buddy_cache_path pr "$pr_number" "$cache_dir")"
   printf 'PR review request added to %s.\n' "$pr_ref"
 fi

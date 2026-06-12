@@ -9,13 +9,14 @@ fi
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/load-config.sh"
+source "$script_dir/github-fetch.sh"
 openspec_buddy_require_core_config
 
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
 query_thread() {
-  gh api graphql \
+  buddy_graphql_api \
     -f query='
 query($threadId: ID!) {
   node(id: $threadId) {
@@ -70,7 +71,7 @@ if [[ "$before_resolved" == "true" ]]; then
 fi
 
 mutation_file="$tmp_dir/resolve-mutation.json"
-gh api graphql \
+buddy_graphql_api \
   -f query='
 mutation($threadId: ID!) {
   resolveReviewThread(input: { threadId: $threadId }) {

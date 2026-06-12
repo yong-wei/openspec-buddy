@@ -44,6 +44,10 @@ printf '%s\n' \
   '  cat "${GH_THREADS_FILE:?}"' \
   '  exit 0' \
   'fi' \
+  'if [[ "$1" == "api" && "$2" == "rate_limit" ]]; then' \
+  '  printf "%s\n" "{\"remaining\":1000,\"resetAt\":\"2026-06-12T00:30:00Z\"}"' \
+  '  exit 0' \
+  'fi' \
   'echo "unexpected gh invocation: $*" >&2' \
   'exit 99' \
   > "$tmp_dir/gh"

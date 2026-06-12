@@ -11,6 +11,13 @@ owner="${repo%%/*}"
 name="${repo#*/}"
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
+cache_dir="$(buddy_cache_dir)"
+scan_cache_file="$(buddy_open_ready_scan_cache_file "$cache_dir" "$limit")"
+
+if ! buddy_cache_is_stale "$scan_cache_file" "$buddy_ready_scan_cache_ttl_seconds"; then
+  buddy_cache_tool data "$scan_cache_file"
+  exit 0
+fi
 
 issues_file="$tmp_dir/issues.json"
 candidate_numbers_file="$tmp_dir/candidate-numbers.txt"
@@ -60,6 +67,7 @@ else
   printf '[]\n' > "$relationships_file"
 fi
 
+merged_file="$tmp_dir/merged.json"
 node -e '
 const fs = require("node:fs");
 const issues = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
@@ -76,4 +84,7 @@ const merged = issues.map((issue) => {
   return next;
 });
 process.stdout.write(`${JSON.stringify({ issues: merged }, null, 2)}\n`);
-' "$issues_file" "$candidate_bodies_file" "$relationships_file"
+' "$issues_file" "$candidate_bodies_file" "$relationships_file" > "$merged_file"
+
+buddy_cache_set_from_file "$scan_cache_file" rest relationship "ready-scan-limit-$limit" "$merged_file"
+cat "$merged_file"

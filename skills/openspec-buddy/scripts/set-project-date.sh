@@ -22,6 +22,7 @@ fi
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/load-config.sh"
+source "$script_dir/github-fetch.sh"
 openspec_buddy_require_core_config
 
 project_owner="$OPENSPEC_BUDDY_PROJECT_OWNER"
@@ -35,64 +36,43 @@ fi
 
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
+cache_dir="$(buddy_cache_dir)"
 
-if [[ "$issue_ref" == http://* || "$issue_ref" == https://* ]]; then
-  issue_url="$issue_ref"
-else
-  issue_url="$(gh issue view "$issue_ref" --json url --jq '.url')"
-fi
-
+subject_file="$tmp_dir/subject.json"
 project_file="$tmp_dir/project.json"
-fields_file="$tmp_dir/fields.json"
-items_file="$tmp_dir/items.json"
 
-gh project view "$project_number" \
-  --owner "$project_owner" \
-  --format json > "$project_file"
+buddy_subject_json "$issue_ref" "$cache_dir" "$subject_file"
+buddy_project_metadata_json "$cache_dir" "$project_file"
 
-project_id="$(node -e '
-const fs = require("fs");
-const project = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-process.stdout.write(project.id || "");
-' "$project_file")"
+issue_url="$(node -e 'const fs=require("node:fs"); const subject=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(subject.url || "");' "$subject_file")"
+project_id="$(node -e 'const fs=require("node:fs"); const project=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(project.id || "");' "$project_file")"
 
 if [[ -z "$project_id" ]]; then
   echo "Could not resolve project id for \"$project_title\"." >&2
   exit 1
 fi
 
-gh project field-list "$project_number" \
-  --owner "$project_owner" \
-  --format json \
-  --limit 100 > "$fields_file"
-
 field_id="$(node -e '
-const fs = require("fs");
-const data = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+const fs = require("node:fs");
+const project = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
 const fieldName = process.argv[2];
-const field = (data.fields || []).find((entry) => entry.name === fieldName && entry.type === "ProjectV2Field");
-if (field) process.stdout.write(field.id);
-' "$fields_file" "$field_name")"
+const field = project.dateFields?.[fieldName];
+if (field?.id) process.stdout.write(field.id);
+' "$project_file" "$field_name")"
 
 if [[ -z "$field_id" ]]; then
   echo "Could not resolve Project date field \"$field_name\"." >&2
   exit 1
 fi
 
-gh project item-list "$project_number" \
-  --owner "$project_owner" \
-  --format json \
-  --limit 200 > "$items_file"
-
-item_id="$(node -e '
-const fs = require("fs");
-const data = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-const issueUrl = process.argv[2];
-const item = (data.items || []).find((entry) => entry.content && entry.content.url === issueUrl);
-if (item) process.stdout.write(item.id);
-' "$items_file" "$issue_url")"
+item_id="$(buddy_project_item_id_from_subject_file "$subject_file" "$project_title")"
+item_present="$(buddy_project_item_present_in_subject_file "$subject_file" "$project_title")"
 
 if [[ -z "$item_id" ]]; then
+  if [[ "$item_present" == "1" ]]; then
+    echo "Target is already in project \"$project_title\", but gh subject metadata does not expose an editable project item id." >&2
+    exit 1
+  fi
   item_id="$(
     gh project item-add "$project_number" \
       --owner "$project_owner" \
@@ -100,6 +80,8 @@ if [[ -z "$item_id" ]]; then
       --format json \
       --jq '.id'
   )"
+  buddy_invalidate_cache "$(buddy_cache_path project project "$cache_dir")"
+  buddy_invalidate_subject_cache_from_file "$subject_file" "$cache_dir"
 fi
 
 gh project item-edit \
@@ -109,5 +91,7 @@ gh project item-edit \
   --date "$date_value" \
   --format json \
   --jq '.id' >/dev/null
+
+buddy_invalidate_subject_cache_from_file "$subject_file" "$cache_dir"
 
 printf 'Project "%s" %s set to "%s" for %s.\n' "$project_title" "$field_name" "$date_value" "$issue_url"

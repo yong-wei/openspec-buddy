@@ -13,6 +13,11 @@ case "$1 $2" in
   "repo view")
     printf 'owner/repo\n'
     ;;
+  "api rate_limit")
+    cat <<'JSON'
+{"remaining":1000,"resetAt":"2026-06-12T00:30:00Z"}
+JSON
+    ;;
   "api graphql")
     printf 'api graphql\n' >> "$GH_CALL_LOG"
     previous=''
@@ -37,6 +42,7 @@ chmod +x "$tmp_dir/gh"
 export PATH="$tmp_dir:$PATH"
 export GH_CALL_LOG="$tmp_dir/gh-calls.log"
 export GH_QUERY_FILE="$tmp_dir/query.graphql"
+export OPENSPEC_BUDDY_GH_CACHE_DIR="$tmp_dir/cache"
 
 output="$("$repo_root/skills/openspec-buddy/scripts/verify-issue-relationships.sh" --require-parent 100 101 101)"
 [[ "$output" == "Issue relationships verified." ]]
@@ -58,6 +64,11 @@ set -euo pipefail
 case "$1 $2" in
   "repo view")
     printf 'owner/repo\n'
+    ;;
+  "api rate_limit")
+    cat <<'JSON'
+{"remaining":1000,"resetAt":"2026-06-12T00:30:00Z"}
+JSON
     ;;
   "api graphql")
     printf 'api graphql\n' >> "$GH_CALL_LOG"
@@ -102,6 +113,7 @@ EOF
 chmod +x "$tmp_dir/gh"
 : > "$GH_CALL_LOG"
 : > "$GH_QUERY_FILE"
+export OPENSPEC_BUDDY_GH_CACHE_DIR="$tmp_dir/cache-batch"
 
 refs=()
 for number in $(seq 1 30); do
@@ -124,6 +136,100 @@ fi
 
 if grep -q 'issue25: issue(number: 26)' "$GH_QUERY_FILE"; then
   echo "expected first batch to stop at 25 issues" >&2
+  exit 1
+fi
+
+cat > "$tmp_dir/gh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+case "$1 $2" in
+  "repo view")
+    printf 'owner/repo\n'
+    ;;
+  "api rate_limit")
+    printf '%s\n' '{"remaining":0,"resetAt":"2026-06-12T00:30:00Z"}'
+    ;;
+  "api graphql")
+    echo "graphql should not run when remaining quota is below threshold" >&2
+    exit 99
+    ;;
+  *)
+    echo "unexpected gh command: $*" >&2
+    exit 1
+    ;;
+esac
+EOF
+chmod +x "$tmp_dir/gh"
+: > "$GH_CALL_LOG"
+: > "$GH_QUERY_FILE"
+export OPENSPEC_BUDDY_GH_CACHE_DIR="$tmp_dir/cache-low-budget"
+
+set +e
+"$repo_root/skills/openspec-buddy/scripts/verify-issue-relationships.sh" 1 >"$tmp_dir/low-budget.out" 2>"$tmp_dir/low-budget.err"
+low_budget_status="$?"
+set -e
+
+if [[ "$low_budget_status" -eq 0 ]]; then
+  echo "expected low GraphQL budget to fail before executing graphql" >&2
+  exit 1
+fi
+
+if ! grep -E 'below (threshold|required minimum)' "$tmp_dir/low-budget.err" >/dev/null; then
+  echo "expected low GraphQL budget diagnostic" >&2
+  cat "$tmp_dir/low-budget.err" >&2
+  exit 1
+fi
+
+if grep -F 'api graphql' "$GH_CALL_LOG" >/dev/null; then
+  echo "GraphQL should not execute when budget guard fails" >&2
+  exit 1
+fi
+
+cat > "$tmp_dir/gh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+case "$1 $2" in
+  "repo view")
+    printf 'owner/repo\n'
+    ;;
+  "api rate_limit")
+    printf '%s\n' '{"remaining":300,"resetAt":"2026-06-12T00:30:00Z"}'
+    ;;
+  "api graphql")
+    echo "graphql should not run when remaining quota cannot cover all GraphQL batches" >&2
+    exit 99
+    ;;
+  *)
+    echo "unexpected gh command: $*" >&2
+    exit 1
+    ;;
+esac
+EOF
+chmod +x "$tmp_dir/gh"
+: > "$GH_CALL_LOG"
+: > "$GH_QUERY_FILE"
+export OPENSPEC_BUDDY_GH_CACHE_DIR="$tmp_dir/cache-batch-low-budget"
+
+set +e
+"$repo_root/skills/openspec-buddy/scripts/verify-issue-relationships.sh" "${refs[@]}" >"$tmp_dir/batch-low-budget.out" 2>"$tmp_dir/batch-low-budget.err"
+batch_low_budget_status="$?"
+set -e
+
+if [[ "$batch_low_budget_status" -eq 0 ]]; then
+  echo "expected multi-batch GraphQL reads to fail before execution when remaining quota cannot cover all batches" >&2
+  exit 1
+fi
+
+if ! grep -F 'below required minimum 301' "$tmp_dir/batch-low-budget.err" >/dev/null; then
+  echo "expected multi-batch low GraphQL budget diagnostic" >&2
+  cat "$tmp_dir/batch-low-budget.err" >&2
+  exit 1
+fi
+
+if grep -F 'api graphql' "$GH_CALL_LOG" >/dev/null; then
+  echo "GraphQL batch reads should not execute when budget cannot cover all batches" >&2
   exit 1
 fi
 

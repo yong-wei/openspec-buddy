@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ "${1:-}" == "api" && "${2:-}" == "rate_limit" ]]; then
+  printf '{"remaining":1000,"resetAt":"2026-06-12T00:30:00Z"}\n'
+  exit 0
+fi
+
 if [[ "${1:-}" != "api" || "${2:-}" != "graphql" ]]; then
   echo "unexpected gh invocation: $*" >&2
   exit 9
