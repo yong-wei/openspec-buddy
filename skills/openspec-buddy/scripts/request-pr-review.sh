@@ -20,6 +20,8 @@ fi
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/load-config.sh"
 source "$script_dir/github-fetch.sh"
+# shellcheck source=./cache-signal.sh
+source "$script_dir/cache-signal.sh"
 openspec_buddy_require_core_config
 
 review_request="${OPENSPEC_BUDDY_PR_REVIEW_REQUEST:-}"
@@ -58,6 +60,7 @@ resolve_pr_number() {
 
 cache_dir="$(buddy_cache_dir)"
 repo_nwo="$(buddy_repo_nwo)"
+buddy_signal_apply "$cache_dir" "$repo_nwo"
 pr_number="$(resolve_pr_number "$pr_ref")" || {
   echo "Could not resolve pull request number from: $pr_ref" >&2
   exit 1
@@ -145,5 +148,9 @@ if [[ "$dry_run" == "1" ]]; then
 else
   run_with_timeout gh pr comment "$pr_ref" --body "$review_request" >/dev/null
   buddy_invalidate_cache "$(buddy_cache_path pr "$pr_number" "$cache_dir")"
+  buddy_invalidate_pr_rest_bundle_cache "$cache_dir" "$pr_number"
+  if [[ "${OPENSPEC_BUDDY_SKIP_SIGNAL_PUBLISH:-0}" != "1" ]]; then
+    buddy_signal_publish request-pr-review "pr:$pr_number"
+  fi
   printf 'PR review request added to %s.\n' "$pr_ref"
 fi

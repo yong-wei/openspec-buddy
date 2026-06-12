@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -10,7 +10,7 @@ stub_bin="$tmp_dir/bin"
 mkdir -p "$stub_bin"
 
 cat >"$stub_bin/openspec" <<'EOF'
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 
 if [[ "${1:-}" == "list" && "${2:-}" == "--json" ]]; then
@@ -51,7 +51,7 @@ EOF
 chmod +x "$stub_bin/openspec"
 
 cat >"$stub_bin/gh" <<'EOF'
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 echo "gh should not be called in local-only mode" >&2
 exit 1

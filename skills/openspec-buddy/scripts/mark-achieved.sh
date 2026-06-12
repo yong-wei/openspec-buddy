@@ -10,7 +10,12 @@ if [[ -z "$issue_number" || -z "$archive_path" ]]; then
 fi
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-"$script_dir/set-status-label.sh" "$issue_number" "status:archived"
+source "$script_dir/github-fetch.sh"
+# shellcheck source=./cache-signal.sh
+source "$script_dir/cache-signal.sh"
+cache_dir="$(buddy_cache_dir)"
+buddy_signal_apply "$cache_dir"
+OPENSPEC_BUDDY_SKIP_SIGNAL_PUBLISH=1 "$script_dir/set-status-label.sh" "$issue_number" "status:archived"
 "$script_dir/set-project-date.sh" "$issue_number" "End" "$(date +%F)"
 
 body="OpenSpec change archived at \`$archive_path\`."
@@ -26,3 +31,12 @@ else
 fi
 
 "$script_dir/close-completed-series-parent.sh" "$issue_number"
+buddy_invalidate_issue_cache "$cache_dir" "$issue_number"
+buddy_invalidate_ready_scan_cache "$cache_dir"
+if [[ -n "$pr_url" ]]; then
+  pr_number="$(node -e 'const value=process.argv[1]; const match=String(value).match(/\/pull\/([0-9]+)/); process.stdout.write(match ? match[1] : value);' "$pr_url")"
+  buddy_invalidate_pr_cache "$cache_dir" "$pr_number"
+  buddy_signal_publish mark-achieved "issue:$issue_number" "pr:$pr_number" "ready-scan" "project"
+else
+  buddy_signal_publish mark-achieved "issue:$issue_number" "ready-scan" "project"
+fi

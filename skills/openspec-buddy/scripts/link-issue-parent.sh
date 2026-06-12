@@ -13,8 +13,11 @@ fi
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=./github-fetch.sh
 source "$script_dir/github-fetch.sh"
+# shellcheck source=./cache-signal.sh
+source "$script_dir/cache-signal.sh"
 repo_nwo="$(buddy_repo_nwo)"
 cache_dir="$(buddy_cache_dir)"
+buddy_signal_apply "$cache_dir" "$repo_nwo"
 
 parent_json="$(gh issue view -R "$repo_nwo" "$parent_ref" --json id,number,url)"
 child_json="$(gh issue view -R "$repo_nwo" "$child_ref" --json id,number,url)"
@@ -22,6 +25,18 @@ parent_id="$(node -e 'const data=JSON.parse(process.argv[1]); process.stdout.wri
 child_id="$(node -e 'const data=JSON.parse(process.argv[1]); process.stdout.write(data.id);' "$child_json")"
 parent_number="$(node -e 'const data=JSON.parse(process.argv[1]); process.stdout.write(String(data.number));' "$parent_json")"
 child_number="$(node -e 'const data=JSON.parse(process.argv[1]); process.stdout.write(String(data.number));' "$child_json")"
+old_parent_number=""
+
+if [[ "$replace_parent" == "true" ]]; then
+  owner="${repo_nwo%%/*}"
+  repo_name="${repo_nwo#*/}"
+  old_parent_number="$(buddy_issue_relationships_graphql "$owner" "$repo_name" "$child_number" | node -e '
+const fs = require("node:fs");
+const relationships = JSON.parse(fs.readFileSync(0, "utf8"));
+const issue = Array.isArray(relationships) ? relationships[0] : null;
+process.stdout.write(issue?.parent?.number ? String(issue.parent.number) : "");
+')"
+fi
 
 buddy_graphql_api \
   -f query='
@@ -36,11 +51,8 @@ mutation($parent: ID!, $child: ID!, $replaceParent: Boolean!) {
   -F replaceParent="$replace_parent" \
   --jq '.data.addSubIssue | "Linked issue #\(.subIssue.number) to parent #\(.issue.number)."'
 
-if [[ "$replace_parent" == "true" ]]; then
-  buddy_invalidate_all_relationship_cache "$cache_dir"
-else
-  buddy_invalidate_issue_relationship_cache "$cache_dir" "$parent_number" "$child_number"
-  buddy_invalidate_ready_scan_cache "$cache_dir"
-fi
+buddy_invalidate_issue_relationship_cache "$cache_dir" "$old_parent_number" "$parent_number" "$child_number"
+buddy_invalidate_ready_scan_cache "$cache_dir"
+buddy_signal_publish link-parent "relationship:issue:$parent_number" "relationship:issue:$child_number" "${old_parent_number:+relationship:issue:$old_parent_number}" "ready-scan"
 
 printf 'Parent relationship confirmed: #%s -> #%s\n' "$parent_number" "$child_number"

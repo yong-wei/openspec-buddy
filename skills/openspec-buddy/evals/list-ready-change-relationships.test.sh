@@ -1,12 +1,20 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 tmp_dir="$(mktemp -d)"
+project_root="$tmp_dir/project"
+mkdir -p "$project_root"
 trap 'rm -rf "$tmp_dir"' EXIT
 
+(
+  cd "$project_root"
+  git init -q
+  git remote add origin https://github.com/owner/repo.git
+)
+
 cat > "$tmp_dir/gh" <<'EOF'
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 
 printf '%s\n' "$*" >> "$GH_CALL_LOG"
@@ -102,6 +110,8 @@ export PATH="$tmp_dir:$PATH"
 export GH_CALL_LOG="$tmp_dir/gh.log"
 export GH_GRAPHQL_QUERY_FILE="$tmp_dir/query.graphql"
 export OPENSPEC_BUDDY_GH_CACHE_DIR="$tmp_dir/cache-first"
+export OPENSPEC_BUDDY_REPO_ROOT="$project_root"
+export OPENSPEC_BUDDY_DISABLE_SIGNAL=1
 
 output="$("$repo_root/skills/openspec-buddy/scripts/list-ready-change-relationships.sh" 50)"
 
@@ -153,7 +163,7 @@ batch_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir" "$batch_dir"' EXIT
 
 cat > "$batch_dir/gh" <<'EOF'
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 
 printf '%s\n' "$*" >> "$GH_CALL_LOG"
@@ -246,6 +256,7 @@ chmod +x "$batch_dir/gh"
 GH_CALL_LOG="$batch_dir/gh.log" \
 GH_GRAPHQL_QUERY_LOG="$batch_dir/graphql.log" \
 OPENSPEC_BUDDY_GH_CACHE_DIR="$batch_dir/cache-second" \
+OPENSPEC_BUDDY_DISABLE_SIGNAL=1 \
 PATH="$batch_dir:$PATH" \
   "$repo_root/skills/openspec-buddy/scripts/list-ready-change-relationships.sh" 100 > "$batch_dir/output.json"
 

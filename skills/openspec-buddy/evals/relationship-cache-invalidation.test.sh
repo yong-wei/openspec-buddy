@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
@@ -6,7 +6,7 @@ tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
 cat > "$tmp_dir/gh" <<'EOF'
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 
 printf '%s\n' "$*" >> "$GH_LOG_FILE"
@@ -42,6 +42,10 @@ if [[ "$1" == "issue" && "$2" == "view" ]]; then
 fi
 
 if [[ "$1" == "api" && "$2" == "graphql" ]]; then
+  if printf '%s\n' "$*" | grep -F 'issue0: issue(number: 11)' >/dev/null; then
+    printf '%s\n' '{"data":{"repository":{"issue0":{"id":"ISSUE_11","number":11,"title":"Issue 11","url":"https://github.com/owner/repo/issues/11","state":"OPEN","body":"","updatedAt":"2026-06-12T00:00:00Z","labels":{"nodes":[{"name":"status:ready"}]},"parent":{"number":9,"title":"Issue 9","url":"https://github.com/owner/repo/issues/9","state":"OPEN","updatedAt":"2026-06-12T00:00:00Z","labels":{"nodes":[{"name":"status:tracking"}]}},"subIssues":{"nodes":[]},"blockedBy":{"nodes":[]},"blocking":{"nodes":[]}}}}}'
+    exit 0
+  fi
   if printf '%s\n' "$*" | grep -F 'addBlockedBy' >/dev/null; then
     printf '%s\n' '{"data":{"addBlockedBy":{"issue":{"number":1,"url":"https://github.com/owner/repo/issues/1"},"blockingIssue":{"number":2,"url":"https://github.com/owner/repo/issues/2"}}}}'
     exit 0
@@ -70,6 +74,7 @@ printf '%s\n' '{"fetchedAt":"2026-06-12T00:00:00Z","source":"rest","repo":"owner
 export PATH="$tmp_dir:$PATH"
 export GH_LOG_FILE="$tmp_dir/gh.log"
 export OPENSPEC_BUDDY_GH_CACHE_DIR="$cache_dir"
+export OPENSPEC_BUDDY_DISABLE_SIGNAL=1
 
 "$repo_root/skills/openspec-buddy/scripts/link-issue-dependencies.sh" 1 2 >"$tmp_dir/dependencies.out"
 
@@ -105,8 +110,8 @@ if [[ -e "$cache_dir/relationships/ready-scan-limit-10.json" ]]; then
   exit 1
 fi
 
-if [[ -e "$cache_dir/relationships/issue-99.json" ]]; then
-  echo "replace-parent mutation should invalidate all relationship cache entries to avoid stale old-parent state" >&2
+if [[ ! -e "$cache_dir/relationships/issue-99.json" ]]; then
+  echo "replace-parent mutation should preserve unrelated relationship cache entries" >&2
   exit 1
 fi
 

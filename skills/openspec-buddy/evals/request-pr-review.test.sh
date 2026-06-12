@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -12,9 +12,11 @@ export OPENSPEC_BUDDY_PROJECT_OWNER=opt-de
 export OPENSPEC_BUDDY_PROJECT_NUMBER=1
 export OPENSPEC_BUDDY_PROJECT_TITLE="Major LTE"
 export OPENSPEC_BUDDY_PR_REVIEW_REQUEST="@codex review 中文回复，即使没有重大问题也必须给出显式回复"
+export OPENSPEC_BUDDY_DISABLE_SIGNAL=1
+export OPENSPEC_BUDDY_CACHE_DIR="$tmp_dir/cache"
 
 cat > "$tmp_dir/gh" <<'EOF'
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 
 printf '%s\n' "$*" >> "${GH_LOG_FILE:?}"
@@ -81,7 +83,7 @@ cat > "$tmp_dir/comments-present.json" <<JSON
 ]
 JSON
 export GH_COMMENTS_FILE="$tmp_dir/comments-present.json"
-"$helper" 123
+bash "$helper" 123
 if [[ -e "$GH_COMMENT_LOG_FILE" ]]; then
   echo "request-pr-review.sh posted a duplicate review request" >&2
   exit 1
@@ -100,11 +102,22 @@ cat > "$tmp_dir/comments-missing.json" <<JSON
 JSON
 export GH_COMMENTS_FILE="$tmp_dir/comments-missing.json"
 export GH_COMMENT_LOG_FILE="$tmp_dir/comment-missing.log"
-"$helper" 123
+bash "$helper" 123
 if ! grep -F -- "$OPENSPEC_BUDDY_PR_REVIEW_REQUEST" "$GH_COMMENT_LOG_FILE" >/dev/null; then
   echo "request-pr-review.sh did not post the configured review request" >&2
   exit 1
 fi
+for cache_file in \
+  "$OPENSPEC_BUDDY_CACHE_DIR/pr-rest-123.json" \
+  "$OPENSPEC_BUDDY_CACHE_DIR/reviews-123.json" \
+  "$OPENSPEC_BUDDY_CACHE_DIR/commits-123.json" \
+  "$OPENSPEC_BUDDY_CACHE_DIR/issue-comments-123.json" \
+  "$OPENSPEC_BUDDY_CACHE_DIR/review-comments-123.json"; do
+  if [[ -e "$cache_file" ]]; then
+    echo "request-pr-review.sh should invalidate PR REST bundle cache after posting a review request" >&2
+    exit 1
+  fi
+done
 
 cat > "$tmp_dir/pr-head-2.json" <<JSON
 {
@@ -133,10 +146,21 @@ export GH_PR_FILE="$tmp_dir/pr-head-2.json"
 export GH_COMMITS_FILE="$tmp_dir/commits-head-2.json"
 export GH_COMMENTS_FILE="$tmp_dir/comments-stale.json"
 export GH_COMMENT_LOG_FILE="$tmp_dir/comment-stale.log"
-"$helper" 123
+bash "$helper" 123
 if ! grep -F -- "$OPENSPEC_BUDDY_PR_REVIEW_REQUEST" "$GH_COMMENT_LOG_FILE" >/dev/null; then
   echo "request-pr-review.sh did not refresh a stale review request after the current head" >&2
   exit 1
 fi
+for cache_file in \
+  "$OPENSPEC_BUDDY_CACHE_DIR/pr-rest-123.json" \
+  "$OPENSPEC_BUDDY_CACHE_DIR/reviews-123.json" \
+  "$OPENSPEC_BUDDY_CACHE_DIR/commits-123.json" \
+  "$OPENSPEC_BUDDY_CACHE_DIR/issue-comments-123.json" \
+  "$OPENSPEC_BUDDY_CACHE_DIR/review-comments-123.json"; do
+  if [[ -e "$cache_file" ]]; then
+    echo "request-pr-review.sh should invalidate stale PR REST bundle cache after posting a refreshed review request" >&2
+    exit 1
+  fi
+done
 
 echo "request-pr-review tests passed"

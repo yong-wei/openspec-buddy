@@ -34,6 +34,18 @@ root before checking the process environment. Set `OPENSPEC_BUDDY_ENV_FILE` to
 use a different dotenv-style file. Non-empty process environment values override
 file values.
 
+Buddy may also read these optional internal coordination settings:
+
+- `OPENSPEC_BUDDY_CACHE_DIR`
+- `OPENSPEC_BUDDY_CACHE_SIGNAL_REF`
+- `OPENSPEC_BUDDY_CACHE_SIGNAL_REMOTE`
+
+They are cache and invalidation controls, not business truth. GitHub Issue, PR,
+Project, and review state remain the source of truth.
+`OPENSPEC_BUDDY_CACHE_SIGNAL_REMOTE` also determines which git remote is used
+to derive the canonical `owner/repo` cache identity, so it must point at the
+same GitHub remote Buddy should read and write.
+
 Default GitHub-coordinated Buddy flows require:
 
 - `OPENSPEC_BUDDY_BASE_BRANCH`

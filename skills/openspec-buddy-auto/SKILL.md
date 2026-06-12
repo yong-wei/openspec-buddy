@@ -41,6 +41,11 @@ shared loader. Auto mode additionally requires
 Resolve `<openspec-buddy-skill-dir>` to the directory containing
 `openspec-buddy/SKILL.md`; do not paste the placeholder literally.
 
+If the project explicitly shares Buddy cache state across worktrees, auto mode
+may reuse `OPENSPEC_BUDDY_CACHE_DIR` and the internal cache-signal Ref. Treat
+that layer only as a coordination accelerator. It may invalidate or reuse local
+cache, but it does not replace current GitHub review, Project, or merge truth.
+
 On first use in a project, follow OpenSpec Buddy's core first-run configuration
 protocol. If GitHub-backed auto mode is requested and
 `OPENSPEC_BUDDY_PR_REVIEW_REQUEST` is still missing, ask the user for the
@@ -240,6 +245,9 @@ Do not merge unless all are true:
   configured fallback quiet checks only when no explicit clean review record is
   available. After review gates are clear, use foreground CI waiting such as
   `gh run watch --exit-status` when checks are still running.
+- Do not treat shared cache hits or cache-signal updates as review clearance.
+  Review truth still comes from the current GitHub REST and GraphQL reads used
+  by `wait-for-review-clear.sh` and `verify-review-clear.sh`.
 - Every review-thread resolve must be preceded by a reply in that same thread. The reply must state the fix commit or the reason the thread is non-actionable, plus the verification evidence. Resolve through `openspec-buddy/scripts/resolve-review-thread.sh <thread-id>`, not a raw GraphQL mutation; the helper must independently confirm `isResolved=true` for that thread before the review loop can continue. Do not silently resolve Codex review threads.
 - Do not merge while CI is `IN_PROGRESS`, even when every review thread is resolved and the PR is mergeable.
 - OpenSpec Buddy automation targets `$OPENSPEC_BUDDY_BASE_BRANCH`, not `$OPENSPEC_BUDDY_RELEASE_BRANCH`. New changes use the configured base branch, PRs use that base branch, and pre-archived change files land through the same implementation PR. Merging the Buddy base branch to the release branch is a manual release action outside Buddy Auto unless the project configures otherwise.

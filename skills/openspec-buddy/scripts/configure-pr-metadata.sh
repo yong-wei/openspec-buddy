@@ -21,10 +21,13 @@ fi
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/load-config.sh"
 source "$script_dir/github-fetch.sh"
+# shellcheck source=./cache-signal.sh
+source "$script_dir/cache-signal.sh"
 openspec_buddy_require_core_config
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 cache_dir="$(buddy_cache_dir)"
+buddy_signal_apply "$cache_dir"
 
 project_owner="$OPENSPEC_BUDDY_PROJECT_OWNER"
 project_number="$OPENSPEC_BUDDY_PROJECT_NUMBER"
@@ -192,6 +195,9 @@ fi
 
 if [[ "$pr_mutated" == "1" ]]; then
   buddy_invalidate_cache "$pr_cache_file"
+  if [[ "${OPENSPEC_BUDDY_SKIP_SIGNAL_PUBLISH:-0}" != "1" ]]; then
+    buddy_signal_publish configure-pr-metadata "pr:$pr_number" "project"
+  fi
 fi
 
 printf 'Configured PR metadata for %s from issue #%s.\n' "$pr_url" "$issue_number"

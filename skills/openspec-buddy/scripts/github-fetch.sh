@@ -81,9 +81,67 @@ buddy_cache_set_from_file() {
   buddy_cache_tool set "$cache_file" "$source_name" "$repo_nwo" "$object_type" "$key" "$updated_at" < "$input_file" >/dev/null
 }
 
+buddy_cache_merge_from_file() {
+  local cache_file="$1"
+  local source_name="$2"
+  local object_type="$3"
+  local key="$4"
+  local input_file="$5"
+  local updated_at="${6:-}"
+  local repo_nwo
+  repo_nwo="$(buddy_repo_nwo_from_remote || true)"
+  repo_nwo="${repo_nwo:-unknown}"
+  buddy_cache_tool merge "$cache_file" "$source_name" "$repo_nwo" "$object_type" "$key" "$updated_at" < "$input_file" >/dev/null
+}
+
 buddy_invalidate_cache() {
   local cache_file="$1"
   buddy_cache_tool invalidate "$cache_file"
+}
+
+buddy_signal_state_cache_file() {
+  local cache_dir="$1"
+  buddy_cache_path signal-state state "$cache_dir"
+}
+
+buddy_signal_payload_cache_file() {
+  local cache_dir="$1"
+  buddy_cache_path signal-payload payload "$cache_dir"
+}
+
+buddy_invalidate_issue_cache() {
+  local cache_dir="$1"
+  shift
+  local issue_number
+  for issue_number in "$@"; do
+    [[ -n "$issue_number" ]] || continue
+    buddy_invalidate_cache "$(buddy_cache_path issue "$issue_number" "$cache_dir")"
+  done
+}
+
+buddy_invalidate_pr_cache() {
+  local cache_dir="$1"
+  shift
+  local pr_number
+  for pr_number in "$@"; do
+    [[ -n "$pr_number" ]] || continue
+    buddy_invalidate_cache "$(buddy_cache_path pr "$pr_number" "$cache_dir")"
+  done
+}
+
+buddy_invalidate_pr_rest_bundle_cache() {
+  local cache_dir="$1"
+  shift
+  local pr_number
+  for pr_number in "$@"; do
+    [[ -n "$pr_number" ]] || continue
+    rm -f \
+      "$cache_dir/pr-rest-${pr_number}.json" \
+      "$cache_dir/reviews-${pr_number}.json" \
+      "$cache_dir/commits-${pr_number}.json" \
+      "$cache_dir/issue-comments-${pr_number}.json" \
+      "$cache_dir/review-comments-${pr_number}.json"
+  done
 }
 
 buddy_invalidate_issue_relationship_cache() {
@@ -99,6 +157,11 @@ buddy_invalidate_issue_relationship_cache() {
 buddy_invalidate_ready_scan_cache() {
   local cache_dir="$1"
   rm -f "$cache_dir"/relationships/ready-scan-limit-*.json
+}
+
+buddy_invalidate_project_cache() {
+  local cache_dir="$1"
+  buddy_invalidate_cache "$(buddy_cache_path project project "$cache_dir")"
 }
 
 buddy_invalidate_all_relationship_cache() {
@@ -135,8 +198,12 @@ buddy_ref_cache_key() {
 }
 
 buddy_repo_nwo_from_remote() {
+  local remote_name
+  remote_name="${OPENSPEC_BUDDY_CACHE_SIGNAL_REMOTE:-origin}"
+  local repo_root
+  repo_root="$(openspec_buddy_repo_root)"
   local remote_url
-  remote_url="$(git remote get-url origin 2>/dev/null || true)"
+  remote_url="$(git -C "$repo_root" remote get-url "$remote_name" 2>/dev/null || true)"
   if [[ "$remote_url" == git@github.com:* ]]; then
     remote_url="${remote_url#git@github.com:}"
     printf '%s\n' "${remote_url%.git}"
@@ -148,6 +215,35 @@ buddy_repo_nwo_from_remote() {
     return 0
   fi
   return 1
+}
+
+buddy_relationship_neighbor_numbers() {
+  if [[ "$#" -eq 0 ]]; then
+    return 0
+  fi
+  node -e '
+const fs = require("node:fs");
+const seen = new Set();
+for (const file of process.argv.slice(1)) {
+  const relationship = JSON.parse(fs.readFileSync(file, "utf8")).data || {};
+  const numbers = [
+    relationship.number,
+    relationship.parentNumber,
+    ...(relationship.subIssueNumbers || []),
+    ...(relationship.blockedByNumbers || []),
+    ...(relationship.blockingNumbers || []),
+  ];
+  for (const value of numbers) {
+    const number = Number(value || 0);
+    if (Number.isFinite(number) && number > 0) {
+      seen.add(number);
+    }
+  }
+}
+for (const number of [...seen].sort((left, right) => left - right)) {
+  process.stdout.write(`${number}\n`);
+}
+' "$@"
 }
 
 buddy_repo_json() {
@@ -523,10 +619,10 @@ buddy_issue_relationships_query() {
         body
         updatedAt
         labels(first: 40) { nodes { name } }
-        parent { number title url state labels(first: 40) { nodes { name } } }
-        subIssues(first: 100) { nodes { number title url state labels(first: 40) { nodes { name } } } }
-        blockedBy(first: 40) { nodes { number title url state labels(first: 40) { nodes { name } } } }
-        blocking(first: 40) { nodes { number title url state labels(first: 40) { nodes { name } } } }
+        parent { number title url state updatedAt labels(first: 40) { nodes { name } } }
+        subIssues(first: 100) { nodes { number title url state updatedAt labels(first: 40) { nodes { name } } } }
+        blockedBy(first: 40) { nodes { number title url state updatedAt labels(first: 40) { nodes { name } } } }
+        blocking(first: 40) { nodes { number title url state updatedAt labels(first: 40) { nodes { name } } } }
 '
   local query='query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) {'
   local index
@@ -599,6 +695,7 @@ buddy_issue_relationships_graphql() {
 
   local cache_dir
   cache_dir="$(buddy_cache_dir)"
+  local tmp_dir=""
   local pending_numbers=()
   local number cache_file
   for number in "${numbers[@]}"; do
@@ -611,7 +708,6 @@ buddy_issue_relationships_graphql() {
   if [[ "${#pending_numbers[@]}" -gt 0 ]]; then
     local pending_call_count=$(( (${#pending_numbers[@]} + buddy_graphql_batch_size - 1) / buddy_graphql_batch_size ))
     buddy_graphql_guard_for_calls "$pending_call_count"
-    local tmp_dir
     tmp_dir="$(mktemp -d)"
     trap 'rm -rf "$tmp_dir"' RETURN
     local files=()
@@ -648,37 +744,183 @@ for (const file of files) {
 process.stdout.write(`${JSON.stringify(issues, null, 2)}\n`);
 ' "${files[@]}" > "$combined_file"
 
+    local repo_nwo
+    repo_nwo="$(buddy_cache_expected_repo)"
+
     node -e '
 const fs = require("node:fs");
+const path = require("node:path");
 const issues = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-for (const issue of issues) {
-  const file = process.argv[2].replace("__NUMBER__", String(issue.number));
-  const payload = { ...issue };
-  fs.writeFileSync(`${file}.tmp`, `${JSON.stringify(payload, null, 2)}\n`);
-}
-' "$combined_file" "$(buddy_cache_path relationship 'issue-__NUMBER__' "$cache_dir")"
+const issueTemplate = process.argv[2];
+const relationshipTemplate = process.argv[3];
+const repo = process.argv[4];
+const issuePayloads = new Map();
 
-    while IFS= read -r number; do
-      [[ -n "$number" ]] || continue
-      cache_file="$(buddy_cache_path relationship "issue-$number" "$cache_dir")"
-      local temp_payload="${cache_file}.tmp"
-      if [[ -f "$temp_payload" ]]; then
-        buddy_cache_set_from_file "$cache_file" graphql relationship "issue-$number" "$temp_payload"
-        rm -f "$temp_payload"
-      fi
-    done < <(printf '%s\n' "${pending_numbers[@]}")
+function writeJsonFileAtomic(file, value) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const tempFile = path.join(path.dirname(file), `.${path.basename(file)}.${process.pid}.${Date.now()}.tmp`);
+  fs.writeFileSync(tempFile, `${JSON.stringify(value, null, 2)}\n`);
+  fs.renameSync(tempFile, file);
+}
+
+function mergeData(baseValue, patchValue) {
+  if (Array.isArray(baseValue) && Array.isArray(patchValue)) return patchValue;
+  if (
+    baseValue &&
+    typeof baseValue === "object" &&
+    !Array.isArray(baseValue) &&
+    patchValue &&
+    typeof patchValue === "object" &&
+    !Array.isArray(patchValue)
+  ) {
+    const merged = { ...baseValue };
+    for (const [key, value] of Object.entries(patchValue)) {
+      merged[key] = key in baseValue ? mergeData(baseValue[key], value) : value;
+    }
+    return merged;
+  }
+  return patchValue;
+}
+
+function setIssueNode(node) {
+  if (!node || !node.number) return;
+  const current = issuePayloads.get(node.number) || { number: node.number };
+  issuePayloads.set(node.number, {
+    ...current,
+    ...Object.fromEntries(
+      Object.entries({
+        id: node.id,
+        number: node.number,
+        title: node.title,
+        url: node.url,
+        state: node.state,
+        body: node.body,
+        updatedAt: node.updatedAt,
+        labels: node.labels,
+      }).filter(([, value]) => value !== undefined)
+    ),
+  });
+}
+
+function nodeNumbers(list) {
+  return (Array.isArray(list) ? list : [])
+    .map((node) => Number(node?.number || 0))
+    .filter((value) => Number.isFinite(value) && value > 0);
+}
+
+for (const issue of issues) {
+  if (!issue?.number) continue;
+  setIssueNode(issue);
+  setIssueNode(issue.parent);
+  for (const field of ["subIssues", "blockedBy", "blocking"]) {
+    for (const node of issue[field]?.nodes || []) {
+      setIssueNode(node);
+    }
+  }
+
+  const relationship = {
+    number: issue.number,
+    updatedAt: issue.updatedAt || "",
+    parentNumber: issue.parent?.number || null,
+    subIssueNumbers: nodeNumbers(issue.subIssues?.nodes),
+    blockedByNumbers: nodeNumbers(issue.blockedBy?.nodes),
+    blockingNumbers: nodeNumbers(issue.blocking?.nodes),
+  };
+  const relationshipFile = relationshipTemplate.replace("__NUMBER__", String(issue.number));
+  writeJsonFileAtomic(relationshipFile, {
+    fetchedAt: new Date().toISOString(),
+    source: "graphql",
+    repo,
+    objectType: "relationship",
+    key: `issue-${issue.number}`,
+    ...(relationship.updatedAt ? { updatedAt: relationship.updatedAt } : {}),
+    data: relationship,
+  });
+}
+
+for (const [number, payload] of issuePayloads.entries()) {
+  const issueFile = issueTemplate.replace("__NUMBER__", String(number));
+  let existing = {};
+  if (fs.existsSync(issueFile)) {
+    existing = JSON.parse(fs.readFileSync(issueFile, "utf8")).data || {};
+  }
+  const merged = mergeData(existing, payload);
+  writeJsonFileAtomic(issueFile, {
+    fetchedAt: new Date().toISOString(),
+    source: "graphql",
+    repo,
+    objectType: "issue",
+    key: String(number),
+    ...(merged.updatedAt || payload.updatedAt ? { updatedAt: merged.updatedAt || payload.updatedAt } : {}),
+    data: merged,
+  });
+}
+' "$combined_file" "$(buddy_cache_path issue '__NUMBER__' "$cache_dir")" "$(buddy_cache_path relationship 'issue-__NUMBER__' "$cache_dir")" "$repo_nwo"
   fi
 
   local relationship_files=()
   for number in "${numbers[@]}"; do
     relationship_files+=("$(buddy_cache_path relationship "issue-$number" "$cache_dir")")
   done
+  local hydrate_issue_numbers=()
+  while IFS= read -r number; do
+    [[ -n "$number" ]] || continue
+    hydrate_issue_numbers+=("$number")
+  done < <(buddy_relationship_neighbor_numbers "${relationship_files[@]}")
+  if [[ "${#hydrate_issue_numbers[@]}" -gt 0 ]]; then
+    local hydrate_tmp_dir=""
+    hydrate_tmp_dir="$(mktemp -d)"
+    trap 'rm -rf "$tmp_dir" "$hydrate_tmp_dir"' RETURN
+    for number in "${hydrate_issue_numbers[@]}"; do
+      buddy_issue_json "$number" "$cache_dir" "$hydrate_tmp_dir/$number.json" >/dev/null
+    done
+  fi
   node -e '
 const fs = require("node:fs");
-const files = process.argv.slice(1);
-const issues = files.map((file) => JSON.parse(fs.readFileSync(file, "utf8")).data || {});
+const relationshipFiles = process.argv.slice(1);
+const issueCache = new Map();
+
+function loadEntry(file) {
+  return JSON.parse(fs.readFileSync(file, "utf8")).data || {};
+}
+
+function issuePath(number) {
+  return fileTemplate.replace("__NUMBER__", String(number));
+}
+
+function loadIssue(number) {
+  if (!number) return null;
+  if (issueCache.has(number)) return issueCache.get(number);
+  const file = issuePath(number);
+  if (!fs.existsSync(file)) {
+    const minimal = { number };
+    issueCache.set(number, minimal);
+    return minimal;
+  }
+  const issue = loadEntry(file);
+  issueCache.set(number, issue);
+  return issue;
+}
+
+function wrapNodes(numbers) {
+  return { nodes: numbers.map((number) => loadIssue(number)).filter(Boolean) };
+}
+
+const fileTemplate = process.argv[process.argv.length - 1];
+const files = relationshipFiles.slice(0, -1);
+const issues = files.map((file) => {
+  const relationship = loadEntry(file);
+  const self = loadIssue(relationship.number) || { number: relationship.number };
+  return {
+    ...self,
+    parent: relationship.parentNumber ? loadIssue(relationship.parentNumber) : null,
+    subIssues: wrapNodes(relationship.subIssueNumbers || []),
+    blockedBy: wrapNodes(relationship.blockedByNumbers || []),
+    blocking: wrapNodes(relationship.blockingNumbers || []),
+  };
+});
 process.stdout.write(`${JSON.stringify(issues, null, 2)}\n`);
-' "${relationship_files[@]}"
+' "${relationship_files[@]}" "$(buddy_cache_path issue '__NUMBER__' "$cache_dir")"
 }
 
 buddy_open_ready_scan_cache_file() {

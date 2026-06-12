@@ -121,6 +121,7 @@ function runVerify(prFile) {
       OPENSPEC_BUDDY_PROJECT_TITLE: 'Major LTE',
       OPENSPEC_BUDDY_PR_DEVELOPMENT_LINK_MODE: 'manual',
       OPENSPEC_BUDDY_PR_REVIEW_REQUEST: reviewRequest,
+      OPENSPEC_BUDDY_DISABLE_SIGNAL: '1',
     },
   });
 }

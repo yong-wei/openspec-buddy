@@ -10,6 +10,8 @@ fi
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/load-config.sh"
 source "$script_dir/github-fetch.sh"
+# shellcheck source=./cache-signal.sh
+source "$script_dir/cache-signal.sh"
 openspec_buddy_require_core_config
 "$script_dir/sync-base-branch.sh"
 tmp_dir="$(mktemp -d)"
@@ -41,6 +43,8 @@ if [[ "$change_id" != "$claim_branch" ]]; then
   echo "claim_branch must equal change_id." >&2
   exit 1
 fi
+
+buddy_signal_apply "$(buddy_cache_dir)"
 
 if ! gh issue develop --help >/dev/null 2>&1; then
   echo "gh issue develop is required to create the linked Development branch. Update GitHub CLI before claiming Buddy issues." >&2
@@ -123,7 +127,7 @@ viewer="$(gh api user --jq .login)"
 claim_id="$(uuidgen 2>/dev/null || node -e 'console.log(crypto.randomUUID())')"
 lease_until="$(node -e 'const hours=Number(process.env.OPENSPEC_BUDDY_CLAIM_TTL_HOURS); console.log(new Date(Date.now()+hours*3600*1000).toISOString())')"
 gh issue edit "$issue_number" --add-assignee "$viewer"
-"$script_dir/set-status-label.sh" "$issue_number" "status:claimed"
+OPENSPEC_BUDDY_SKIP_SIGNAL_PUBLISH=1 "$script_dir/set-status-label.sh" "$issue_number" "status:claimed"
 
 gh issue comment "$issue_number" --body "$(cat <<EOF
 OpenSpec Buddy Claim
@@ -150,4 +154,5 @@ if (!labels.includes("status:claimed") || !assignees.includes(viewer)) process.e
 
 created_branch_lock=""
 "$script_dir/set-project-date.sh" "$issue_number" "Start" "$(date +%F)"
+buddy_signal_publish claim "issue:$issue_number" "ready-scan" "project"
 printf 'Claimed issue #%s for change %s on branch %s with claim %s\n' "$issue_number" "$change_id" "$claim_branch" "$claim_id"

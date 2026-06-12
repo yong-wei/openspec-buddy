@@ -38,9 +38,12 @@ fi
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=./github-fetch.sh
 source "$script_dir/github-fetch.sh"
+# shellcheck source=./cache-signal.sh
+source "$script_dir/cache-signal.sh"
 repo="$(buddy_repo_nwo)"
 owner="${repo%%/*}"
 name="${repo#*/}"
+buddy_signal_apply "$(buddy_cache_dir)" "$repo"
 
 numbers=()
 seen=","

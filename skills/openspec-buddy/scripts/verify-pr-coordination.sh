@@ -12,11 +12,14 @@ fi
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/load-config.sh"
 source "$script_dir/github-fetch.sh"
+# shellcheck source=./cache-signal.sh
+source "$script_dir/cache-signal.sh"
 openspec_buddy_require_core_config
 
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 cache_dir="$(buddy_cache_dir)"
+buddy_signal_apply "$cache_dir"
 
 issue_file="$tmp_dir/issue.json"
 pr_file="$tmp_dir/pr.json"

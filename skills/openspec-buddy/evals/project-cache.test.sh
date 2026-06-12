@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
@@ -13,7 +13,7 @@ trap 'rm -rf "$tmp_dir"' EXIT
 )
 
 cat > "$tmp_dir/gh" <<'EOF'
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 
 printf '%s\n' "$*" >> "$GH_LOG_FILE"
@@ -202,6 +202,7 @@ export OPENSPEC_BUDDY_PROJECT_OWNER=owner
 export OPENSPEC_BUDDY_PROJECT_NUMBER=1
 export OPENSPEC_BUDDY_PROJECT_TITLE="Major LTE"
 export OPENSPEC_BUDDY_PR_DEVELOPMENT_LINK_MODE=manual
+export OPENSPEC_BUDDY_DISABLE_SIGNAL=1
 
 "$repo_root/skills/openspec-buddy/scripts/set-project-status.sh" 123 status:ready > "$tmp_dir/status.out"
 if ! grep -F 'Status set to "Todo"' "$tmp_dir/status.out" >/dev/null; then

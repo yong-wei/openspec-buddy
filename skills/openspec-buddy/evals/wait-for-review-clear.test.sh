@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -17,7 +17,7 @@ export OPENSPEC_BUDDY_REVIEW_POLL_SECONDS=1
 export OPENSPEC_BUDDY_REVIEW_MAX_WAIT_SECONDS=1
 
 printf '%s\n' \
-  '#!/usr/bin/env bash' \
+  '#!/bin/bash' \
   'set -euo pipefail' \
   'printf "%s\n" "$*" >> "${GH_LOG_FILE:?}"' \
   'if [[ "$1" == "api" && "$2" == */pulls/123 ]]; then' \
@@ -113,7 +113,7 @@ export GH_THREADS_FILE="$tmp_dir/threads.json"
 export GH_LOG_FILE="$tmp_dir/gh.log"
 
 printf '%s\n' \
-  '#!/usr/bin/env bash' \
+  '#!/bin/bash' \
   'set -euo pipefail' \
   'printf "%s\n" "$*" >> "${VERIFY_LOG_FILE:?}"' \
   'if [[ "${VERIFY_MODE:-clean}" == "waitable" ]]; then' \
@@ -173,7 +173,7 @@ if [[ "$wait_elapsed" -lt 2 ]]; then
 fi
 
 printf '%s\n' \
-  '#!/usr/bin/env bash' \
+  '#!/bin/bash' \
   'set -euo pipefail' \
   'sleep 2' \
   > "$tmp_dir/verify-timeout.sh"
@@ -221,7 +221,7 @@ export GH_PR_FILE="$tmp_dir/pr-head-2.json"
 export GH_COMMITS_FILE="$tmp_dir/commits-head-2.json"
 
 printf '%s\n' \
-  '#!/usr/bin/env bash' \
+  '#!/bin/bash' \
   'set -euo pipefail' \
   'count_file="${VERIFY_COUNT_FILE:?}"' \
   'count=0' \

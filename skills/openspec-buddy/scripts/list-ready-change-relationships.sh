@@ -5,6 +5,8 @@ limit="${1:-100}"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=./github-fetch.sh
 source "$script_dir/github-fetch.sh"
+# shellcheck source=./cache-signal.sh
+source "$script_dir/cache-signal.sh"
 
 repo="$(buddy_repo_nwo)"
 owner="${repo%%/*}"
@@ -12,6 +14,7 @@ name="${repo#*/}"
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 cache_dir="$(buddy_cache_dir)"
+buddy_signal_apply "$cache_dir" "$repo"
 scan_cache_file="$(buddy_open_ready_scan_cache_file "$cache_dir" "$limit")"
 
 if ! buddy_cache_is_stale "$scan_cache_file" "$buddy_ready_scan_cache_ttl_seconds"; then
@@ -60,7 +63,11 @@ else
   node -e 'process.stdout.write("{}\n")' > "$candidate_bodies_file"
 fi
 
-mapfile -t candidate_numbers < "$candidate_numbers_file"
+candidate_numbers=()
+while IFS= read -r number; do
+  [[ -n "$number" ]] || continue
+  candidate_numbers+=("$number")
+done < "$candidate_numbers_file"
 if [[ "${#candidate_numbers[@]}" -gt 0 ]]; then
   buddy_issue_relationships_graphql "$owner" "$name" "${candidate_numbers[@]}" > "$relationships_file"
 else

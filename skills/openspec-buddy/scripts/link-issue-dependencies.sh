@@ -3,7 +3,11 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/github-fetch.sh"
+# shellcheck source=./cache-signal.sh
+source "$script_dir/cache-signal.sh"
 cache_dir="$(buddy_cache_dir)"
+repo_nwo="$(buddy_repo_nwo)"
+buddy_signal_apply "$cache_dir" "$repo_nwo"
 
 if [[ "$#" -lt 2 || $(( $# % 2 )) -ne 0 ]]; then
   echo "Usage: link-issue-dependencies.sh <blocked-issue> <blocking-issue> [<blocked-issue> <blocking-issue> ...]" >&2
@@ -40,4 +44,5 @@ mutation($issue: ID!, $blockingIssue: ID!) {
 
   buddy_invalidate_issue_relationship_cache "$cache_dir" "$blocked_number" "$blocking_number"
   buddy_invalidate_ready_scan_cache "$cache_dir"
+  buddy_signal_publish link-dependency "relationship:issue:$blocked_number" "relationship:issue:$blocking_number" "ready-scan"
 done

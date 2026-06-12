@@ -11,12 +11,16 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/load-config.sh"
 # shellcheck source=./github-fetch.sh
 source "$script_dir/github-fetch.sh"
+# shellcheck source=./cache-signal.sh
+source "$script_dir/cache-signal.sh"
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
+cache_dir="$(buddy_cache_dir)"
 
 issue_file="$tmp_dir/issue.json"
 parent_file="$tmp_dir/parent.json"
 repo_nwo="$(buddy_repo_nwo)"
+buddy_signal_apply "$cache_dir" "$repo_nwo"
 
 issue_id="$(gh issue view -R "$repo_nwo" "$issue_ref" --json id --jq '.id')"
 
@@ -136,7 +140,7 @@ fi
 parent_number="$(node -e 'const data = JSON.parse(process.argv[1]); process.stdout.write(String(data.parentNumber));' "$summary")"
 body="$(node -e 'const data = JSON.parse(process.argv[1]); process.stdout.write(data.body);' "$summary")"
 
-"$script_dir/set-status-label.sh" "$parent_number" "status:archived"
+OPENSPEC_BUDDY_SKIP_SIGNAL_PUBLISH=1 "$script_dir/set-status-label.sh" "$parent_number" "status:archived"
 "$script_dir/set-project-date.sh" "$parent_number" "End" "$(date +%F)"
 
 state="$(gh issue view -R "$repo_nwo" "$parent_number" --json state --jq '.state')"
@@ -146,4 +150,7 @@ else
   gh issue comment -R "$repo_nwo" "$parent_number" --body "$body"
 fi
 
+buddy_invalidate_issue_cache "$cache_dir" "$parent_number"
+buddy_invalidate_ready_scan_cache "$cache_dir"
+buddy_signal_publish close-series-parent "issue:$parent_number" "ready-scan" "project"
 echo "Series parent #$parent_number finalized."

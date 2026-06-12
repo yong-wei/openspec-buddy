@@ -15,6 +15,8 @@ fi
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/github-fetch.sh"
+# shellcheck source=./cache-signal.sh
+source "$script_dir/cache-signal.sh"
 
 existing_statuses="$(
   gh issue view "$issue_number" --json labels \
@@ -30,6 +32,11 @@ args+=(--add-label "$target_status")
 gh "${args[@]}"
 
 cache_dir="$(buddy_cache_dir)"
-buddy_invalidate_all_relationship_cache "$cache_dir"
+buddy_invalidate_issue_cache "$cache_dir" "$issue_number"
+buddy_invalidate_ready_scan_cache "$cache_dir"
 
 "$script_dir/set-project-status.sh" "$issue_number" "$target_status"
+
+if [[ "${OPENSPEC_BUDDY_SKIP_SIGNAL_PUBLISH:-0}" != "1" ]]; then
+  buddy_signal_publish set-status "issue:$issue_number" "ready-scan" "project"
+fi

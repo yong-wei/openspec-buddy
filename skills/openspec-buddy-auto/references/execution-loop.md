@@ -16,6 +16,11 @@ worktree or topic branch, it must not switch branches; it succeeds only when the
 current `HEAD` equals `origin/$OPENSPEC_BUDDY_BASE_BRANCH`. Stop if the worktree
 is dirty or the current `HEAD` is not aligned with the base branch.
 
+If the project explicitly shares `OPENSPEC_BUDDY_CACHE_DIR` or a cache-signal
+Ref, use that layer only to invalidate or reuse local cache between worktrees.
+It is an internal coordination accelerator, not a substitute for current
+GitHub review, Project, or merge truth.
+
 ## Claim
 
 For GitHub-coordinated changes, use `openspec-buddy claim [issue-number]`. If

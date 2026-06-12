@@ -6,6 +6,8 @@ issue_number="${1:-}"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/load-config.sh"
 source "$script_dir/github-fetch.sh"
+# shellcheck source=./cache-signal.sh
+source "$script_dir/cache-signal.sh"
 openspec_buddy_require_core_config
 "$script_dir/sync-base-branch.sh"
 
@@ -20,6 +22,8 @@ cleanup() {
   rm -rf "$tmp_dir"
 }
 trap cleanup EXIT
+
+buddy_signal_apply "$(buddy_cache_dir)"
 
 if [[ -z "$issue_number" ]]; then
   gh issue list \
@@ -156,7 +160,7 @@ claim_id="$(uuidgen 2>/dev/null || node -e 'console.log(crypto.randomUUID())')"
 lease_until="$(node -e 'const hours=Number(process.env.OPENSPEC_BUDDY_CLAIM_TTL_HOURS); console.log(new Date(Date.now()+hours*3600*1000).toISOString())')"
 
 gh issue edit "$issue_number" --add-assignee "$viewer"
-"$script_dir/set-status-label.sh" "$issue_number" "status:claimed"
+OPENSPEC_BUDDY_SKIP_SIGNAL_PUBLISH=1 "$script_dir/set-status-label.sh" "$issue_number" "status:claimed"
 
 gh issue comment "$issue_number" --body "$(cat <<EOF
 OpenSpec Buddy Claim
@@ -185,4 +189,5 @@ if (!/<!--\s*openspec-buddy\s*\r?\n/.test(issue.body || "")) process.exit(2);
 
 created_branch_lock=""
 "$script_dir/set-project-date.sh" "$issue_number" "Start" "$(date +%F)"
+buddy_signal_publish claim "issue:$issue_number" "ready-scan" "project"
 printf 'Claimed open issue #%s for change %s on branch %s with claim %s\n' "$issue_number" "$change_id" "$claim_branch" "$claim_id"

@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
@@ -10,10 +10,11 @@ trap 'rm -rf "$tmp_dir"' EXIT
 (
   cd "$project_root"
   git init -q
+  git remote add origin https://github.com/owner/repo.git
 )
 
 cat > "$tmp_dir/gh" <<'EOF'
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 
 printf '%s\n' "$*" >> "$GH_LOG_FILE"
@@ -72,10 +73,14 @@ EOF
 chmod +x "$tmp_dir/gh"
 
 cache_dir="$project_root/openspec/.buddy-cache"
-mkdir -p "$cache_dir/relationships"
-printf '%s\n' '{"fetchedAt":"2026-06-12T00:00:00Z","source":"graphql","repo":"unknown","objectType":"relationship","key":"issue-123","data":{"number":123}}' > "$cache_dir/relationships/issue-123.json"
-printf '%s\n' '{"fetchedAt":"2026-06-12T00:00:00Z","source":"graphql","repo":"unknown","objectType":"relationship","key":"issue-999","data":{"number":999}}' > "$cache_dir/relationships/issue-999.json"
-printf '%s\n' '{"fetchedAt":"2026-06-12T00:00:00Z","source":"rest","repo":"unknown","objectType":"relationship","key":"ready-scan-limit-25","data":[]}' > "$cache_dir/relationships/ready-scan-limit-25.json"
+mkdir -p "$cache_dir/relationships" "$cache_dir/issues"
+fetched_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+printf '%s\n' "{\"fetchedAt\":\"$fetched_at\",\"source\":\"graphql\",\"repo\":\"owner/repo\",\"objectType\":\"relationship\",\"key\":\"issue-123\",\"data\":{\"number\":123}}" > "$cache_dir/relationships/issue-123.json"
+printf '%s\n' "{\"fetchedAt\":\"$fetched_at\",\"source\":\"graphql\",\"repo\":\"owner/repo\",\"objectType\":\"relationship\",\"key\":\"issue-999\",\"data\":{\"number\":999}}" > "$cache_dir/relationships/issue-999.json"
+printf '%s\n' "{\"fetchedAt\":\"$fetched_at\",\"source\":\"graphql\",\"repo\":\"owner/repo\",\"objectType\":\"relationship\",\"key\":\"issue-555\",\"data\":{\"number\":555,\"blockedByNumbers\":[123]}}" > "$cache_dir/relationships/issue-555.json"
+printf '%s\n' "{\"fetchedAt\":\"$fetched_at\",\"source\":\"rest\",\"repo\":\"owner/repo\",\"objectType\":\"relationship\",\"key\":\"ready-scan-limit-25\",\"data\":[]}" > "$cache_dir/relationships/ready-scan-limit-25.json"
+printf '%s\n' "{\"fetchedAt\":\"$fetched_at\",\"source\":\"rest\",\"repo\":\"owner/repo\",\"objectType\":\"issue\",\"key\":\"123\",\"data\":{\"number\":123,\"state\":\"OPEN\",\"labels\":[{\"name\":\"status:ready\"},{\"name\":\"type:change\"}]}}" > "$cache_dir/issues/123.json"
+printf '%s\n' "{\"fetchedAt\":\"$fetched_at\",\"source\":\"rest\",\"repo\":\"owner/repo\",\"objectType\":\"issue\",\"key\":\"555\",\"data\":{\"number\":555,\"state\":\"OPEN\",\"labels\":[{\"name\":\"status:ready\"},{\"name\":\"type:change\"}]}}" > "$cache_dir/issues/555.json"
 
 export PATH="$tmp_dir:$PATH"
 export GH_LOG_FILE="$tmp_dir/gh.log"
@@ -85,11 +90,12 @@ export OPENSPEC_BUDDY_RELEASE_BRANCH=main
 export OPENSPEC_BUDDY_PROJECT_OWNER=owner
 export OPENSPEC_BUDDY_PROJECT_NUMBER=1
 export OPENSPEC_BUDDY_PROJECT_TITLE="Major LTE"
+export OPENSPEC_BUDDY_DISABLE_SIGNAL=1
 
 "$repo_root/skills/openspec-buddy/scripts/set-status-label.sh" 123 status:archived >"$tmp_dir/out.txt"
 
-if [[ -e "$cache_dir/relationships/issue-123.json" ]]; then
-  echo "set-status-label.sh should invalidate the updated issue relationship cache entry" >&2
+if [[ ! -e "$cache_dir/relationships/issue-123.json" ]]; then
+  echo "set-status-label.sh should preserve targeted relationship cache entries after node-only status changes" >&2
   exit 1
 fi
 
@@ -98,9 +104,41 @@ if [[ -e "$cache_dir/relationships/ready-scan-limit-25.json" ]]; then
   exit 1
 fi
 
-if [[ -e "$cache_dir/relationships/issue-999.json" ]]; then
-  echo "set-status-label.sh should invalidate all relationship cache entries because neighboring issue labels are embedded in cached relationships" >&2
+if [[ ! -e "$cache_dir/relationships/issue-999.json" ]]; then
+  echo "set-status-label.sh should not invalidate unrelated relationship cache entries" >&2
   exit 1
 fi
+
+hydrated="$(
+  PATH="$tmp_dir:$PATH" \
+  GH_LOG_FILE="$tmp_dir/gh.log" \
+  OPENSPEC_BUDDY_REPO_ROOT="$project_root" \
+  OPENSPEC_BUDDY_BASE_BRANCH=integration \
+  OPENSPEC_BUDDY_RELEASE_BRANCH=main \
+  OPENSPEC_BUDDY_PROJECT_OWNER=owner \
+  OPENSPEC_BUDDY_PROJECT_NUMBER=1 \
+  OPENSPEC_BUDDY_PROJECT_TITLE="Major LTE" \
+  OPENSPEC_BUDDY_DISABLE_SIGNAL=1 \
+  bash -c '
+    source "'"$repo_root"'/skills/openspec-buddy/scripts/github-fetch.sh"
+    buddy_issue_relationships_graphql owner repo 555
+  '
+)"
+
+HYDRATED_RELATIONSHIPS="$hydrated" node -e '
+const payload = JSON.parse(process.env.HYDRATED_RELATIONSHIPS);
+const blocker = payload[0]?.blockedBy?.nodes?.[0];
+if (!blocker) {
+  process.stderr.write("expected hydrated blocker node\n");
+  process.exit(1);
+}
+const labels = Array.isArray(blocker.labels)
+  ? blocker.labels.map((entry) => entry.name)
+  : (blocker.labels?.nodes || []).map((entry) => entry.name);
+if (!labels.includes("status:archived")) {
+  process.stderr.write("expected missing blocker cache to be refetched with archived status\n");
+  process.exit(1);
+}
+'
 
 echo "set-status-label cache invalidation tests passed"

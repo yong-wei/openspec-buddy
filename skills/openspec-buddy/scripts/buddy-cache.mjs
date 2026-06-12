@@ -13,6 +13,7 @@ function usage() {
   buddy-cache.mjs get <file>
   buddy-cache.mjs data <file> [repo] [object-type] [key]
   buddy-cache.mjs set <file> <source> <repo> <object-type> <key> [updated-at]
+  buddy-cache.mjs merge <file> <source> <repo> <object-type> <key> [updated-at]
   buddy-cache.mjs invalidate <file>
 `);
 }
@@ -56,6 +57,10 @@ function bucketFor(objectType, key) {
   switch (objectType) {
     case 'meta':
       return path.join('meta.json');
+    case 'signal-state':
+      return path.join('signal-state.json');
+    case 'signal-payload':
+      return path.join('signal-payload.json');
     case 'repo':
       return path.join('repo.json');
     case 'project':
@@ -75,6 +80,52 @@ function bucketFor(objectType, key) {
 
 function readJson(file) {
   return JSON.parse(fs.readFileSync(file, 'utf8'));
+}
+
+function writeJsonFileAtomic(file, value) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const tempFile = path.join(
+    path.dirname(file),
+    `.${path.basename(file)}.${process.pid}.${Date.now()}.tmp`,
+  );
+  fs.writeFileSync(tempFile, `${JSON.stringify(value, null, 2)}\n`);
+  fs.renameSync(tempFile, file);
+}
+
+function mergeData(baseValue, patchValue) {
+  if (Array.isArray(baseValue) && Array.isArray(patchValue)) {
+    return patchValue;
+  }
+  if (
+    baseValue &&
+    typeof baseValue === 'object' &&
+    !Array.isArray(baseValue) &&
+    patchValue &&
+    typeof patchValue === 'object' &&
+    !Array.isArray(patchValue)
+  ) {
+    const merged = { ...baseValue };
+    for (const [key, value] of Object.entries(patchValue)) {
+      merged[key] = key in baseValue ? mergeData(baseValue[key], value) : value;
+    }
+    return merged;
+  }
+  return patchValue;
+}
+
+function buildEntry(source, repo, objectType, key, data, updatedAt = '') {
+  const entry = {
+    fetchedAt: new Date().toISOString(),
+    source,
+    repo,
+    objectType,
+    key,
+    data,
+  };
+  if (updatedAt) {
+    entry.updatedAt = updatedAt;
+  }
+  return entry;
 }
 
 function cacheMatches(entry, expectedRepo = '', expectedObjectType = '', expectedKey = '') {
@@ -98,21 +149,14 @@ function main() {
 
       const metaFile = path.join(cacheDir, 'meta.json');
       if (!fs.existsSync(metaFile)) {
-        fs.writeFileSync(
-          metaFile,
-          `${JSON.stringify(
-            {
-              fetchedAt: new Date().toISOString(),
-              source: 'local',
-              repo: repoRoot,
-              objectType: 'meta',
-              key: 'layout',
-              data: { version: 1 },
-            },
-            null,
-            2,
-          )}\n`,
-        );
+        writeJsonFileAtomic(metaFile, {
+          fetchedAt: new Date().toISOString(),
+          source: 'local',
+          repo: repoRoot,
+          objectType: 'meta',
+          key: 'layout',
+          data: { version: 1 },
+        });
       }
 
       process.stdout.write(`${cacheDir}\n`);
@@ -188,19 +232,25 @@ function main() {
       }
       const raw = fs.readFileSync(0, 'utf8').trim();
       const data = raw ? JSON.parse(raw) : {};
-      const entry = {
-        fetchedAt: new Date().toISOString(),
-        source,
-        repo,
-        objectType,
-        key,
-        data,
-      };
-      if (updatedAt) {
-        entry.updatedAt = updatedAt;
+      const entry = buildEntry(source, repo, objectType, key, data, updatedAt);
+      writeJsonFileAtomic(file, entry);
+      process.stdout.write(`${file}\n`);
+      return;
+    }
+    case 'merge': {
+      const [file, source, repo, objectType, key, updatedAt = ''] = args;
+      if (!file || !source || !repo || !objectType || !key) {
+        usage();
+        process.exit(2);
       }
-      fs.mkdirSync(path.dirname(file), { recursive: true });
-      fs.writeFileSync(file, `${JSON.stringify(entry, null, 2)}\n`);
+      const raw = fs.readFileSync(0, 'utf8').trim();
+      const patch = raw ? JSON.parse(raw) : {};
+      let existingData = {};
+      if (fs.existsSync(file)) {
+        existingData = readJson(file).data ?? {};
+      }
+      const entry = buildEntry(source, repo, objectType, key, mergeData(existingData, patch), updatedAt);
+      writeJsonFileAtomic(file, entry);
       process.stdout.write(`${file}\n`);
       return;
     }

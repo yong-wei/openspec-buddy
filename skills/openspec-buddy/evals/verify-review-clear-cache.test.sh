@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -26,7 +26,7 @@ cat > "$cache_dir/review-comments-123.json" <<'JSON'
 JSON
 
 cat > "$tmp_dir/gh" <<'EOF'
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 printf '%s\n' "$*" >> "$GH_LOG_FILE"
 if [[ "$1" == "api" && "$2" == "graphql" ]]; then
@@ -78,7 +78,7 @@ cat > "$cache_dir/review-threads-123.json" <<'JSON'
 {"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}
 JSON
 cat > "$tmp_dir/gh" <<'EOF'
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 printf '%s\n' "$*" >> "$GH_LOG_FILE"
 if [[ "$1" == "api" && "$2" == "graphql" ]]; then
