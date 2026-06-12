@@ -5,26 +5,25 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
-cat > "$tmp_dir/gh" <<'EOF'
-#!/bin/bash
-set -euo pipefail
+cat > "$tmp_dir/gh-env.sh" <<'EOF'
+gh() {
+  printf '%s\n' "$*" >> "$GH_LOG_FILE"
 
-printf '%s\n' "$*" >> "$GH_LOG_FILE"
+  if [[ "$1" == "api" && "$2" == "rate_limit" ]]; then
+    printf '%s\n' '{"remaining":0,"resetAt":"2026-06-12T00:30:00Z"}'
+    return 0
+  fi
 
-if [[ "$1" == "api" && "$2" == "rate_limit" ]]; then
-  printf '%s\n' '{"remaining":0,"resetAt":"2026-06-12T00:30:00Z"}'
-  exit 0
-fi
+  if [[ "$1" == "api" && "$2" == "graphql" ]]; then
+    echo "graphql should not run when budget guard fails" >&2
+    return 99
+  fi
 
-if [[ "$1" == "api" && "$2" == "graphql" ]]; then
-  echo "graphql should not run when budget guard fails" >&2
-  exit 99
-fi
-
-echo "unexpected gh invocation: $*" >&2
-exit 1
+  echo "unexpected gh invocation: $*" >&2
+  return 1
+}
+export -f gh
 EOF
-chmod +x "$tmp_dir/gh"
 
 cat > "$tmp_dir/run.sh" <<EOF
 #!/bin/bash
@@ -50,11 +49,10 @@ buddy_graphql_guard_for_calls 2
 EOF
 chmod +x "$tmp_dir/run-batched-guard.sh"
 
-export PATH="$tmp_dir:$PATH"
 export GH_LOG_FILE="$tmp_dir/gh.log"
 
 set +e
-bash "$tmp_dir/run.sh" >"$tmp_dir/out.txt" 2>"$tmp_dir/err.txt"
+BASH_ENV="$tmp_dir/gh-env.sh" bash "$tmp_dir/run.sh" >"$tmp_dir/out.txt" 2>"$tmp_dir/err.txt"
 status="$?"
 set -e
 
@@ -77,7 +75,7 @@ fi
 : > "$GH_LOG_FILE"
 
 set +e
-bash "$tmp_dir/run-conditional.sh" >"$tmp_dir/out-conditional.txt" 2>"$tmp_dir/err-conditional.txt"
+BASH_ENV="$tmp_dir/gh-env.sh" bash "$tmp_dir/run-conditional.sh" >"$tmp_dir/out-conditional.txt" 2>"$tmp_dir/err-conditional.txt"
 status="$?"
 set -e
 
@@ -99,29 +97,28 @@ fi
 
 : > "$GH_LOG_FILE"
 
-cat > "$tmp_dir/gh" <<'EOF'
-#!/bin/bash
-set -euo pipefail
+cat > "$tmp_dir/gh-env.sh" <<'EOF'
+gh() {
+  printf '%s\n' "$*" >> "$GH_LOG_FILE"
 
-printf '%s\n' "$*" >> "$GH_LOG_FILE"
+  if [[ "$1" == "api" && "$2" == "rate_limit" ]]; then
+    printf '%s\n' '{"remaining":300,"resetAt":"2026-06-12T00:30:00Z"}'
+    return 0
+  fi
 
-if [[ "$1" == "api" && "$2" == "rate_limit" ]]; then
-  printf '%s\n' '{"remaining":300,"resetAt":"2026-06-12T00:30:00Z"}'
-  exit 0
-fi
+  if [[ "$1" == "api" && "$2" == "graphql" ]]; then
+    echo "graphql should not run when multi-batch budget guard fails" >&2
+    return 99
+  fi
 
-if [[ "$1" == "api" && "$2" == "graphql" ]]; then
-  echo "graphql should not run when multi-batch budget guard fails" >&2
-  exit 99
-fi
-
-echo "unexpected gh invocation: $*" >&2
-exit 1
+  echo "unexpected gh invocation: $*" >&2
+  return 1
+}
+export -f gh
 EOF
-chmod +x "$tmp_dir/gh"
 
 set +e
-bash "$tmp_dir/run-batched-guard.sh" >"$tmp_dir/out-batched.txt" 2>"$tmp_dir/err-batched.txt"
+BASH_ENV="$tmp_dir/gh-env.sh" bash "$tmp_dir/run-batched-guard.sh" >"$tmp_dir/out-batched.txt" 2>"$tmp_dir/err-batched.txt"
 status="$?"
 set -e
 
