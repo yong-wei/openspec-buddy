@@ -11,10 +11,12 @@ fi
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/load-config.sh"
+source "$script_dir/github-fetch.sh"
 openspec_buddy_require_core_config
 
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
+cache_dir="$(buddy_cache_dir)"
 
 issue_file="$tmp_dir/issue.json"
 pr_file="$tmp_dir/pr.json"
@@ -23,14 +25,14 @@ metadata_file="$tmp_dir/metadata.json"
 labels_file="$tmp_dir/labels.txt"
 pr_labels_file="$tmp_dir/pr-labels.txt"
 
-gh issue view "$issue_number" --json number,url,labels,assignees,body,projectItems > "$issue_file"
-gh pr view "$pr_ref" --json number,url,body,baseRefName,labels,isDraft,assignees,projectItems,closingIssuesReferences,files,comments > "$pr_file"
+buddy_issue_json "$issue_number" "$cache_dir" "$issue_file"
+buddy_pr_json "$pr_ref" "$cache_dir" "$pr_file"
 
 node -e 'const fs=require("fs"); const issue=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(issue.body || "");' "$issue_file" > "$body_file"
 node "$script_dir/parse-issue-metadata.mjs" "$body_file" > "$metadata_file"
 node "$script_dir/build-pr-labels.mjs" "$issue_file" "$pr_file" "$labels_file" "$pr_labels_file"
 
-repo_default_branch="$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name')"
+repo_default_branch="$(buddy_repo_default_branch "$cache_dir")"
 
 node "$script_dir/verify-pr-coordination.mjs" \
   "$issue_file" \

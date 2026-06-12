@@ -9,6 +9,10 @@ if [[ -z "$issue_number" || -z "$pr_url" ]]; then
 fi
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$script_dir/github-fetch.sh"
+cache_dir="$(buddy_cache_dir)"
+export OPENSPEC_BUDDY_CACHE_DIR="$cache_dir"
+export OPENSPEC_BUDDY_GH_CACHE_DIR="$cache_dir"
 "$script_dir/ensure-pr-base.sh" "$pr_url"
 
 if [[ "$(gh pr view "$pr_url" --json isDraft --jq '.isDraft')" == "true" ]]; then

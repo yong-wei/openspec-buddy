@@ -13,6 +13,9 @@ if [[ "$target_status" != status:* ]]; then
   exit 2
 fi
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$script_dir/github-fetch.sh"
+
 existing_statuses="$(
   gh issue view "$issue_number" --json labels \
     --jq '[.labels[].name | select(test("^status:\\s*"))] | join(",")'
@@ -26,5 +29,7 @@ args+=(--add-label "$target_status")
 
 gh "${args[@]}"
 
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cache_dir="$(buddy_cache_dir)"
+buddy_invalidate_all_relationship_cache "$cache_dir"
+
 "$script_dir/set-project-status.sh" "$issue_number" "$target_status"

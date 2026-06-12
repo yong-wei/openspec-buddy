@@ -86,6 +86,13 @@ JSON
   exit 0
 fi
 
+if [[ "$1" == "api" && "$2" == "rate_limit" ]]; then
+  cat <<'JSON'
+{"remaining":1000,"resetAt":"2026-06-12T00:30:00Z"}
+JSON
+  exit 0
+fi
+
 echo "unexpected gh command: $*" >&2
 exit 1
 EOF
@@ -94,6 +101,7 @@ chmod +x "$tmp_dir/gh"
 export PATH="$tmp_dir:$PATH"
 export GH_CALL_LOG="$tmp_dir/gh.log"
 export GH_GRAPHQL_QUERY_FILE="$tmp_dir/query.graphql"
+export OPENSPEC_BUDDY_GH_CACHE_DIR="$tmp_dir/cache-first"
 
 output="$("$repo_root/skills/openspec-buddy/scripts/list-ready-change-relationships.sh" 50)"
 
@@ -223,6 +231,13 @@ PY
   exit 0
 fi
 
+if [[ "$1" == "api" && "$2" == "rate_limit" ]]; then
+  cat <<'JSON'
+{"remaining":1000,"resetAt":"2026-06-12T00:30:00Z"}
+JSON
+  exit 0
+fi
+
 echo "unexpected gh command: $*" >&2
 exit 1
 EOF
@@ -230,6 +245,7 @@ chmod +x "$batch_dir/gh"
 
 GH_CALL_LOG="$batch_dir/gh.log" \
 GH_GRAPHQL_QUERY_LOG="$batch_dir/graphql.log" \
+OPENSPEC_BUDDY_GH_CACHE_DIR="$batch_dir/cache-second" \
 PATH="$batch_dir:$PATH" \
   "$repo_root/skills/openspec-buddy/scripts/list-ready-change-relationships.sh" 100 > "$batch_dir/output.json"
 

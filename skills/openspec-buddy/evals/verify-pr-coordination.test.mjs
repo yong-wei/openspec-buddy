@@ -94,7 +94,9 @@ if [[ "$1" == "pr" && "$2" == "view" ]]; then
   exit 0
 fi
 if [[ "$1" == "repo" && "$2" == "view" ]]; then
-  printf '%s\\n' "main"
+  cat <<'JSON'
+{"nameWithOwner":"owner/repo","defaultBranchRef":{"name":"main"}}
+JSON
   exit 0
 fi
 echo "unexpected gh invocation: $*" >&2
@@ -111,6 +113,7 @@ function runVerify(prFile) {
       PATH: `${tmpDir}:${process.env.PATH}`,
       GH_ISSUE_JSON: issueFile,
       GH_PR_JSON: prFile,
+      OPENSPEC_BUDDY_GH_CACHE_DIR: path.join(tmpDir, `cache-${path.basename(prFile, '.json')}`),
       OPENSPEC_BUDDY_BASE_BRANCH: 'integration',
       OPENSPEC_BUDDY_RELEASE_BRANCH: 'main',
       OPENSPEC_BUDDY_PROJECT_OWNER: 'opt-de',

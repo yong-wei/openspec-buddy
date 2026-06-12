@@ -35,6 +35,12 @@ if [[ "$1" == "api" && "$2" == "graphql" ]]; then
 JSON
   exit 0
 fi
+if [[ "$1" == "api" && "$2" == "rate_limit" ]]; then
+  cat <<'JSON'
+{"remaining":1000,"resetAt":"2026-06-12T00:30:00Z"}
+JSON
+  exit 0
+fi
 echo "unexpected gh call: $*" >&2
 exit 99
 EOF
@@ -78,6 +84,12 @@ printf '%s\n' "$*" >> "$GH_LOG_FILE"
 if [[ "$1" == "api" && "$2" == "graphql" ]]; then
   cat <<'JSON'
 {"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"isResolved":false,"path":"src/demo.js","line":12,"comments":{"nodes":[{"author":{"login":"chatgpt-codex-connector"},"body":"P1: still broken","url":"https://example.test/thread"}]}}]}}}}}
+JSON
+  exit 0
+fi
+if [[ "$1" == "api" && "$2" == "rate_limit" ]]; then
+  cat <<'JSON'
+{"remaining":1000,"resetAt":"2026-06-12T00:30:00Z"}
 JSON
   exit 0
 fi
