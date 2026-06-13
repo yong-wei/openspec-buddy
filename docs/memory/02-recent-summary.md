@@ -25,9 +25,11 @@
 - `v0.6.0` 发布线新增 `wait-for-review-clear.sh` 前台阻塞等待 helper；Buddy Auto review 等待不再由主代理轮询，而由 helper 低频检查 review 状态并在必要时调用 `verify-review-clear.sh`。
 - `v0.6.1` 发布线要求 Buddy apply/auto 在 pre-archive 前先运行 `openspec validate <change_id> --strict` 校验 active change/delta spec，并修复重复 review request gate 对 unresolved/P0-P2 blocker 的优先级。
 - 本机项目目录新增被 git 忽略的 `.agents/skills/release-package/` 项目级发布技能：后续发布默认由代理判定 SemVer、维护 release notes 和相关文档，再用本地 `npm publish` token 文件完成 GitHub Release、npm 打包发布与发布后验证；`.agents/` 不放行进仓库。
+- 从 2026-06-13 起，后续 OpenSpec-buddy 修改默认在隔离 git worktree 中完成，避免本仓库软链接技能影响其他正在运行的项目代理；开发结束后必须经子代理审核通过，再提交、推送、合并到 `main`，删除开发 worktree，将本地 `main` 对齐远端，然后直接发版和打包 npm。可使用 Superpowers 的工作树技能。
 
 ## 当前警惕点
 
 - 用户要求提交时，必须先使用高推理子代理独立审查；有问题则修改并复审，直到报告没有问题后才可以提交。
+- 除本次已经开始的主工作树分支外，后续修改不要直接在主工作树开发；先创建隔离 worktree，完成后清理开发 worktree 并确认本地 `main` 跟随 `origin/main`。
 - README 面向使用者，不承载 release 和 GitHub automatic publishing 这类维护者流程。
 - 协作者应优先使用 npm copy 安装，避免把个人机器上的绝对路径软链接提交到项目中。

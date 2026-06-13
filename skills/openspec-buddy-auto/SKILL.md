@@ -159,7 +159,9 @@ hatch: keep the normal PR, review, and issue/project synchronization flow.
     state sync.
     If the archived issue belongs to a series parent and all sibling changes are
     also archived, finalize the parent issue as `status:archived`, Project
-    `Status: Done`, Project `End` set, and closed.
+    `Status: Done`, Project `End` set, and closed. `mark-achieved.sh` performs
+    this parent reconciliation automatically and must fail if a closed child is
+    missing the terminal `status:archived` label.
 19. GitHub-backed path only: delete the local and remote claim branch.
 20. Return to the coordination branch and fast-forward it to `$OPENSPEC_BUDDY_BASE_BRANCH`.
 21. Write an execution retrospective before final reporting.

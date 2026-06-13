@@ -22,9 +22,10 @@ It is not an executable OpenSpec change and must never be selected by `apply` or
 
 ## Series Parent Completion
 
-After each child change is archived, check the linked series parent. When every
-sub-issue under the parent is closed and labeled `status:archived`, finalize the
-parent issue too:
+After each child change is archived, Buddy checks the linked series parent.
+When every sub-issue under the parent is closed, labeled `status:archived`, has
+Project `Status: Done`, and has Project `End` set, finalize the parent issue
+too:
 
 ```bash
 <openspec-buddy-skill-dir>/scripts/close-completed-series-parent.sh <child-or-parent-issue>
@@ -33,7 +34,9 @@ parent issue too:
 Finalization changes the parent from `status:tracking` to `status:archived`,
 sets the Project `Status` to `Done`, sets Project `End` to the local date, and
 closes the parent with a comment listing the archived child changes. If any
-child issue is still open or not archived, leave the parent as `status:tracking`.
+child issue is already closed with Project `Done` and `End` set but is missing
+`status:archived`, treat it as repairable terminal drift and rerun
+`mark-achieved.sh` for that child instead of silently leaving the parent open.
 
 ## Parent Link
 

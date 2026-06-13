@@ -160,16 +160,19 @@ After PR merge:
    to edit unrelated capabilities in the current issue-sync step; record it as
    existing debt unless the claimed change caused it.
 6. Run `mark-achieved.sh <issue-number> <archive-path> <pr-url>` to sync the
-   GitHub issue and Project state.
+   GitHub issue and Project state, then reconcile completed series parents.
 7. Verify the issue has exactly one `status:*` label and that it is `status:archived`.
    If the issue is already closed or the Project item is already `Done`, still rerun
    `mark-achieved.sh` to reconcile the label, archive comment, and Project `End`.
 8. Verify the linked series parent. If every child issue under the parent is
-    closed and labeled `status:archived`, the parent must also be closed with
-    `status:archived`, Project `Status: Done`, and Project `End` set. Use:
+   closed with `status:archived`, Project `Status: Done`, and Project `End`
+   set, the parent must also be closed with the same terminal state. For a
+   direct repair or audit, use:
    ```bash
    <openspec-buddy-skill-dir>/scripts/close-completed-series-parent.sh <child-or-parent-issue>
    ```
+   If this reports repairable terminal drift in a child issue, rerun
+   `mark-achieved.sh` for that child before continuing.
 9. Delete the remote claim branch before deleting the local branch. Local `git branch -d`
    can reject deletion while the local branch still tracks an older remote claim branch,
    even when the branch is merged to current `HEAD`.
