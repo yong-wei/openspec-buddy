@@ -433,20 +433,41 @@ process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 buddy_project_item_id_from_subject_file() {
   local subject_file="$1"
   local project_title="$2"
+  local project_id="${3:-}"
   node -e '
 const fs = require("node:fs");
 const data = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
 const title = process.argv[2];
+const projectId = process.argv[3] || "";
 const items = Array.isArray(data.projectItems) ? data.projectItems : [];
-const match = items.find((item) => {
+const titleMatches = items.filter((item) => {
   const value = item?.title || item?.project?.title || item?.projectTitle || "";
   return value === title;
 });
-if (!match) {
+if (titleMatches.length === 0) {
   process.exit(0);
 }
-process.stdout.write(match.id || match.itemId || match.projectItem?.id || match.nodeId || "");
-' "$subject_file" "$project_title"
+const exactMatches = projectId
+  ? titleMatches.filter((item) => (item?.project?.id || item?.projectId || "") === projectId)
+  : titleMatches;
+let matches = titleMatches;
+if (projectId) {
+  if (exactMatches.length > 0) {
+    matches = exactMatches;
+  } else if (titleMatches.length === 1) {
+    const onlyMatch = titleMatches[0];
+    const matchProjectId = onlyMatch?.project?.id || onlyMatch?.projectId || "";
+    matches = matchProjectId ? [] : [onlyMatch];
+  } else {
+    matches = [];
+  }
+}
+if (matches.length !== 1) {
+  process.exit(0);
+}
+const match = matches[0];
+process.stdout.write(match?.id || match?.itemId || match?.projectItem?.id || match?.nodeId || "");
+' "$subject_file" "$project_title" "$project_id"
 }
 
 buddy_project_item_present_in_subject_file() {
@@ -465,8 +486,9 @@ process.stdout.write(match ? "1" : "0");
 buddy_project_item_id_for_subject_file() {
   local subject_file="$1"
   local project_title="$2"
+  local project_id="${3:-}"
   local item_id
-  item_id="$(buddy_project_item_id_from_subject_file "$subject_file" "$project_title")"
+  item_id="$(buddy_project_item_id_from_subject_file "$subject_file" "$project_title" "$project_id")"
   if [[ -n "$item_id" ]]; then
     printf '%s\n' "$item_id"
     return 0
@@ -488,20 +510,23 @@ buddy_project_item_id_for_subject_file() {
 query($id: ID!) {
   node(id: $id) {
     ... on Issue {
-      projectItems(first: 50) { nodes { id project { title } } }
+      projectItems(first: 50) { nodes { id project { id title } } }
     }
     ... on PullRequest {
-      projectItems(first: 50) { nodes { id project { title } } }
+      projectItems(first: 50) { nodes { id project { id title } } }
     }
   }
 }' | node -e '
 const fs = require("node:fs");
 const data = JSON.parse(fs.readFileSync(0, "utf8"));
 const title = process.argv[1];
+const projectId = process.argv[2] || "";
 const items = data.data?.node?.projectItems?.nodes || [];
-const match = items.find((item) => item?.project?.title === title);
-if (match?.id) process.stdout.write(match.id);
-' "$project_title"
+const titleMatches = items.filter((item) => item?.project?.title === title);
+const exactMatches = projectId ? titleMatches.filter((item) => item?.project?.id === projectId) : titleMatches;
+const matches = projectId ? exactMatches : titleMatches;
+if (matches.length === 1 && matches[0]?.id) process.stdout.write(matches[0].id);
+' "$project_title" "$project_id"
 }
 
 buddy_open_issues_rest() {
@@ -744,6 +769,32 @@ for (const file of files) {
 process.stdout.write(`${JSON.stringify(issues, null, 2)}\n`);
 ' "${files[@]}" > "$combined_file"
 
+    local missing_numbers_file
+    missing_numbers_file="$tmp_dir/missing-numbers.txt"
+    node -e '
+const fs = require("node:fs");
+const issues = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+const present = new Set(
+  (Array.isArray(issues) ? issues : [])
+    .map((issue) => Number(issue?.number || 0))
+    .filter((value) => Number.isFinite(value) && value > 0)
+);
+for (const raw of process.argv.slice(2)) {
+  const number = Number(raw);
+  if (Number.isFinite(number) && number > 0 && !present.has(number)) {
+    process.stdout.write(`${number}\n`);
+  }
+}
+' "$combined_file" "${pending_numbers[@]}" > "$missing_numbers_file"
+    local missing_numbers=()
+    if [[ -s "$missing_numbers_file" ]]; then
+      mapfile -t missing_numbers < "$missing_numbers_file"
+      if [[ "${#missing_numbers[@]}" -gt 0 ]]; then
+        buddy_invalidate_issue_relationship_cache "$cache_dir" "${missing_numbers[@]}"
+        buddy_invalidate_issue_cache "$cache_dir" "${missing_numbers[@]}"
+      fi
+    fi
+
     local repo_nwo
     repo_nwo="$(buddy_cache_expected_repo)"
 
@@ -860,13 +911,19 @@ for (const [number, payload] of issuePayloads.entries()) {
 
   local relationship_files=()
   for number in "${numbers[@]}"; do
-    relationship_files+=("$(buddy_cache_path relationship "issue-$number" "$cache_dir")")
+    local relationship_file
+    relationship_file="$(buddy_cache_path relationship "issue-$number" "$cache_dir")"
+    if [[ -f "$relationship_file" ]]; then
+      relationship_files+=("$relationship_file")
+    fi
   done
   local hydrate_issue_numbers=()
-  while IFS= read -r number; do
-    [[ -n "$number" ]] || continue
-    hydrate_issue_numbers+=("$number")
-  done < <(buddy_relationship_neighbor_numbers "${relationship_files[@]}")
+  if [[ "${#relationship_files[@]}" -gt 0 ]]; then
+    while IFS= read -r number; do
+      [[ -n "$number" ]] || continue
+      hydrate_issue_numbers+=("$number")
+    done < <(buddy_relationship_neighbor_numbers "${relationship_files[@]}")
+  fi
   if [[ "${#hydrate_issue_numbers[@]}" -gt 0 ]]; then
     local hydrate_tmp_dir=""
     hydrate_tmp_dir="$(mktemp -d)"
@@ -874,6 +931,10 @@ for (const [number, payload] of issuePayloads.entries()) {
     for number in "${hydrate_issue_numbers[@]}"; do
       buddy_issue_json "$number" "$cache_dir" "$hydrate_tmp_dir/$number.json" >/dev/null
     done
+  fi
+  if [[ "${#relationship_files[@]}" -eq 0 ]]; then
+    printf '[]\n'
+    return 0
   fi
   node -e '
 const fs = require("node:fs");

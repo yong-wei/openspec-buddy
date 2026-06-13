@@ -77,6 +77,32 @@ JSON
 fi
 
 if [[ "$1" == "pr" && "$2" == "view" ]]; then
+  if [[ "${PR_VIEW_MODE:-detached}" == "title-only" ]]; then
+    cat <<'JSON'
+{
+  "id": "PR_45",
+  "number": 45,
+  "url": "https://github.com/owner/repo/pull/45",
+  "body": "Summary",
+  "baseRefName": "integration",
+  "isDraft": false,
+  "headRefOid": "head-45",
+  "updatedAt": "2026-06-12T00:00:00Z",
+  "labels": [
+    { "name": "type:change" },
+    { "name": "area:demo" },
+    { "name": "risk:low" },
+    { "name": "mode:isolated" }
+  ],
+  "assignees": [{ "login": "student-a" }],
+  "projectItems": [{ "title": "Major LTE", "status": { "name": "In Progress" } }],
+  "closingIssuesReferences": [],
+  "files": [{ "path": "src/demo.js" }],
+  "comments": []
+}
+JSON
+    exit 0
+  fi
   if [[ "${PR_VIEW_MODE:-detached}" == "attached" ]]; then
     cat <<'JSON'
 {
@@ -167,6 +193,46 @@ if [[ "$1" == "project" && "$2" == "item-add" ]]; then
   exit 0
 fi
 
+if [[ "$1" == "api" && "$2" == "rate_limit" ]]; then
+  cat <<'JSON'
+{"remaining":1000,"resetAt":"2026-06-12T00:30:00Z"}
+JSON
+  exit 0
+fi
+
+if [[ "$1" == "api" && "$2" == "graphql" ]]; then
+  subject_id=""
+  previous=""
+  for arg in "$@"; do
+    if [[ "$previous" == "-f" && "$arg" == id=* ]]; then
+      subject_id="${arg#id=}"
+    fi
+    previous="$arg"
+  done
+  printf '%s\n' "$*" >> "$GH_LOG_FILE"
+  if [[ "$subject_id" == PR_* ]]; then
+    item_id="ITEM_PR_45"
+  else
+    item_id="ITEM_ISSUE_123"
+  fi
+  if [[ "${GRAPHQL_PROJECT_ITEM_MODE:-single}" == "duplicate-title" ]]; then
+    cat <<JSON
+{"data":{"node":{"projectItems":{"nodes":[{"id":"ITEM_WRONG","project":{"id":"PROJECT_OTHER","title":"Major LTE"}},{"id":"$item_id","project":{"id":"PROJECT_1","title":"Major LTE"}}]}}}}
+JSON
+    exit 0
+  fi
+  if [[ "${GRAPHQL_PROJECT_ITEM_MODE:-single}" == "wrong-project-only" ]]; then
+    cat <<'JSON'
+{"data":{"node":{"projectItems":{"nodes":[{"id":"ITEM_WRONG","project":{"id":"PROJECT_OTHER","title":"Major LTE"}}]}}}}
+JSON
+    exit 0
+  fi
+  cat <<JSON
+{"data":{"node":{"projectItems":{"nodes":[{"id":"$item_id","project":{"id":"PROJECT_1","title":"Major LTE"}}]}}}}
+JSON
+  exit 0
+fi
+
 if [[ "$1" == "project" && "$2" == "item-list" ]]; then
   echo "project item-list should not be called" >&2
   exit 97
@@ -254,21 +320,73 @@ if [[ -e "$cache_root/prs/45.json" ]]; then
 fi
 
 : > "$GH_LOG_FILE"
-set +e
-OPENSPEC_BUDDY_GH_CACHE_DIR="$tmp_dir/cache-title-only" ISSUE_ITEM_MODE=title-only "$repo_root/skills/openspec-buddy/scripts/set-project-status.sh" 123 status:ready >"$tmp_dir/title-only.out" 2>"$tmp_dir/title-only.err"
-title_only_status="$?"
-set -e
-if [[ "$title_only_status" -eq 0 ]]; then
-  echo "set-project-status.sh should fail closed when projectItems lacks editable item id" >&2
+OPENSPEC_BUDDY_GH_CACHE_DIR="$tmp_dir/cache-title-only" ISSUE_ITEM_MODE=title-only GRAPHQL_PROJECT_ITEM_MODE=duplicate-title "$repo_root/skills/openspec-buddy/scripts/set-project-status.sh" 123 status:ready >"$tmp_dir/title-only.out"
+if ! grep -F 'Status set to "Todo"' "$tmp_dir/title-only.out" >/dev/null; then
+  echo "set-project-status.sh should recover editable project item ids via target-scoped GraphQL" >&2
+  cat "$tmp_dir/title-only.out" >&2
   exit 1
 fi
-if ! grep -F 'does not expose an editable project item id' "$tmp_dir/title-only.err" >/dev/null; then
-  echo "expected missing project item id diagnostic" >&2
-  cat "$tmp_dir/title-only.err" >&2
+if ! grep -F 'api graphql' "$GH_LOG_FILE" >/dev/null; then
+  echo "set-project-status.sh should query GraphQL for an editable project item id when projectItems only includes the project title" >&2
   exit 1
 fi
 if grep -F 'project item-add' "$GH_LOG_FILE" >/dev/null; then
   echo "set-project-status.sh should not add a duplicate project item when subject metadata lacks item id" >&2
+  exit 1
+fi
+
+: > "$GH_LOG_FILE"
+OPENSPEC_BUDDY_GH_CACHE_DIR="$tmp_dir/cache-title-only-date" ISSUE_ITEM_MODE=title-only GRAPHQL_PROJECT_ITEM_MODE=duplicate-title "$repo_root/skills/openspec-buddy/scripts/set-project-date.sh" 123 Start 2026-06-13 >"$tmp_dir/title-only-date.out"
+if ! grep -F 'Start set to "2026-06-13"' "$tmp_dir/title-only-date.out" >/dev/null; then
+  echo "set-project-date.sh should recover editable project item ids via target-scoped GraphQL" >&2
+  cat "$tmp_dir/title-only-date.out" >&2
+  exit 1
+fi
+if ! grep -F 'api graphql' "$GH_LOG_FILE" >/dev/null; then
+  echo "set-project-date.sh should query GraphQL for an editable project item id when projectItems only includes the project title" >&2
+  exit 1
+fi
+
+: > "$GH_LOG_FILE"
+set +e
+OPENSPEC_BUDDY_GH_CACHE_DIR="$tmp_dir/cache-wrong-project-only" ISSUE_ITEM_MODE=title-only GRAPHQL_PROJECT_ITEM_MODE=wrong-project-only "$repo_root/skills/openspec-buddy/scripts/set-project-status.sh" 123 status:ready >"$tmp_dir/wrong-project.out" 2>"$tmp_dir/wrong-project.err"
+wrong_project_status="$?"
+set -e
+if [[ "$wrong_project_status" -eq 0 ]]; then
+  echo "set-project-status.sh should fail when GraphQL only returns same-title items from the wrong project" >&2
+  exit 1
+fi
+if ! grep -F 'no editable project item id was found even after a target-scoped GraphQL refresh' "$tmp_dir/wrong-project.err" >/dev/null; then
+  echo "set-project-status.sh should explain that same-title items from the wrong project are not acceptable fallback matches" >&2
+  cat "$tmp_dir/wrong-project.err" >&2
+  exit 1
+fi
+if grep -F 'project item-edit --id ITEM_WRONG' "$GH_LOG_FILE" >/dev/null; then
+  echo "set-project-status.sh should not edit a same-title item from the wrong project" >&2
+  exit 1
+fi
+
+: > "$GH_LOG_FILE"
+OPENSPEC_BUDDY_GH_CACHE_DIR="$tmp_dir/cache-pr-title-only" PR_VIEW_MODE=title-only GRAPHQL_PROJECT_ITEM_MODE=duplicate-title "$repo_root/skills/openspec-buddy/scripts/set-project-status.sh" https://github.com/owner/repo/pull/45 status:in-review >"$tmp_dir/pr-title-only.out"
+if ! grep -F 'Status set to "In Progress"' "$tmp_dir/pr-title-only.out" >/dev/null; then
+  echo "set-project-status.sh should recover editable PR project item ids via target-scoped GraphQL" >&2
+  cat "$tmp_dir/pr-title-only.out" >&2
+  exit 1
+fi
+if ! grep -F 'api graphql' "$GH_LOG_FILE" >/dev/null; then
+  echo "set-project-status.sh should query GraphQL for an editable PR project item id when projectItems only includes the project title" >&2
+  exit 1
+fi
+
+: > "$GH_LOG_FILE"
+OPENSPEC_BUDDY_GH_CACHE_DIR="$tmp_dir/cache-pr-title-only-date" PR_VIEW_MODE=title-only GRAPHQL_PROJECT_ITEM_MODE=duplicate-title "$repo_root/skills/openspec-buddy/scripts/set-project-date.sh" https://github.com/owner/repo/pull/45 Start 2026-06-13 >"$tmp_dir/pr-title-only-date.out"
+if ! grep -F 'Start set to "2026-06-13"' "$tmp_dir/pr-title-only-date.out" >/dev/null; then
+  echo "set-project-date.sh should recover editable PR project item ids via target-scoped GraphQL" >&2
+  cat "$tmp_dir/pr-title-only-date.out" >&2
+  exit 1
+fi
+if ! grep -F 'api graphql' "$GH_LOG_FILE" >/dev/null; then
+  echo "set-project-date.sh should query GraphQL for an editable PR project item id when projectItems only includes the project title" >&2
   exit 1
 fi
 

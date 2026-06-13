@@ -67,6 +67,20 @@ if [[ "$1" == "project" && "$2" == "item-edit" ]]; then
   exit 0
 fi
 
+if [[ "$1" == "api" && "$2" == "rate_limit" ]]; then
+  cat <<'JSON'
+{"remaining":1000,"resetAt":"2026-06-12T00:30:00Z"}
+JSON
+  exit 0
+fi
+
+if [[ "$1" == "api" && "$2" == "graphql" ]]; then
+  cat <<'JSON'
+{"data":{"repository":{"issue0":{"number":555,"labels":{"nodes":[{"name":"status:ready"},{"name":"type:change"}]},"subIssues":{"nodes":[]},"blockedBy":{"nodes":[{"number":123,"labels":{"nodes":[{"name":"status:archived"},{"name":"type:change"}]}}]},"blocking":{"nodes":[]}}}}}
+JSON
+  exit 0
+fi
+
 echo "unexpected gh invocation: $*" >&2
 exit 1
 EOF

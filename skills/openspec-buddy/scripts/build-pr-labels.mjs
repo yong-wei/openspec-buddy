@@ -20,6 +20,12 @@ function normalizeLabelName(label) {
   return name.replace(/^(status|type|level|area|series|risk|mode|coupling):\s+/, '$1:');
 }
 
+function normalizeLabels(labels) {
+  if (Array.isArray(labels)) return labels;
+  if (Array.isArray(labels?.nodes)) return labels.nodes;
+  return [];
+}
+
 function baseSlug(baseRefName) {
   return String(baseRefName || 'unknown')
     .toLowerCase()
@@ -33,7 +39,7 @@ function isInherited(labelName) {
   return inheritedPrefixes.has(labelName.slice(0, separator));
 }
 
-const issueLabels = (issue.labels || []).map(normalizeLabelName).filter(Boolean);
+const issueLabels = normalizeLabels(issue.labels).map(normalizeLabelName).filter(Boolean);
 const inherited = issueLabels.filter(isInherited);
 const prLabels = ['pr:openspec-buddy', `pr:base-${baseSlug(pr.baseRefName)}`];
 const labels = [...new Set([...prLabels, ...inherited])];
