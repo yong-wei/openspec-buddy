@@ -9,6 +9,7 @@ const commands = [
   { label: 'node skills/openspec-buddy/evals/build-pr-development-note.test.mjs', cmd: 'node', args: ['skills/openspec-buddy/evals/build-pr-development-note.test.mjs'] },
   { label: 'node skills/openspec-buddy/evals/build-pr-labels.test.mjs', cmd: 'node', args: ['skills/openspec-buddy/evals/build-pr-labels.test.mjs'] },
   { label: 'bash skills/openspec-buddy/evals/cache-signal.test.sh', cmd: 'bash', args: ['skills/openspec-buddy/evals/cache-signal.test.sh'] },
+  { label: 'bash skills/openspec-buddy/evals/close-completed-series-parent.test.sh', cmd: 'bash', args: ['skills/openspec-buddy/evals/close-completed-series-parent.test.sh'] },
   { label: 'bash skills/openspec-buddy/evals/github-cli-compat.test.sh', cmd: 'bash', args: ['skills/openspec-buddy/evals/github-cli-compat.test.sh'] },
   { label: 'bash skills/openspec-buddy/evals/github-fetch-graphql-guard.test.sh', cmd: 'bash', args: ['skills/openspec-buddy/evals/github-fetch-graphql-guard.test.sh'] },
   { label: 'bash skills/openspec-buddy/evals/link-issue-dependencies-budget.test.sh', cmd: 'bash', args: ['skills/openspec-buddy/evals/link-issue-dependencies-budget.test.sh'] },

@@ -31,6 +31,7 @@ else
 fi
 
 "$script_dir/close-completed-series-parent.sh" "$issue_number"
+"$script_dir/reconcile-completed-series-parents.sh"
 buddy_invalidate_issue_cache "$cache_dir" "$issue_number"
 buddy_invalidate_ready_scan_cache "$cache_dir"
 if [[ -n "$pr_url" ]]; then

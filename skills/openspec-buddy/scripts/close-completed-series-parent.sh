@@ -19,6 +19,7 @@ cache_dir="$(buddy_cache_dir)"
 
 issue_file="$tmp_dir/issue.json"
 parent_file="$tmp_dir/parent.json"
+project_file="$tmp_dir/project.json"
 repo_nwo="$(buddy_repo_nwo)"
 buddy_signal_apply "$cache_dir" "$repo_nwo"
 
@@ -68,10 +69,25 @@ if [[ -z "$parent_id" ]]; then
   exit 0
 fi
 
+openspec_buddy_require_core_config
+project_title="$OPENSPEC_BUDDY_PROJECT_TITLE"
+done_option_name="$OPENSPEC_BUDDY_PROJECT_STATUS_DONE"
+status_field_name="$OPENSPEC_BUDDY_PROJECT_STATUS_FIELD"
+end_field_name="$OPENSPEC_BUDDY_PROJECT_END_FIELD"
+buddy_project_metadata_json "$cache_dir" "$project_file"
+project_id="$(node -e 'const fs=require("node:fs"); const project=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(project.id || "");' "$project_file")"
+
+if [[ -z "$project_id" ]]; then
+  echo "Could not resolve project id for \"$project_title\"." >&2
+  exit 1
+fi
+
 buddy_graphql_api \
   -f id="$parent_id" \
+  -f statusField="$status_field_name" \
+  -f endField="$end_field_name" \
   -f query='
-query($id: ID!) {
+query($id: ID!, $statusField: String!, $endField: String!) {
   node(id: $id) {
     ... on Issue {
       id
@@ -80,6 +96,18 @@ query($id: ID!) {
       state
       url
       labels(first: 50) { nodes { name } }
+      projectItems(first: 50) {
+        nodes {
+          id
+          project { id title }
+          status: fieldValueByName(name: $statusField) {
+            ... on ProjectV2ItemFieldSingleSelectValue { name }
+          }
+          end: fieldValueByName(name: $endField) {
+            ... on ProjectV2ItemFieldDateValue { date }
+          }
+        }
+      }
       subIssues(first: 100) {
         nodes {
           number
@@ -87,6 +115,18 @@ query($id: ID!) {
           state
           url
           labels(first: 50) { nodes { name } }
+          projectItems(first: 50) {
+            nodes {
+              id
+              project { id title }
+              status: fieldValueByName(name: $statusField) {
+                ... on ProjectV2ItemFieldSingleSelectValue { name }
+              }
+              end: fieldValueByName(name: $endField) {
+                ... on ProjectV2ItemFieldDateValue { date }
+              }
+            }
+          }
         }
       }
     }
@@ -96,8 +136,23 @@ query($id: ID!) {
 summary="$(node -e '
 const fs = require("fs");
 const parent = JSON.parse(fs.readFileSync(process.argv[1], "utf8")).data.node;
+const projectTitle = process.argv[2];
+const doneOptionName = process.argv[3];
+const projectId = process.argv[4];
 const children = parent.subIssues?.nodes || [];
 const parentLabels = (parent.labels?.nodes || []).map((entry) => entry.name);
+function projectItem(issue) {
+  return (issue.projectItems?.nodes || []).find((item) => item?.project?.id === projectId && item?.project?.title === projectTitle) || null;
+}
+function terminalState(issue) {
+  const labels = (issue.labels?.nodes || []).map((entry) => entry.name);
+  const item = projectItem(issue);
+  const projectDone = item?.status?.name === doneOptionName;
+  const hasEnd = Boolean(item?.end?.date);
+  const archived = labels.includes("status:archived");
+  const closed = issue.state === "CLOSED";
+  return { labels, projectDone, hasEnd, archived, closed };
+}
 if (!parentLabels.includes("type:series-parent")) {
   console.error(`Issue #${parent.number} is not a series parent.`);
   process.exit(2);
@@ -106,10 +161,18 @@ if (children.length === 0) {
   console.log(JSON.stringify({ action: "skip", reason: `Series parent #${parent.number} has no child issues.` }));
   process.exit(0);
 }
-const incomplete = children.filter((child) => {
-  const labels = (child.labels?.nodes || []).map((entry) => entry.name);
-  return child.state !== "CLOSED" || !labels.includes("status:archived");
-});
+const childStates = children.map((child) => ({ child, terminal: terminalState(child) }));
+const repairableDrift = childStates.filter(({ terminal }) => terminal.closed && terminal.projectDone && terminal.hasEnd && !terminal.archived);
+if (repairableDrift.length > 0) {
+  console.log(JSON.stringify({
+    action: "drift",
+    reason: `Series parent #${parent.number} has repairable terminal drift in child issue(s): ${repairableDrift.map(({ child }) => `#${child.number}`).join(", ")}. These child issues are closed with Project Done and End set, but are missing status:archived.`,
+  }));
+  process.exit(0);
+}
+const incomplete = childStates
+  .filter(({ terminal }) => !terminal.closed || !terminal.archived || !terminal.projectDone || !terminal.hasEnd)
+  .map(({ child }) => child);
 if (incomplete.length > 0) {
   console.log(JSON.stringify({
     action: "skip",
@@ -117,7 +180,8 @@ if (incomplete.length > 0) {
   }));
   process.exit(0);
 }
-if (parent.state !== "OPEN" && parentLabels.includes("status:archived")) {
+const parentTerminal = terminalState(parent);
+if (parent.state !== "OPEN" && parentTerminal.archived && parentTerminal.projectDone && parentTerminal.hasEnd) {
   console.log(JSON.stringify({ action: "skip", reason: `Series parent #${parent.number} is already finalized.` }));
   process.exit(0);
 }
@@ -126,15 +190,20 @@ console.log(JSON.stringify({
   action: "finalize",
   parentNumber: parent.number,
   parentUrl: parent.url,
-  body: `OpenSpec series completed. All child changes are closed with \`status:archived\`.\n\nArchived child changes:\n${childLines.join("\n")}`,
+  body: `OpenSpec series completed. All child changes are closed with \`status:archived\`, Project \`Done\`, and Project \`End\` set.\n\nArchived child changes:\n${childLines.join("\n")}`,
 }));
-' "$parent_file")"
+' "$parent_file" "$project_title" "$done_option_name" "$project_id")"
 
 action="$(node -e 'const data = JSON.parse(process.argv[1]); process.stdout.write(data.action);' "$summary")"
 
 if [[ "$action" == "skip" ]]; then
   node -e 'const data = JSON.parse(process.argv[1]); console.log(data.reason);' "$summary"
   exit 0
+fi
+
+if [[ "$action" == "drift" ]]; then
+  node -e 'const data = JSON.parse(process.argv[1]); console.error(data.reason);' "$summary"
+  exit 1
 fi
 
 parent_number="$(node -e 'const data = JSON.parse(process.argv[1]); process.stdout.write(String(data.parentNumber));' "$summary")"
