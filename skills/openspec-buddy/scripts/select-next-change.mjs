@@ -154,6 +154,7 @@ for (const issue of issues) {
 }
 const candidates = [];
 const rejected = [];
+const staleClaimCandidates = [];
 
 for (const issue of issues) {
   const labels = normalizeLabels(issue.labels);
@@ -161,6 +162,20 @@ for (const issue of issues) {
 
   if (labels.includes("type:series-parent") || labels.includes("status:tracking")) {
     rejected.push({ number: issue.number, reason: "series parent issue" });
+    continue;
+  }
+
+  if (labels.includes("status:claimed")) {
+    if (parsed.metadata?.change_id && activeChanges.has(parsed.metadata.change_id)) {
+      staleClaimCandidates.push({
+        number: issue.number,
+        title: issue.title,
+        url: issue.url,
+        change_id: parsed.metadata.change_id,
+        claim_branch: parsed.metadata.claim_branch,
+      });
+    }
+    rejected.push({ number: issue.number, reason: "already claimed; skipped until stale-claim fallback" });
     continue;
   }
 
@@ -273,7 +288,14 @@ if (scored.length === 0) {
     process.exit(0);
   }
 
-  process.stdout.write(`${JSON.stringify({ selected: null, reason: "No executable OpenSpec Buddy issue.", rejected }, null, 2)}\n`);
+  process.stdout.write(`${JSON.stringify({
+    selected: null,
+    reason: staleClaimCandidates.length > 0
+      ? "No executable OpenSpec Buddy issue; stale-claim recovery candidates require verification."
+      : "No executable OpenSpec Buddy issue.",
+    stale_claim_candidates: staleClaimCandidates,
+    rejected,
+  }, null, 2)}\n`);
   process.exit(0);
 }
 

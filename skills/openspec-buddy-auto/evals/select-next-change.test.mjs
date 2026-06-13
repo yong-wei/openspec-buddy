@@ -8,13 +8,13 @@ const currentFile = fileURLToPath(import.meta.url);
 const selector = path.resolve(path.dirname(currentFile), "../../openspec-buddy/scripts/select-next-change.mjs");
 process.env.OPENSPEC_BUDDY_BASE_BRANCH = "develop";
 
-function issue({ number, changeId, series, labels = [], blockedBy = [], blocking = [], risk = "medium", baseBranch = "develop", bodyOverrides = "" }) {
+function issue({ number, changeId, series, labels = [], status = "status:ready", blockedBy = [], blocking = [], risk = "medium", baseBranch = "develop", bodyOverrides = "" }) {
   return {
     number,
     title: `OpenSpec: ${changeId}`,
     state: "OPEN",
     url: `https://github.example.test/issues/${number}`,
-    labels: ["status:ready", `series:${series}`, `risk:${risk}`, "mode:isolated", ...labels].map((name) => ({ name })),
+    labels: [status, `series:${series}`, `risk:${risk}`, "mode:isolated", ...labels].filter(Boolean).map((name) => ({ name })),
     body: `---
 change_id: ${changeId}
 claim_branch: ${changeId}
@@ -100,6 +100,46 @@ const baseInput = {
   const result = runSelector({ ...baseInput, currentSeries: "beta" });
   assert.equal(result.selected.change_id, "same-series-next");
   assert.equal(result.selected.series, "beta");
+}
+
+{
+  const result = runSelector({
+    activeChanges: ["claimed-work", "ready-work"],
+    issues: [
+      issue({
+        number: 20,
+        changeId: "claimed-work",
+        series: "alpha",
+        status: "status:claimed",
+      }),
+      issue({
+        number: 21,
+        changeId: "ready-work",
+        series: "alpha",
+      }),
+    ],
+  });
+  assert.equal(result.selected.change_id, "ready-work");
+  assert.equal(result.selected.number, 21);
+  assert.equal(result.rejected.find((entry) => entry.number === 20).reason, "already claimed; skipped until stale-claim fallback");
+}
+
+{
+  const result = runSelector({
+    activeChanges: ["claimed-work"],
+    issues: [
+      issue({
+        number: 20,
+        changeId: "claimed-work",
+        series: "alpha",
+        status: "status:claimed",
+      }),
+    ],
+  });
+  assert.equal(result.selected, null);
+  assert.equal(result.stale_claim_candidates.length, 1);
+  assert.equal(result.stale_claim_candidates[0].change_id, "claimed-work");
+  assert.match(result.reason, /stale-claim recovery/);
 }
 
 {

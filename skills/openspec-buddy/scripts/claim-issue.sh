@@ -6,6 +6,7 @@ issue_number="${1:-}"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/load-config.sh"
 source "$script_dir/github-fetch.sh"
+source "$script_dir/claim-lock.sh"
 # shellcheck source=./cache-signal.sh
 source "$script_dir/cache-signal.sh"
 openspec_buddy_require_core_config
@@ -13,17 +14,29 @@ openspec_buddy_require_core_config
 
 tmp_dir="$(mktemp -d)"
 created_branch_lock=""
+change_id=""
+claim_branch=""
+viewer=""
+repo_nwo=""
+claim_id=""
+lease_until=""
+claim_lock_written=0
+claim_completed=0
 viewer="$(gh api user --jq .login)"
 
 cleanup() {
-  if [[ -n "$created_branch_lock" ]]; then
-    git push origin ":refs/heads/$created_branch_lock" >/dev/null 2>&1 || true
+  if [[ -n "$created_branch_lock" && -n "$issue_number" && -n "$change_id" && -n "$claim_branch" && -n "$viewer" && -n "$claim_id" && -n "$lease_until" && -n "$repo_nwo" ]]; then
+    buddy_delete_claim_branch_if_owned "$issue_number" "$change_id" "$claim_branch" "$viewer" "$claim_id" "$lease_until" "$repo_nwo" "$tmp_dir/cleanup" || true
+  fi
+  if [[ "$claim_lock_written" == "1" && "$claim_completed" != "1" && -n "$issue_number" && -n "$change_id" && -n "$claim_branch" && -n "$viewer" && -n "$claim_id" && -n "$lease_until" ]]; then
+    buddy_release_claim_lock "$issue_number" "$change_id" "$claim_branch" "$viewer" "$claim_id" "$lease_until" "claim did not complete" >/dev/null 2>&1 || true
   fi
   rm -rf "$tmp_dir"
 }
 trap cleanup EXIT
 
-buddy_signal_apply "$(buddy_cache_dir)"
+cache_dir="$(buddy_cache_dir)"
+buddy_signal_apply "$cache_dir"
 
 if [[ -z "$issue_number" ]]; then
   gh issue list \
@@ -109,6 +122,10 @@ base_branch="$(node -e 'const fs=require("fs"); const data=JSON.parse(fs.readFil
 repo_nwo="$(buddy_repo_nwo)"
 owner="${repo_nwo%%/*}"
 repo_name="${repo_nwo#*/}"
+viewer="$(gh api user --jq .login)"
+
+buddy_preflight_claim_truth_check "$issue_number" "$change_id" "$claim_branch" "$viewer" "$repo_nwo" "$tmp_dir/preflight-before-relationships"
+
 blocked_by_file="$tmp_dir/blocked-by.json"
 buddy_issue_relationships_graphql "$owner" "$repo_name" "$issue_number" > "$blocked_by_file"
 
@@ -138,10 +155,17 @@ node "$script_dir/find-coupling-conflicts.mjs" "$tmp_dir/issues-for-coupling.jso
 
 git fetch origin "$base_branch" >/dev/null
 base_sha="$(git rev-parse "origin/$base_branch")"
-if git ls-remote --exit-code --heads origin "$claim_branch" >/dev/null 2>&1; then
-  echo "Remote claim branch already exists: $claim_branch" >&2
-  exit 1
-fi
+claim_id="$(uuidgen 2>/dev/null || node -e 'console.log(crypto.randomUUID())')"
+lease_until="$(node -e 'const hours=Number(process.env.OPENSPEC_BUDDY_CLAIM_TTL_HOURS); console.log(new Date(Date.now()+hours*3600*1000).toISOString())')"
+
+buddy_preflight_claim_truth_check "$issue_number" "$change_id" "$claim_branch" "$viewer" "$repo_nwo" "$tmp_dir/preflight-before-lock"
+buddy_write_minimal_claim_lock "$issue_number" "$change_id" "$claim_branch" "$base_branch" "$base_sha" "$viewer" "$claim_id" "$lease_until" "$issue_file" "$tmp_dir/adopted-body.md" true
+claim_lock_written=1
+buddy_verify_claim_lock_rest "$issue_number" "$change_id" "$viewer" "$claim_id" "$lease_until" "$repo_nwo" "$tmp_dir/verify-lock" "$claim_branch"
+
+buddy_invalidate_issue_cache "$cache_dir" "$issue_number"
+buddy_invalidate_ready_scan_cache "$cache_dir"
+
 gh issue develop "$issue_number" --name "$claim_branch" --base "$base_branch" >/dev/null
 created_branch_lock="$claim_branch"
 if ! git ls-remote --exit-code --heads origin "$claim_branch" >/dev/null 2>&1; then
@@ -154,40 +178,11 @@ if [[ "$linked_branches" != *"$claim_branch"* ]]; then
   exit 1
 fi
 
-gh issue edit "$issue_number" --body-file "$tmp_dir/adopted-body.md"
-
-claim_id="$(uuidgen 2>/dev/null || node -e 'console.log(crypto.randomUUID())')"
-lease_until="$(node -e 'const hours=Number(process.env.OPENSPEC_BUDDY_CLAIM_TTL_HOURS); console.log(new Date(Date.now()+hours*3600*1000).toISOString())')"
-
-gh issue edit "$issue_number" --add-assignee "$viewer"
-OPENSPEC_BUDDY_SKIP_SIGNAL_PUBLISH=1 "$script_dir/set-status-label.sh" "$issue_number" "status:claimed"
-
-gh issue comment "$issue_number" --body "$(cat <<EOF
-OpenSpec Buddy Claim
-
-claim_id: $claim_id
-agent: @$viewer
-change_id: $change_id
-branch: $claim_branch
-base_branch: $base_branch
-base_sha: $base_sha
-lease_until: $lease_until
-adopted_from_open_issue: true
-EOF
-)"
-
-gh issue view "$issue_number" --json labels,assignees,body > "$tmp_dir/claimed.json"
-node -e '
-const fs = require("fs");
-const issue = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-const viewer = process.argv[2];
-const labels = issue.labels.map((label) => label.name.replace(/^status:\s+/, "status:"));
-const assignees = issue.assignees.map((assignee) => assignee.login);
-if (!labels.includes("status:claimed") || !assignees.includes(viewer)) process.exit(1);
-if (!/<!--\s*openspec-buddy\s*\r?\n/.test(issue.body || "")) process.exit(2);
-' "$tmp_dir/claimed.json" "$viewer"
+buddy_verify_claim_lock_rest "$issue_number" "$change_id" "$viewer" "$claim_id" "$lease_until" "$repo_nwo" "$tmp_dir/verify-after-development-link" "$claim_branch"
 
 created_branch_lock=""
+"$script_dir/set-project-status.sh" "$issue_number" "status:claimed"
 "$script_dir/set-project-date.sh" "$issue_number" "Start" "$(date +%F)"
+claim_completed=1
 buddy_signal_publish claim "issue:$issue_number" "ready-scan" "project"
 printf 'Claimed open issue #%s for change %s on branch %s with claim %s\n' "$issue_number" "$change_id" "$claim_branch" "$claim_id"

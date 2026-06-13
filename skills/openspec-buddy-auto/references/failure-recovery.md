@@ -6,6 +6,7 @@ Set `status:needs-human` when:
 
 ```text
 issue metadata disagrees with OpenSpec files
+status:ready issue already has a claim branch, Development link, claim comment, or open PR
 claim branch exists with unknown commits
 open PR exists for the same claim branch
 dependency status is ambiguous
@@ -43,10 +44,12 @@ confidence, set `status:needs-human` instead of synthesizing an archive record.
 A stale claim can be recovered only when:
 
 ```text
+there is no other ready/backlog/unlabeled claimable issue
 lease_until has expired
 no open PR exists
 claim branch has no commits beyond recorded base_sha
 no newer claim comment exists
+issue has no new assignee or status change after the stale claim
 ```
 
 Otherwise stop. Do not force-push or delete another agent's branch.

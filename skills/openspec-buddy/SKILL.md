@@ -110,7 +110,7 @@ one GitHub Issue = one change_id = one claim branch = one OpenSpec change = one 
 
 The issue metadata must include `claim_branch`, and `claim_branch` must equal `change_id`.
 
-An ordinary open issue can be a source issue before it is adopted. The first Buddy action on that source issue is always `claim`: verify the current worktree is aligned with the configured base branch, create the Development branch lock, assign the agent, add hidden Buddy metadata to the same original issue, and then decide whether the issue is simple enough to become one executable change or complex enough to become a tracking parent with child change issues. Do not create a mirror issue just to hold Buddy metadata for an existing issue.
+An ordinary open issue can be a source issue before it is adopted. The first Buddy action on that source issue is always `claim`: verify the current worktree is aligned with the configured base branch, read GitHub truth for partial-claim signals, write the minimal claim lock, re-read GitHub truth to prove the latest active claim belongs to this run, and only then create the Development branch lock and Project updates. Hidden Buddy metadata is added to the same original issue as part of the minimal claim lock. After the lock succeeds, decide whether the issue is simple enough to become one executable change or complex enough to become a tracking parent with child change issues. Do not create a mirror issue just to hold Buddy metadata for an existing issue.
 
 ## Execution Retrospective Requirement
 
@@ -139,16 +139,22 @@ Steps:
    ```
    The script first runs `sync-base-branch.sh`, then lists open issues when no number is provided, skips series parents, issues assigned to another user, active or terminal status labels, and accepts unlabeled, `status:backlog`, or `status:ready` issues. The helper does not force a worktree branch switch: it fast-forwards only when the current branch is `$OPENSPEC_BUDDY_BASE_BRANCH`; otherwise it requires the current `HEAD` to match `origin/$OPENSPEC_BUDDY_BASE_BRANCH`.
 2. If the selected issue already has valid Buddy metadata, the script delegates to `claim-change.sh`.
-3. If the selected issue is an ordinary open issue, the script derives `change_id` as `issue-<number>-<title-slug>`, creates `origin/<change_id>` through `gh issue develop`, verifies the issue Development branch link, prepends a hidden `<!-- openspec-buddy ... -->` metadata block, assigns the current GitHub viewer, sets `status:claimed`, syncs the GitHub Project to `In Progress`, and sets Project `Start`.
-4. Re-read the claimed issue and confirm:
-   - the issue has the current viewer as assignee
+3. If the selected issue is an ordinary open issue, the script derives `change_id` as `issue-<number>-<title-slug>` and prepends a hidden `<!-- openspec-buddy ... -->` metadata block as part of the minimal claim lock.
+4. Claim uses a hard gate:
+   - before writing, bypass cache and read GitHub truth for issue state/labels/assignees, claim comments, same-name remote branch, Development link, and open PR
+   - write only the minimal lock: assignee, `status:claimed`, Buddy metadata when adopting an ordinary issue, and an `OpenSpec Buddy Claim` comment with `claim_id` and `lease_until`
+   - immediately re-read GitHub truth through REST and confirm the latest active claim belongs to this `claim_id`
+   - only after that verification succeeds, create `origin/<change_id>` through `gh issue develop`, verify the issue Development branch link, sync Project Status to `In Progress`, and set Project `Start`
+   - if verification fails, stop the issue and do not create Development link, branch, Project updates, PR, or implementation changes
+5. Re-read the claimed issue and confirm:
    - `status:claimed` is present
-   - the Development branch exists and is linked
+   - the latest active `OpenSpec Buddy Claim` comment belongs to this `claim_id`
+   - the Development branch exists and is linked after claim verification
    - `parse-issue-metadata.mjs` parses either front matter or the hidden Buddy block
-5. Classify the claimed issue immediately:
+6. Classify the claimed issue immediately:
    - Simple issue: keep the claimed issue as the single executable change, run `openspec-explore` only as needed, create the local OpenSpec change under `openspec/changes/<change_id>`, then continue with `apply`.
    - Complex issue: keep the claim while decomposing. Create child executable issues with their own Buddy metadata, link them as sub-issues or dependencies, then convert the original issue to `type:series-parent` and `status:tracking` only after the child issues exist. The original issue remains the parent tracking record; do not create a second "original task" issue.
-6. If complexity is unclear after a bounded read of the issue and repository context, keep the issue claimed and ask the user whether to treat it as simple or decompose it. Do not release the claim merely because classification needs a human decision.
+7. If complexity is unclear after a bounded read of the issue and repository context, keep the issue claimed and ask the user whether to treat it as simple or decompose it. Do not release the claim merely because classification needs a human decision.
 
 When a complex issue is decomposed, the original issue is no longer an executable change. The child issues carry the one-issue/one-change mapping.
 
@@ -273,14 +279,17 @@ Steps:
    - `claim_branch` equals `change_id`
    - `base_branch` equals `$OPENSPEC_BUDDY_BASE_BRANCH`
    - execution mode and branch constraints are satisfiable
-6. If the issue is `status:ready`, claim it with a linked Development branch and remote branch lock:
+6. If the issue is `status:ready`, acquire the minimal claim lock and verify it before any peripheral mutation:
    ```bash
    <openspec-buddy-skill-dir>/scripts/claim-change.sh <issue-number>
    ```
-   The claim creates `origin/<change_id>` from the declared `base_branch` using
-   `gh issue develop`, verifies that the issue Development branch list contains
-   the claim branch, writes a structured claim comment, and sets a lease.
-   It also mirrors the issue status to the Project `Status` field and sets Project `Start` to the current date.
+   The claim first writes only assignee, `status:claimed`, and a structured
+   claim comment with lease. It then re-reads GitHub truth through REST and
+   verifies the latest active claim belongs to this `claim_id`. Only after that
+   does it create or reuse `origin/<change_id>` from the declared `base_branch`
+   through `gh issue develop`, verify that the issue Development branch list
+   contains the claim branch, mirror the issue status to the Project `Status`
+   field, and set Project `Start` to the current date.
    If the issue is already `status:claimed`, do not claim it again. Re-read the
    issue and confirm that the current viewer is the assignee, `origin/<change_id>`
    exists, the issue Development branch list contains `<change_id>`, and the

@@ -40,6 +40,7 @@ function statusLabel(labels) {
 }
 
 const candidates = [];
+const staleCandidates = [];
 const rejected = [];
 
 for (const issue of issues) {
@@ -60,6 +61,16 @@ for (const issue of issues) {
 
   if (labels.includes("type:series-parent") || status === "status:tracking") {
     rejected.push({ number, reason: "series parent issue" });
+    continue;
+  }
+
+  if (status === "status:claimed") {
+    staleCandidates.push({
+      number,
+      title: issue.title,
+      url: issue.url,
+    });
+    rejected.push({ number, reason: "already claimed; skipped until stale-claim fallback" });
     continue;
   }
 
@@ -88,6 +99,18 @@ for (const issue of issues) {
 candidates.sort((left, right) => left.number - right.number);
 
 if (candidates.length === 0) {
+  staleCandidates.sort((left, right) => left.number - right.number);
+  if (staleCandidates.length > 0) {
+    process.stdout.write(`${JSON.stringify({
+      selected: {
+        ...staleCandidates[0],
+        stale_claim: true,
+        reason: "no normal claimable issue; stale-claim recovery verification required",
+      },
+      rejected,
+    }, null, 2)}\n`);
+    process.exit(0);
+  }
   process.stdout.write(`${JSON.stringify({ selected: null, reason: "No claimable open issue.", rejected }, null, 2)}\n`);
   process.exit(0);
 }

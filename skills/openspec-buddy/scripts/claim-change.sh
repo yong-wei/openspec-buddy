@@ -10,16 +10,28 @@ fi
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/load-config.sh"
 source "$script_dir/github-fetch.sh"
+source "$script_dir/claim-lock.sh"
 # shellcheck source=./cache-signal.sh
 source "$script_dir/cache-signal.sh"
 openspec_buddy_require_core_config
 "$script_dir/sync-base-branch.sh"
 tmp_dir="$(mktemp -d)"
 created_branch_lock=""
+change_id=""
+claim_branch=""
+viewer=""
+repo_nwo=""
+claim_id=""
+lease_until=""
+claim_lock_written=0
+claim_completed=0
 
 cleanup() {
-  if [[ -n "$created_branch_lock" ]]; then
-    git push origin ":refs/heads/$created_branch_lock" >/dev/null 2>&1 || true
+  if [[ -n "$created_branch_lock" && -n "$issue_number" && -n "$change_id" && -n "$claim_branch" && -n "$viewer" && -n "$claim_id" && -n "$lease_until" && -n "$repo_nwo" ]]; then
+    buddy_delete_claim_branch_if_owned "$issue_number" "$change_id" "$claim_branch" "$viewer" "$claim_id" "$lease_until" "$repo_nwo" "$tmp_dir/cleanup" || true
+  fi
+  if [[ "$claim_lock_written" == "1" && "$claim_completed" != "1" && -n "$issue_number" && -n "$change_id" && -n "$claim_branch" && -n "$viewer" && -n "$claim_id" && -n "$lease_until" ]]; then
+    buddy_release_claim_lock "$issue_number" "$change_id" "$claim_branch" "$viewer" "$claim_id" "$lease_until" "claim did not complete" >/dev/null 2>&1 || true
   fi
   rm -rf "$tmp_dir"
 }
@@ -29,6 +41,7 @@ issue_file="$tmp_dir/issue.json"
 body_file="$tmp_dir/body.md"
 metadata_file="$tmp_dir/metadata.json"
 issues_file="$tmp_dir/issues.json"
+stale_recovery=0
 
 gh issue view "$issue_number" --json id,number,title,labels,assignees,body,url > "$issue_file"
 node -e 'const fs=require("fs"); const issue=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(issue.body || "");' "$issue_file" > "$body_file"
@@ -44,14 +57,18 @@ if [[ "$change_id" != "$claim_branch" ]]; then
   exit 1
 fi
 
-buddy_signal_apply "$(buddy_cache_dir)"
+cache_dir="$(buddy_cache_dir)"
+buddy_signal_apply "$cache_dir"
 
 if ! gh issue develop --help >/dev/null 2>&1; then
   echo "gh issue develop is required to create the linked Development branch. Update GitHub CLI before claiming Buddy issues." >&2
   exit 1
 fi
 
-if ! node -e 'const fs=require("fs"); const issue=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); const labels=issue.labels.map((l)=>l.name.replace(/^status:\s+/,"status:")); process.exit(labels.includes("status:ready") ? 0 : 1);' "$issue_file"; then
+issue_status="$(node -e 'const fs=require("fs"); const issue=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); const labels=issue.labels.map((l)=>l.name.replace(/^status:\s+/,"status:")); process.stdout.write(labels.find((label)=>label.startsWith("status:")) || "");' "$issue_file")"
+if [[ "$issue_status" == "status:claimed" ]]; then
+  stale_recovery=1
+elif [[ "$issue_status" != "status:ready" ]]; then
   echo "Issue #$issue_number is not status:ready." >&2
   exit 1
 fi
@@ -64,6 +81,14 @@ fi
 repo_nwo="$(buddy_repo_nwo)"
 owner="${repo_nwo%%/*}"
 repo_name="${repo_nwo#*/}"
+viewer="$(gh api user --jq .login)"
+
+if [[ "$stale_recovery" == "1" ]]; then
+  buddy_stale_claim_recoverable "$issue_number" "$change_id" "$claim_branch" "$repo_nwo" "$tmp_dir/stale-recovery-before-relationships"
+else
+  buddy_preflight_claim_truth_check "$issue_number" "$change_id" "$claim_branch" "$viewer" "$repo_nwo" "$tmp_dir/preflight-before-relationships"
+fi
+
 blocked_by_file="$tmp_dir/blocked-by.json"
 buddy_issue_relationships_graphql "$owner" "$repo_name" "$issue_number" > "$blocked_by_file"
 
@@ -107,52 +132,42 @@ node "$script_dir/find-coupling-conflicts.mjs" "$issues_file" "$issue_number" "$
 
 git fetch origin "$base_branch" >/dev/null
 base_sha="$(git rev-parse "origin/$base_branch")"
-if git ls-remote --exit-code --heads origin "$claim_branch" >/dev/null 2>&1; then
-  echo "Remote claim branch already exists: $claim_branch" >&2
-  exit 1
+claim_id="$(uuidgen 2>/dev/null || node -e 'console.log(crypto.randomUUID())')"
+lease_until="$(node -e 'const hours=Number(process.env.OPENSPEC_BUDDY_CLAIM_TTL_HOURS); console.log(new Date(Date.now()+hours*3600*1000).toISOString())')"
+
+if [[ "$stale_recovery" == "1" ]]; then
+  buddy_stale_claim_recoverable "$issue_number" "$change_id" "$claim_branch" "$repo_nwo" "$tmp_dir/stale-recovery-before-lock"
+else
+  buddy_preflight_claim_truth_check "$issue_number" "$change_id" "$claim_branch" "$viewer" "$repo_nwo" "$tmp_dir/preflight-before-lock"
 fi
-gh issue develop "$issue_number" --name "$claim_branch" --base "$base_branch" >/dev/null
-created_branch_lock="$claim_branch"
+buddy_write_minimal_claim_lock "$issue_number" "$change_id" "$claim_branch" "$base_branch" "$base_sha" "$viewer" "$claim_id" "$lease_until" "$issue_file"
+claim_lock_written=1
+buddy_verify_claim_lock_rest "$issue_number" "$change_id" "$viewer" "$claim_id" "$lease_until" "$repo_nwo" "$tmp_dir/verify-lock" "$claim_branch"
+
+buddy_invalidate_issue_cache "$cache_dir" "$issue_number"
+buddy_invalidate_ready_scan_cache "$cache_dir"
+
+if buddy_claim_branch_exists "$claim_branch"; then
+  linked_branches="$(gh issue develop --list "$issue_number" 2>/dev/null || true)"
+else
+  gh issue develop "$issue_number" --name "$claim_branch" --base "$base_branch" >/dev/null
+  created_branch_lock="$claim_branch"
+  linked_branches="$(gh issue develop --list "$issue_number" 2>/dev/null || true)"
+fi
 if ! git ls-remote --exit-code --heads origin "$claim_branch" >/dev/null 2>&1; then
   echo "gh issue develop did not create remote branch: $claim_branch" >&2
   exit 1
 fi
-linked_branches="$(gh issue develop --list "$issue_number" 2>/dev/null || true)"
 if [[ "$linked_branches" != *"$claim_branch"* ]]; then
   echo "gh issue develop created $claim_branch, but the issue Development branch list did not show it." >&2
   exit 1
 fi
 
-viewer="$(gh api user --jq .login)"
-claim_id="$(uuidgen 2>/dev/null || node -e 'console.log(crypto.randomUUID())')"
-lease_until="$(node -e 'const hours=Number(process.env.OPENSPEC_BUDDY_CLAIM_TTL_HOURS); console.log(new Date(Date.now()+hours*3600*1000).toISOString())')"
-gh issue edit "$issue_number" --add-assignee "$viewer"
-OPENSPEC_BUDDY_SKIP_SIGNAL_PUBLISH=1 "$script_dir/set-status-label.sh" "$issue_number" "status:claimed"
-
-gh issue comment "$issue_number" --body "$(cat <<EOF
-OpenSpec Buddy Claim
-
-claim_id: $claim_id
-agent: @$viewer
-change_id: $change_id
-branch: $claim_branch
-base_branch: $base_branch
-base_sha: $base_sha
-lease_until: $lease_until
-EOF
-)"
-
-gh issue view "$issue_number" --json labels,assignees > "$tmp_dir/claimed.json"
-node -e '
-const fs = require("fs");
-const issue = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-const viewer = process.argv[2];
-const labels = issue.labels.map((label) => label.name.replace(/^status:\s+/, "status:"));
-const assignees = issue.assignees.map((assignee) => assignee.login);
-if (!labels.includes("status:claimed") || !assignees.includes(viewer)) process.exit(1);
-' "$tmp_dir/claimed.json" "$viewer"
+buddy_verify_claim_lock_rest "$issue_number" "$change_id" "$viewer" "$claim_id" "$lease_until" "$repo_nwo" "$tmp_dir/verify-after-development-link" "$claim_branch"
 
 created_branch_lock=""
+"$script_dir/set-project-status.sh" "$issue_number" "status:claimed"
 "$script_dir/set-project-date.sh" "$issue_number" "Start" "$(date +%F)"
+claim_completed=1
 buddy_signal_publish claim "issue:$issue_number" "ready-scan" "project"
 printf 'Claimed issue #%s for change %s on branch %s with claim %s\n' "$issue_number" "$change_id" "$claim_branch" "$claim_id"

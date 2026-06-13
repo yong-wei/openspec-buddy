@@ -25,16 +25,46 @@ GitHub review, Project, or merge truth.
 
 For GitHub-coordinated changes, use `openspec-buddy claim [issue-number]`. If
 no issue number is supplied, it must select the smallest claimable open issue
-number. The claim must create:
+number.
+
+Claim is a hard gate, not a best-effort setup step. Candidate lists and Buddy
+caches are only accelerators; immediately before writing claim state the claim
+script must read GitHub truth for the target issue, claim branch, open PR, and
+current claim comments. Before the claim lock is verified, it must not create
+or modify a Development link, Project fields, local branch, remote branch, or
+implementation files.
+
+The minimal claim lock writes only:
+
+```text
+status:claimed
+OpenSpec Buddy Claim comment with claim_id and lease_until
+issue assignee for the claiming agent
+Buddy metadata body for ordinary open issues adopted in place
+```
+
+Immediately after the minimal lock, the script must re-read GitHub through REST
+and verify:
+
+```text
+issue is still open
+issue is status:claimed
+latest valid OpenSpec Buddy Claim comment has this claim_id
+latest valid OpenSpec Buddy Claim comment has this lease_until
+latest valid OpenSpec Buddy Claim comment belongs to this agent
+```
+
+Only after that verification succeeds may the claim script create:
 
 ```text
 origin/<change_id>
 issue Development branch link for <change_id>
-status:claimed
-OpenSpec Buddy Claim comment with claim_id and lease_until
 Project Status: In Progress
 Project Start: current local date
 ```
+
+If verification fails, stop that issue immediately. Do not create a branch,
+Development link, Project update, PR, or implementation commit for the issue.
 
 If the claimed issue was an ordinary open issue, the claim adopts the same
 original issue by prepending the hidden Buddy metadata block. Do not create a

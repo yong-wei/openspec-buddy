@@ -4,7 +4,7 @@
     {
       "id": 1,
       "prompt": "使用 openspec-buddy-auto 处理下一个可以执行的 change。",
-      "expected_output": "先检查 OPENSPEC_BUDDY_* 环境变量并调用核心 sync-base-branch.sh 校验当前 worktree 与 origin/Buddy base branch 对齐，auto 不维护独立同步逻辑；只有当前分支就是 Buddy base branch 时才允许快进，worktree/topic 分支不得被切换或自动快进；调用 openspec-buddy claim；没有指定 issue 时选择最小编号的可 claim open issue，直接在原 issue 上加入 Buddy metadata，不创建镜像 issue，建立 gh issue develop Development 分支锁、指派当前用户、设置 status:claimed 并同步 Project Status/Start；普通开放 issue被收编后立即判断 simple/complex，简单 issue 创建或确认 OpenSpec change 后继续 apply，复杂 issue 拆分为 child issues 后把原 issue 转为 tracking parent。",
+      "expected_output": "先检查 OPENSPEC_BUDDY_* 环境变量并调用核心 sync-base-branch.sh 校验当前 worktree 与 origin/Buddy base branch 对齐，auto 不维护独立同步逻辑；只有当前分支就是 Buddy base branch 时才允许快进，worktree/topic 分支不得被切换或自动快进；调用 openspec-buddy claim；没有指定 issue 时选择最小编号的可 claim open issue，直接在原 issue 上加入 Buddy metadata，不创建镜像 issue；claim 前绕过缓存读取 GitHub 真源，先只写入 assignee、status:claimed、Buddy metadata 和 claim comment，REST 复查确认最新 active claim 属于本次 claim_id 后，才建立 gh issue develop Development 分支锁并同步 Project Status/Start；普通开放 issue被收编后立即判断 simple/complex，简单 issue 创建或确认 OpenSpec change 后继续 apply，复杂 issue 拆分为 child issues 后把原 issue 转为 tracking parent。",
       "files": []
     },
     {

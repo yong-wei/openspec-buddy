@@ -20,6 +20,11 @@ parents, and issues labeled with active or terminal `status:*` values. Missing
 status, `status:backlog`, and `status:ready` are claimable.
 Automatic selection uses the lowest issue number among those candidates.
 
+`status:claimed` is skipped by default. Do not inspect its lease while there
+is any `status:ready`, `status:backlog`, or unlabeled claimable issue. Claimed
+issues enter stale-claim investigation only as a fallback when no other
+claimable issue exists.
+
 After claim, immediately classify the issue:
 
 - Simple issue: adopt it as one executable Buddy change and continue with the
@@ -68,9 +73,17 @@ issue is not a type:series-parent tracking issue
 native blockedBy contains no open, unarchived issue
 no open PR exists for claim_branch
 origin/<claim_branch> does not exist
+issue has no existing Development link for claim_branch
+latest claim comment does not indicate another active or partial claim
 depends_on entries are not active unfinished OpenSpec changes
 same coupling_group has no claimed or in-progress issue
 ```
+
+If an issue is `status:ready` but already has `origin/<claim_branch>`, a
+Development link, an open PR for the same head branch, or an OpenSpec Buddy
+Claim comment, treat it as a partial claim or inconsistent state. Do not claim
+it as a normal ready issue; recover it through the stale-claim rules or mark it
+`status:needs-human` with the observed evidence.
 
 ## Local-Only Prepared Change Source
 

@@ -81,7 +81,7 @@ Human-readable issue description stays visible.
 
 {
   const claimScript = fs.readFileSync(claimIssue, "utf8");
-  assert.match(claimScript, /gh issue edit "\$issue_number" --body-file "\$tmp_dir\/adopted-body\.md"/);
+  assert.match(claimScript, /buddy_write_minimal_claim_lock .*\$tmp_dir\/adopted-body\.md/);
   assert.doesNotMatch(claimScript, /gh issue create/);
 }
 
@@ -119,7 +119,24 @@ Human-readable issue description stays visible.
 
   assert.equal(result.selected.number, 8);
   assert.equal(result.selected.reason, "lowest claimable issue number");
-  assert.equal(result.rejected.find((entry) => entry.number === 4).reason, "already claimed or active");
+  assert.equal(result.rejected.find((entry) => entry.number === 4).reason, "already claimed; skipped until stale-claim fallback");
+}
+
+{
+  const result = runNode(selector, {
+    issues: [
+      {
+        number: 4,
+        title: "Already claimed",
+        state: "OPEN",
+        labels: [{ name: "status:claimed" }],
+      },
+    ],
+  });
+
+  assert.equal(result.selected.number, 4);
+  assert.equal(result.selected.stale_claim, true);
+  assert.equal(result.selected.reason, "no normal claimable issue; stale-claim recovery verification required");
 }
 
 {
