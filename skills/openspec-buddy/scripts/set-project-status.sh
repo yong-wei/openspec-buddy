@@ -75,12 +75,12 @@ process.stdout.write(`${field.id} ${option.id}\n`);
   exit 1
 }
 
-item_id="$(buddy_project_item_id_from_subject_file "$subject_file" "$project_title")"
+item_id="$(buddy_project_item_id_for_subject_file "$subject_file" "$project_title" "$project_id")"
 item_present="$(buddy_project_item_present_in_subject_file "$subject_file" "$project_title")"
 
 if [[ -z "$item_id" ]]; then
   if [[ "$item_present" == "1" ]]; then
-    echo "Target is already in project \"$project_title\", but gh subject metadata does not expose an editable project item id." >&2
+    echo "Target is already in project \"$project_title\", but no editable project item id was found even after a target-scoped GraphQL refresh." >&2
     exit 1
   fi
   item_id="$(
