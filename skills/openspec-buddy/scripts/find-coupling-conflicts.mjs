@@ -4,11 +4,21 @@ import { spawnSync } from "node:child_process";
 
 const issueListPath = process.argv[2];
 const currentIssue = Number(process.argv[3]);
-const couplingGroup = process.argv[4];
+const couplingGroup = normalizeCouplingGroup(process.argv[4]);
 
-if (!issueListPath || !currentIssue || !couplingGroup) {
+if (!issueListPath || !currentIssue || process.argv[4] == null) {
   process.stderr.write("Usage: find-coupling-conflicts.mjs <issues-json> <current-issue-number> <coupling-group>\n");
   process.exit(2);
+}
+
+function normalizeCouplingGroup(value) {
+  const normalized = String(value || "").trim();
+  return normalized && normalized.toLowerCase() !== "none" ? normalized : "";
+}
+
+if (!couplingGroup) {
+  process.stdout.write("[]\n");
+  process.exit(0);
 }
 
 const issues = JSON.parse(fs.readFileSync(issueListPath, "utf8"));
@@ -29,7 +39,7 @@ for (const issue of issues) {
 
   if (parsed.status !== 0) continue;
   const metadata = JSON.parse(parsed.stdout);
-  if (metadata.coupling_group === couplingGroup) {
+  if (normalizeCouplingGroup(metadata.coupling_group) === couplingGroup) {
     conflicts.push({
       number: issue.number,
       title: issue.title,

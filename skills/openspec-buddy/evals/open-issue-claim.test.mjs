@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -11,6 +12,7 @@ const parser = path.join(skillDir, "scripts/parse-issue-metadata.mjs");
 const selector = path.join(skillDir, "scripts/select-claim-issue.mjs");
 const builder = path.join(skillDir, "scripts/build-open-issue-metadata.mjs");
 const claimIssue = path.join(skillDir, "scripts/claim-issue.sh");
+const couplingConflicts = path.join(skillDir, "scripts/find-coupling-conflicts.mjs");
 
 process.env.OPENSPEC_BUDDY_BASE_BRANCH = "integration";
 
@@ -83,6 +85,63 @@ Human-readable issue description stays visible.
   const claimScript = fs.readFileSync(claimIssue, "utf8");
   assert.match(claimScript, /buddy_write_minimal_claim_lock .*\$tmp_dir\/adopted-body\.md/);
   assert.doesNotMatch(claimScript, /gh issue create/);
+}
+
+{
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "coupling-none-"));
+  const issuesFile = path.join(tmpDir, "issues.json");
+  fs.writeFileSync(issuesFile, JSON.stringify([
+    {
+      number: 4,
+      title: "Claimed independent issue",
+      labels: [{ name: "status:claimed" }],
+      body: `---
+change_id: claimed-independent
+claim_branch: claimed-independent
+series: alpha
+coupling_group: none
+execution_mode: isolated
+base_branch: integration
+depends_on: []
+openspec_path: openspec/changes/claimed-independent
+risk: low
+area: demo
+---
+`,
+    },
+  ]));
+
+  const independent = spawnSync(process.execPath, [couplingConflicts, issuesFile, "8", "none"], { encoding: "utf8" });
+  assert.equal(independent.status, 0, independent.stderr || independent.stdout);
+
+  const coupled = spawnSync(process.execPath, [couplingConflicts, issuesFile, "8", "alpha"], { encoding: "utf8" });
+  assert.equal(coupled.status, 0, coupled.stderr || coupled.stdout);
+
+  fs.writeFileSync(issuesFile, JSON.stringify([
+    {
+      number: 6,
+      title: "Claimed coupled issue",
+      labels: [{ name: "status:claimed" }],
+      body: `---
+change_id: claimed-coupled
+claim_branch: claimed-coupled
+series: alpha
+coupling_group: alpha
+execution_mode: isolated
+base_branch: integration
+depends_on: []
+openspec_path: openspec/changes/claimed-coupled
+risk: low
+area: demo
+---
+`,
+    },
+  ]));
+
+  const conflict = spawnSync(process.execPath, [couplingConflicts, issuesFile, "8", "alpha"], { encoding: "utf8" });
+  assert.equal(conflict.status, 1);
+  assert.match(conflict.stderr, /Claimed coupled issue/);
+  fs.rmSync(tmpDir, { recursive: true, force: true });
 }
 
 {
