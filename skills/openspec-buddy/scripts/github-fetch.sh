@@ -990,6 +990,17 @@ buddy_open_ready_scan_cache_file() {
   buddy_cache_path relationship "ready-scan-limit-$limit" "$cache_dir"
 }
 
+buddy_gh_api_paginated_array() {
+  local endpoint="$1"
+  gh api --paginate --slurp "$endpoint" | node -e '
+const fs = require("node:fs");
+const input = JSON.parse(fs.readFileSync(0, "utf8"));
+const pages = Array.isArray(input) ? input : [];
+const flattened = pages.flatMap((page) => Array.isArray(page) ? page : []);
+process.stdout.write(`${JSON.stringify(flattened)}\n`);
+'
+}
+
 buddy_pr_rest_bundle() {
   local repo_nwo="$1"
   local pr_number="$2"
@@ -1003,10 +1014,10 @@ buddy_pr_rest_bundle() {
   export BUDDY_REVIEW_COMMENTS_FILE="$cache_dir/review-comments-${pr_number}.json"
 
   [[ -f "$BUDDY_PR_REST_FILE" && "${OPENSPEC_BUDDY_CACHE_REFRESH:-}" != "1" ]] || gh api "repos/$repo_nwo/pulls/$pr_number" > "$BUDDY_PR_REST_FILE"
-  [[ -f "$BUDDY_REVIEWS_FILE" && "${OPENSPEC_BUDDY_CACHE_REFRESH:-}" != "1" ]] || gh api "repos/$repo_nwo/pulls/$pr_number/reviews?per_page=100" > "$BUDDY_REVIEWS_FILE"
-  [[ -f "$BUDDY_COMMITS_FILE" && "${OPENSPEC_BUDDY_CACHE_REFRESH:-}" != "1" ]] || gh api "repos/$repo_nwo/pulls/$pr_number/commits?per_page=100" > "$BUDDY_COMMITS_FILE"
-  [[ -f "$BUDDY_ISSUE_COMMENTS_FILE" && "${OPENSPEC_BUDDY_CACHE_REFRESH:-}" != "1" ]] || gh api "repos/$repo_nwo/issues/$pr_number/comments?per_page=100" > "$BUDDY_ISSUE_COMMENTS_FILE"
-  [[ -f "$BUDDY_REVIEW_COMMENTS_FILE" && "${OPENSPEC_BUDDY_CACHE_REFRESH:-}" != "1" ]] || gh api "repos/$repo_nwo/pulls/$pr_number/comments" --paginate > "$BUDDY_REVIEW_COMMENTS_FILE"
+  [[ -f "$BUDDY_REVIEWS_FILE" && "${OPENSPEC_BUDDY_CACHE_REFRESH:-}" != "1" ]] || buddy_gh_api_paginated_array "repos/$repo_nwo/pulls/$pr_number/reviews?per_page=100" > "$BUDDY_REVIEWS_FILE"
+  [[ -f "$BUDDY_COMMITS_FILE" && "${OPENSPEC_BUDDY_CACHE_REFRESH:-}" != "1" ]] || buddy_gh_api_paginated_array "repos/$repo_nwo/pulls/$pr_number/commits?per_page=100" > "$BUDDY_COMMITS_FILE"
+  [[ -f "$BUDDY_ISSUE_COMMENTS_FILE" && "${OPENSPEC_BUDDY_CACHE_REFRESH:-}" != "1" ]] || buddy_gh_api_paginated_array "repos/$repo_nwo/issues/$pr_number/comments?per_page=100" > "$BUDDY_ISSUE_COMMENTS_FILE"
+  [[ -f "$BUDDY_REVIEW_COMMENTS_FILE" && "${OPENSPEC_BUDDY_CACHE_REFRESH:-}" != "1" ]] || buddy_gh_api_paginated_array "repos/$repo_nwo/pulls/$pr_number/comments?per_page=100" > "$BUDDY_REVIEW_COMMENTS_FILE"
 }
 
 buddy_review_threads_graphql() {

@@ -33,6 +33,17 @@ run_with_timeout() {
   fi
 }
 
+gh_api_paginated_array() {
+  local endpoint="$1"
+  run_with_timeout gh api --paginate --slurp "$endpoint" | node -e '
+const fs = require("node:fs");
+const input = JSON.parse(fs.readFileSync(0, "utf8"));
+const pages = Array.isArray(input) ? input : [];
+const flattened = pages.flatMap((page) => Array.isArray(page) ? page : []);
+process.stdout.write(`${JSON.stringify(flattened)}\n`);
+'
+}
+
 resolve_pr_number() {
   local ref="$1"
   if [[ "$ref" =~ ^[0-9]+$ ]]; then
@@ -64,10 +75,10 @@ light_state_signature() {
   local commits_file="$tmp_dir/commits.json"
 
   run_with_timeout gh api "repos/$repo_nwo/pulls/$pr_number" > "$pr_file"
-  run_with_timeout gh api "repos/$repo_nwo/issues/$pr_number/comments?per_page=100" > "$issue_comments_file"
-  run_with_timeout gh api "repos/$repo_nwo/pulls/$pr_number/comments?per_page=100" > "$review_comments_file"
-  run_with_timeout gh api "repos/$repo_nwo/pulls/$pr_number/reviews?per_page=100" > "$reviews_file"
-  run_with_timeout gh api "repos/$repo_nwo/pulls/$pr_number/commits?per_page=100" > "$commits_file"
+  gh_api_paginated_array "repos/$repo_nwo/issues/$pr_number/comments?per_page=100" > "$issue_comments_file"
+  gh_api_paginated_array "repos/$repo_nwo/pulls/$pr_number/comments?per_page=100" > "$review_comments_file"
+  gh_api_paginated_array "repos/$repo_nwo/pulls/$pr_number/reviews?per_page=100" > "$reviews_file"
+  gh_api_paginated_array "repos/$repo_nwo/pulls/$pr_number/commits?per_page=100" > "$commits_file"
   cp "$pr_file" "$cache_dir/pr-rest-$pr_number.json"
   cp "$issue_comments_file" "$cache_dir/issue-comments-$pr_number.json"
   cp "$review_comments_file" "$cache_dir/review-comments-$pr_number.json"
