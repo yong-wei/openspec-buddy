@@ -110,15 +110,10 @@ If any condition is unclear, mark the issue `status:blocked` or `status:needs-hu
 
 ## Tie Breaker
 
-Prepared executable changes prefer:
-
-1. Issues from the current series when goal mode or the previous iteration has already started that series.
-2. Issues that unblock downstream changes through GitHub `blocking` relationships.
-3. Issues with larger direct or transitive blocking impact.
-4. Lower-risk issues.
-5. Older issue number.
-
-This deliberately prioritizes clearing dependency chains over sampling unrelated ready issues.
+Prepared executable changes prefer the oldest issue: select the smallest issue
+number among all currently executable issue-backed candidates. Current series,
+downstream `blocking` impact, and risk remain visible in selector output for
+diagnostics, but they do not outrank issue number.
 
 Never select an issue solely because it appears first in an old cached list.
 
@@ -126,6 +121,6 @@ Never select an issue solely because it appears first in an old cached list.
 
 Auto mode should keep a `currentSeries` value after claiming or completing a change. On the next iteration:
 
-- If the same series has any executable issue, select from that series.
-- If the same series has no executable issue, clear the preference and select globally.
+- If the same series has any executable issue, keep reporting the same-series marker.
+- Selection still chooses the smallest executable issue number globally.
 - If another agent claimed the preferred issue first, recalculate relationships and retry selection once.

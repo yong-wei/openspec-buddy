@@ -24,16 +24,36 @@ printf '%s\n' \
   '  cat "${GH_PR_FILE:?}"' \
   '  exit 0' \
   'fi' \
+  'if [[ "$1" == "api" && "${2:-}" == "--paginate" && "${3:-}" == "--slurp" && "${4:-}" == */issues/123/comments* ]]; then' \
+  '  printf "["' \
+  '  cat "${GH_ISSUE_COMMENTS_FILE:?}"' \
+  '  printf "]\n"' \
+  '  exit 0' \
+  'fi' \
   'if [[ "$1" == "api" && "$2" == */issues/123/comments* ]]; then' \
   '  cat "${GH_ISSUE_COMMENTS_FILE:?}"' \
+  '  exit 0' \
+  'fi' \
+  'if [[ "$1" == "api" && "${2:-}" == "--paginate" && "${3:-}" == "--slurp" && "${4:-}" == */pulls/123/comments* ]]; then' \
+  '  printf "[[]]\n"' \
   '  exit 0' \
   'fi' \
   'if [[ "$1" == "api" && "$2" == */pulls/123/comments* ]]; then' \
   '  printf "[]\n"' \
   '  exit 0' \
   'fi' \
+  'if [[ "$1" == "api" && "${2:-}" == "--paginate" && "${3:-}" == "--slurp" && "${4:-}" == */pulls/123/reviews* ]]; then' \
+  '  printf "[[]]\n"' \
+  '  exit 0' \
+  'fi' \
   'if [[ "$1" == "api" && "$2" == */pulls/123/reviews* ]]; then' \
   '  printf "[]\n"' \
+  '  exit 0' \
+  'fi' \
+  'if [[ "$1" == "api" && "${2:-}" == "--paginate" && "${3:-}" == "--slurp" && "${4:-}" == */pulls/123/commits* ]]; then' \
+  '  printf "["' \
+  '  cat "${GH_COMMITS_FILE:?}"' \
+  '  printf "]\n"' \
   '  exit 0' \
   'fi' \
   'if [[ "$1" == "api" && "$2" == */pulls/123/commits* ]]; then' \
@@ -230,6 +250,7 @@ printf '%s\n' \
   'fi' \
   'count="$((count + 1))"' \
   'printf "%s" "$count" > "$count_file"' \
+  'printf "%s\n" "${OPENSPEC_BUDDY_REUSE_PR_REST_CACHE:-}" >> "${VERIFY_REUSE_LOG_FILE:?}"' \
   'if [[ "$count" -eq 1 ]]; then' \
   '  echo "Review clearance verification failed:" >&2' \
   '  echo "- No review found from chatgpt-codex-connector." >&2' \
@@ -247,7 +268,9 @@ printf '%s\n' \
   > "$tmp_dir/verify-cache-refresh.sh"
 chmod +x "$tmp_dir/verify-cache-refresh.sh"
 export VERIFY_COUNT_FILE="$tmp_dir/verify-cache-refresh.count"
+export VERIFY_REUSE_LOG_FILE="$tmp_dir/verify-cache-refresh-reuse.log"
 rm -f "$VERIFY_COUNT_FILE"
+rm -f "$VERIFY_REUSE_LOG_FILE"
 export OPENSPEC_BUDDY_VERIFY_REVIEW_CLEAR_HELPER="$tmp_dir/verify-cache-refresh.sh"
 
 if ! timeout 5s "$helper" 123 > "$tmp_dir/cache-refresh-output.txt" 2> "$tmp_dir/cache-refresh-err.txt"; then
@@ -258,6 +281,11 @@ fi
 if ! grep -F 'cached head and commit state agree' "$tmp_dir/cache-refresh-output.txt" >/dev/null; then
   echo "wait-for-review-clear.sh did not return the cache refresh verifier success output" >&2
   cat "$tmp_dir/cache-refresh-output.txt" >&2
+  exit 1
+fi
+if [[ "$(tr '\n' ' ' < "$VERIFY_REUSE_LOG_FILE" | sed 's/ *$//')" != "0 1" ]]; then
+  echo "wait-for-review-clear.sh should only reuse REST cache after the light REST refresh" >&2
+  cat "$VERIFY_REUSE_LOG_FILE" >&2
   exit 1
 fi
 

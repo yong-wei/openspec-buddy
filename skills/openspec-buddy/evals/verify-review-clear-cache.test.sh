@@ -53,6 +53,7 @@ export OPENSPEC_BUDDY_PROJECT_NUMBER=1
 export OPENSPEC_BUDDY_PROJECT_TITLE=Repo
 export OPENSPEC_BUDDY_PR_REVIEW_REQUEST="@codex review 中文回复，即使没有重大问题也必须给出显式回复"
 export OPENSPEC_BUDDY_GH_CACHE_DIR="$cache_dir"
+export OPENSPEC_BUDDY_REUSE_PR_REST_CACHE=1
 
 output="$(BASH_ENV="$tmp_dir/gh-env.sh" bash "$helper" 123)"
 

@@ -25,6 +25,28 @@ if [[ "$1" == "api" && "$2" == */pulls/123 ]]; then
   cat "${GH_PR_FILE:?}"
   exit 0
 fi
+if [[ "$1" == "api" && "$2" == "--paginate" && "$3" == "--slurp" && "$4" == */pulls/123/commits* ]]; then
+  printf '['
+  cat "${GH_COMMITS_FILE:?}"
+  printf ']'
+  exit 0
+fi
+if [[ "$1" == "api" && "$2" == "--paginate" && "$3" == "--slurp" && "$4" == */issues/123/comments* ]]; then
+  printf '['
+  cat "${GH_COMMENTS_FILE:?}"
+  printf ']'
+  exit 0
+fi
+if [[ "$1" == "api" && "$2" == "--paginate" && "$3" == "--slurp" && "$4" == */pulls/123/reviews* ]]; then
+  printf '['
+  cat "${GH_REVIEWS_FILE:?}"
+  printf ']'
+  exit 0
+fi
+if [[ "$1" == "api" && "$2" == "--paginate" && "$3" == "--slurp" && "$4" == */pulls/123/comments* ]]; then
+  printf '[[]]\n'
+  exit 0
+fi
 if [[ "$1" == "api" && "$2" == */pulls/123/commits* ]]; then
   cat "${GH_COMMITS_FILE:?}"
   exit 0

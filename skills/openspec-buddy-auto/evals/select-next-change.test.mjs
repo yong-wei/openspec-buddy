@@ -98,8 +98,30 @@ const baseInput = {
 
 {
   const result = runSelector({ ...baseInput, currentSeries: "beta" });
-  assert.equal(result.selected.change_id, "same-series-next");
-  assert.equal(result.selected.series, "beta");
+  assert.equal(result.selected.change_id, "unblocks-two");
+  assert.equal(result.selected.number, 12);
+}
+
+{
+  const result = runSelector({
+    activeChanges: ["older-ready", "newer-unblocks"],
+    issues: [
+      issue({
+        number: 22,
+        changeId: "older-ready",
+        series: "alpha",
+        risk: "low",
+      }),
+      issue({
+        number: 30,
+        changeId: "newer-unblocks",
+        series: "alpha",
+        blocking: [{ number: 31 }, { number: 32 }],
+      }),
+    ],
+  });
+  assert.equal(result.selected.change_id, "older-ready");
+  assert.equal(result.selected.number, 22);
 }
 
 {

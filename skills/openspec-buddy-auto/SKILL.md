@@ -83,7 +83,7 @@ hatch: keep the normal PR, review, and issue/project synchronization flow.
 6. Re-read the claimed issue. If the claim adopted an ordinary open issue, classify it immediately:
    - Simple issue: create or confirm the matching local OpenSpec change and continue.
    - Complex issue: create child change issues, link them, convert the source issue to a tracking parent, then stop this iteration or claim the first child in the next iteration.
-7. For an already prepared Buddy issue with an active OpenSpec change, use `references/selection-rules.md` only after claim to decide whether it is executable now. Relationship-aware selection must ignore series parent issues, skip issues with open `blockedBy`, prefer the current series when one is already in progress, and prefer issues that unblock downstream changes.
+7. For an already prepared Buddy issue with an active OpenSpec change, use `references/selection-rules.md` only after claim to decide whether it is executable now. Relationship-aware selection must ignore series parent issues and skip issues with open `blockedBy`; among executable issue-backed candidates, select the smallest issue number globally. Current series and downstream blocking counts are diagnostic signals, not priority keys.
 8. Continue the `openspec-buddy apply` flow for the claimed executable issue:
    - verify the linked issue Development branch and remote branch lock
    - switch to branch `<change_id>`

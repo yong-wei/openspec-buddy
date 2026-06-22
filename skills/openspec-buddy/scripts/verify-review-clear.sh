@@ -44,7 +44,9 @@ owner="${repo_nwo%%/*}"
 repo="${repo_nwo#*/}"
 cache_dir="$(buddy_cache_dir "$tmp_dir/gh-cache")"
 
-buddy_invalidate_pr_rest_bundle_cache "$cache_dir" "$pr_number"
+if [[ "${OPENSPEC_BUDDY_REUSE_PR_REST_CACHE:-}" != "1" ]]; then
+  buddy_invalidate_pr_rest_bundle_cache "$cache_dir" "$pr_number"
+fi
 buddy_pr_rest_bundle "$repo_nwo" "$pr_number" "$cache_dir"
 cp "$BUDDY_PR_REST_FILE" "$pr_rest_file"
 cp "$BUDDY_REVIEWS_FILE" "$reviews_file"

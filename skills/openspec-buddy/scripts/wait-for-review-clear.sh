@@ -122,9 +122,12 @@ is_waitable_review_failure() {
 }
 
 run_clear_gate() {
+  local reuse_rest_cache="${1:-0}"
   local output_file="$tmp_dir/verify-output.txt"
   local status=0
-  OPENSPEC_BUDDY_GH_CACHE_DIR="$cache_dir" run_with_timeout "$verify_helper" "$pr_number" > "$output_file" 2>&1 || status="$?"
+  OPENSPEC_BUDDY_GH_CACHE_DIR="$cache_dir" \
+    OPENSPEC_BUDDY_REUSE_PR_REST_CACHE="$reuse_rest_cache" \
+    run_with_timeout "$verify_helper" "$pr_number" > "$output_file" 2>&1 || status="$?"
 
   if [[ "$status" -eq 0 ]]; then
     cat "$output_file"
@@ -152,7 +155,7 @@ sleep_if_needed() {
 }
 
 set +e
-run_clear_gate
+run_clear_gate 0
 gate_status="$?"
 set -e
 
@@ -171,7 +174,7 @@ while true; do
 
   if [[ "$first_check" -eq 1 || "$signature" != "$last_signature" || "$elapsed" -ge "$max_wait" ]]; then
     set +e
-    run_clear_gate
+    run_clear_gate 1
     gate_status="$?"
     set -e
 

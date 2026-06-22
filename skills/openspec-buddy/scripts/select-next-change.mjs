@@ -245,12 +245,7 @@ const scored = candidates.map((candidate) => {
 });
 
 scored.sort((left, right) => {
-  return (
-    right.sameSeriesScore - left.sameSeriesScore ||
-    right.blockingScore - left.blockingScore ||
-    left.riskScore - right.riskScore ||
-    left.issue.number - right.issue.number
-  );
+  return left.issue.number - right.issue.number;
 });
 
 if (scored.length === 0) {
