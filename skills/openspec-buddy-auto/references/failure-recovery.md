@@ -13,6 +13,7 @@ dependency status is ambiguous
 review loop exceeds configured limit
 mergeability is blocked by non-actionable external state
 archive produces spec conflicts requiring design judgment
+review-response-gate cannot verify an evidence reply or resolve an addressed thread
 ```
 
 Set `status:failed` only for reproducible execution failure with command output.
@@ -53,6 +54,30 @@ issue has no new assignee or status change after the stale claim
 ```
 
 Otherwise stop. Do not force-push or delete another agent's branch.
+
+## Unresolved Review Thread
+
+If `request-pr-review.sh`, `wait-for-review-clear.sh`, or
+`mark-achieved.sh` fails because unresolved actionable Codex review threads
+exist, do not request another review and do not merge by timeout.
+
+Recover only by:
+
+1. Fixing the finding or verifying that it is non-actionable.
+2. Committing and pushing any required change.
+3. Replying in the same review thread with the fix commit or non-actionable
+   rationale plus verification evidence.
+4. Running:
+   ```bash
+   <openspec-buddy-skill-dir>/scripts/review-response-gate.sh <pr> --head <head-sha>
+   ```
+5. Continuing only after the gate reports that GraphQL confirms the addressed
+   actionable threads are resolved.
+
+If the gate refuses to resolve because a reply is missing or lacks evidence,
+write the missing reply. If the resolve mutation fails or a fresh GraphQL read
+still shows the thread unresolved, stop and set `status:needs-human` rather than
+opening another review round.
 
 ## Resume Or Branch Drift
 

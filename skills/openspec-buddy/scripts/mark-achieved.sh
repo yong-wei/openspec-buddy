@@ -15,6 +15,9 @@ source "$script_dir/github-fetch.sh"
 source "$script_dir/cache-signal.sh"
 cache_dir="$(buddy_cache_dir)"
 buddy_signal_apply "$cache_dir"
+if [[ -n "$pr_url" ]]; then
+  "$script_dir/verify-review-threads-resolved.sh" "$pr_url"
+fi
 OPENSPEC_BUDDY_SKIP_SIGNAL_PUBLISH=1 "$script_dir/set-status-label.sh" "$issue_number" "status:archived"
 "$script_dir/set-project-date.sh" "$issue_number" "End" "$(date +%F)"
 

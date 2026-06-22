@@ -341,6 +341,16 @@ Steps:
    Development link; the helper records a manual sidebar-link requirement
    instead of pretending the link is complete. This must leave the issue Project
    `Status` as `In Progress`.
+15. When handling Codex review feedback, a pushed fix commit is not complete
+    until every addressed actionable `P0`, `P1`, or `P2` thread has a same-thread
+    reply with the fix commit or non-actionable rationale plus verification
+    evidence, and this gate passes:
+   ```bash
+   <openspec-buddy-skill-dir>/scripts/review-response-gate.sh <pr-url> --head <head-sha>
+   ```
+   Do not request another review or enter `wait-for-review-clear.sh` until the
+   gate resolves the addressed threads and a fresh GraphQL read confirms
+   `isResolved=true`.
 
 If claim verification fails, stop before editing files. If the user is starting from an ordinary open issue rather than a prepared Buddy issue, run `claim` first so intake and adoption happen before implementation.
 
@@ -363,6 +373,10 @@ Steps:
      `openspec/changes/archive/YYYY-MM-DD-<change_id>/`
    - read the archived `tasks.md` and require no unchecked tasks
    - confirm synced main specs exist and validate affected specs
+   - verify actionable Codex review threads are resolved:
+     ```bash
+     <openspec-buddy-skill-dir>/scripts/verify-review-threads-resolved.sh <pr-url>
+     ```
 4. If the merged PR does not contain an archive path, use the legacy recovery
    path: confirm `openspec instructions apply --change <change_id> --json`
    reports `remaining: 0`, run `openspec-archive-change`, and commit/push the
@@ -399,6 +413,14 @@ Read only the reference needed for the current mode:
 - Do not update `status:*` labels without the Buddy wrapper scripts; Project `Status` must stay synchronized for human-visible coordination.
 - Do not open, review, or merge Buddy PRs against `$OPENSPEC_BUDDY_RELEASE_BRANCH`. Retarget them to `$OPENSPEC_BUDDY_BASE_BRANCH` or stop.
 - Do not create or submit draft PRs for Buddy changes; PRs must be ready for review when they are handed to the review loop.
+- Do not request another Codex review, enter `wait-for-review-clear.sh`, merge,
+  or mark achieved while actionable Codex review threads remain unresolved.
+  `request-pr-review.sh`, `wait-for-review-clear.sh`, and `mark-achieved.sh`
+  enforce this with `verify-review-threads-resolved.sh`.
+- Do not silently resolve Codex review threads. Use
+  `review-response-gate.sh` after replying with commit or verification
+  evidence; the gate resolves through `resolve-review-thread.sh` and re-reads
+  GraphQL.
 - Do not leave Buddy PRs without PR-scoped labels, copied non-status
   coordination labels, mirrored issue assignees, the same Project as the
   originating issue, an origin issue record, the configured review request

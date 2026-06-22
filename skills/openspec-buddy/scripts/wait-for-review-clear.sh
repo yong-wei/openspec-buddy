@@ -63,6 +63,7 @@ trap 'rm -rf "$tmp_dir"' EXIT
 pr_number="$(resolve_pr_number "$pr_ref")"
 repo_nwo="$(buddy_repo_nwo)"
 cache_dir="$(buddy_cache_dir "$tmp_dir/gh-cache")"
+"$script_dir/verify-review-threads-resolved.sh" "$pr_number"
 last_signature=""
 first_check=1
 started_at="$SECONDS"

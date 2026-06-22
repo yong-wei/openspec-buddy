@@ -63,6 +63,14 @@ if [[ "$1" == "api" && "$2" == */pulls/123/comments* ]]; then
   printf "[]\n"
   exit 0
 fi
+if [[ "$1" == "api" && "$2" == "rate_limit" ]]; then
+  printf '{"remaining":1000,"resetAt":"2026-06-22T00:00:00Z"}\n'
+  exit 0
+fi
+if [[ "$1" == "api" && "$2" == "graphql" ]]; then
+  cat "${GH_THREADS_FILE:?}"
+  exit 0
+fi
 if [[ "$1" == "pr" && "$2" == "comment" ]]; then
   printf '%s\n' "$*" >> "${GH_COMMENT_LOG_FILE:?}"
   exit 0
@@ -95,6 +103,10 @@ export GH_COMMITS_FILE="$tmp_dir/commits-head-1.json"
 export GH_REVIEWS_FILE="$tmp_dir/reviews-empty.json"
 export GH_LOG_FILE="$tmp_dir/gh.log"
 export GH_COMMENT_LOG_FILE="$tmp_dir/comment.log"
+cat > "$tmp_dir/threads-empty.json" <<JSON
+{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}
+JSON
+export GH_THREADS_FILE="$tmp_dir/threads-empty.json"
 
 cat > "$tmp_dir/comments-present.json" <<JSON
 [
@@ -114,8 +126,8 @@ if grep -F 'verify-review-clear' "$GH_LOG_FILE" >/dev/null; then
   echo "request-pr-review.sh should not invoke verify-review-clear helper" >&2
   exit 1
 fi
-if grep -F 'api graphql' "$GH_LOG_FILE" >/dev/null; then
-  echo "request-pr-review.sh should not query review threads" >&2
+if ! grep -F 'api graphql' "$GH_LOG_FILE" >/dev/null; then
+  echo "request-pr-review.sh should run the review thread gate before deciding on review requests" >&2
   exit 1
 fi
 
@@ -184,5 +196,54 @@ for cache_file in \
     exit 1
   fi
 done
+
+cat > "$tmp_dir/threads-unresolved.json" <<JSON
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "reviewThreads": {
+          "nodes": [
+            {
+              "id": "THREAD_1",
+              "isResolved": false,
+              "path": "src/demo.js",
+              "line": 12,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": { "login": "chatgpt-codex-connector" },
+                    "body": "P1: still broken",
+                    "url": "https://example.test/thread"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}
+JSON
+export GH_THREADS_FILE="$tmp_dir/threads-unresolved.json"
+export GH_COMMENT_LOG_FILE="$tmp_dir/comment-unresolved.log"
+set +e
+bash "$helper" 123 > "$tmp_dir/unresolved.out" 2> "$tmp_dir/unresolved.err"
+unresolved_status="$?"
+set -e
+if [[ "$unresolved_status" -eq 0 ]]; then
+  echo "request-pr-review.sh should fail before requesting review when actionable threads are unresolved" >&2
+  exit 1
+fi
+if [[ -e "$GH_COMMENT_LOG_FILE" ]]; then
+  echo "request-pr-review.sh must not post a review request when review threads are unresolved" >&2
+  exit 1
+fi
+if ! grep -F 'Unresolved actionable Codex review threads exist' "$tmp_dir/unresolved.err" >/dev/null; then
+  echo "request-pr-review.sh did not surface the review-response-gate failure" >&2
+  cat "$tmp_dir/unresolved.err" >&2
+  exit 1
+fi
 
 echo "request-pr-review tests passed"

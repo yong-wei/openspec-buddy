@@ -1034,17 +1034,25 @@ query($owner: String!, $repo: String!, $number: Int!) {
   repository(owner: $owner, name: $repo) {
     pullRequest(number: $number) {
       reviewThreads(first: 100) {
+        pageInfo {
+          hasNextPage
+        }
         nodes {
+          id
           isResolved
           path
           line
           startLine
           originalLine
           comments(first: 50) {
+            pageInfo {
+              hasNextPage
+            }
             nodes {
               author { login }
               body
               url
+              createdAt
             }
           }
         }

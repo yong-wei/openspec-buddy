@@ -289,4 +289,48 @@ if [[ "$(tr '\n' ' ' < "$VERIFY_REUSE_LOG_FILE" | sed 's/ *$//')" != "0 1" ]]; t
   exit 1
 fi
 
+cat > "$tmp_dir/threads-unresolved.json" <<'JSON'
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "reviewThreads": {
+          "nodes": [
+            {
+              "id": "THREAD_1",
+              "isResolved": false,
+              "path": "src/demo.js",
+              "line": 12,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": { "login": "chatgpt-codex-connector" },
+                    "body": "P1: still broken",
+                    "url": "https://example.test/thread"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}
+JSON
+export GH_THREADS_FILE="$tmp_dir/threads-unresolved.json"
+set +e
+timeout 2s "$helper" 123 > "$tmp_dir/unresolved-output.txt" 2> "$tmp_dir/unresolved-err.txt"
+unresolved_status="$?"
+set -e
+if [[ "$unresolved_status" -eq 0 ]]; then
+  echo "wait-for-review-clear.sh should fail before waiting when actionable threads are unresolved" >&2
+  exit 1
+fi
+if ! grep -F 'Unresolved actionable Codex review threads exist' "$tmp_dir/unresolved-err.txt" >/dev/null; then
+  echo "wait-for-review-clear.sh did not surface the review-response-gate failure" >&2
+  cat "$tmp_dir/unresolved-err.txt" >&2
+  exit 1
+fi
+
 echo "wait-for-review-clear tests passed"

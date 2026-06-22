@@ -26,6 +26,10 @@ rounds. It sleeps for `OPENSPEC_BUDDY_REVIEW_INITIAL_WAIT_SECONDS` first
 (default `120`) until `OPENSPEC_BUDDY_REVIEW_MAX_WAIT_SECONDS` is reached
 (default `900`). During helper execution, do not call `write_stdin` to poll the
 shell session; wait for the command to finish in one foreground wait window.
+Before sleeping, the helper checks GraphQL `reviewThreads`. If any unresolved
+actionable Codex `P0`, `P1`, or `P2` thread exists, it fails immediately and
+prints the thread id, path, line, and URL. Do not retry the wait helper until
+`review-response-gate.sh` has passed.
 
 Forbidden during this phase:
 
@@ -173,7 +177,23 @@ thread with the fix commit or evidence. Resolve the thread only after the reply
 exists. For non-actionable feedback, reply with the rationale and evidence
 before resolving. Silent thread resolution is not allowed.
 
-Use the core resolver helper for every thread resolve:
+After any review-handling commit is pushed, run the review response gate before
+requesting another review or entering another wait:
+
+```bash
+<openspec-buddy-skill-dir>/scripts/review-response-gate.sh <pr-number-or-url> --head <head-sha>
+```
+
+The gate reads GraphQL `reviewThreads.nodes[]`, finds unresolved actionable
+Codex threads, requires an agent reply in each same thread with a fix commit or
+non-actionable rationale plus verification evidence, resolves only those
+addressed threads, and re-reads GraphQL to confirm `isResolved=true`.
+
+A successful reply comment is not equivalent to thread resolution. The loop may
+continue only after the gate confirms every addressed actionable Codex review
+thread has `isResolved=true`.
+
+The gate uses the core resolver helper for every thread resolve:
 
 ```bash
 <openspec-buddy-skill-dir>/scripts/resolve-review-thread.sh <review-thread-node-id>
@@ -184,8 +204,16 @@ then independently re-reads the same GitHub review thread. Treat any non-zero
 exit as a hard stop: the review loop is not clean until the helper confirms
 `isResolved=true` for that exact thread and `verify-review-clear.sh` passes.
 
-After resolving threads, perform another foreground review wait before
-checking again, unless the no-significant-issues exception applies.
+Before requesting another review or starting the foreground wait, the relevant
+helpers run:
+
+```bash
+<openspec-buddy-skill-dir>/scripts/verify-review-threads-resolved.sh <pr-number-or-url>
+```
+
+If this check fails, stop and run the full response gate. After resolving
+threads, perform another foreground review wait before checking again, unless
+the no-significant-issues exception applies.
 
 ## CI Waiting
 

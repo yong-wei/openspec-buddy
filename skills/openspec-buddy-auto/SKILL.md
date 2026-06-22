@@ -138,8 +138,11 @@ hatch: keep the normal PR, review, and issue/project synchronization flow.
     inspect files, send progress updates, or perform unrelated work. Do not use
     Codex automations, heartbeats, reminders, or background monitors for this
     wait. The helper may silently perform its own low-frequency GitHub checks.
+    It fails immediately if GraphQL shows unresolved actionable Codex review
+    threads; do not enter the wait until `review-response-gate.sh` has replied,
+    resolved, and verified those threads.
 14. GitHub-backed path only: check PR review, unresolved threads, requested changes, CI, mergeability, labels, Project membership, and origin issue traceability. Before any merge, run `openspec-buddy/scripts/verify-review-clear.sh <pr-url>` unless `wait-for-review-clear.sh` already returned a successful clearance record for the current head; do not infer review clearance from `gh pr view --comments`. If either helper passes by using a top-level PR clear comment, read the clear comment excerpt and URL printed by the helper output and treat that returned excerpt as the human judgment record; do not make a second, text-only `gh pr view --comments` judgment.
-15. GitHub-backed path only: if new actionable review exists, including `P0`, `P1`, or `P2`, use `github:gh-address-comments` and `superpowers:receiving-code-review`, then push fixes or document the verified non-actionable rationale. Before resolving any review thread, reply in that thread with the fix or non-actionable rationale and evidence; then resolve the thread and repeat from step 13.
+15. GitHub-backed path only: if new actionable review exists, including `P0`, `P1`, or `P2`, use `github:gh-address-comments` and `superpowers:receiving-code-review`, then push fixes or document the verified non-actionable rationale. After any review-handling commit is pushed, reply in the corresponding review thread with the fix commit or non-actionable rationale and verification evidence, then run `openspec-buddy/scripts/review-response-gate.sh <pr-url> --head <head-sha>`. The review-fix commit is not complete until this helper has resolved every addressed actionable Codex thread and GraphQL confirms `isResolved=true`. A successful reply comment alone is not enough. Do not request another `@codex review`, enter `wait-for-review-clear.sh`, or merge until this gate passes.
     If review feedback changes requirements, tasks, or specs, edit the archived
     change files and synced main specs in the same PR; do not restore the
     active `openspec/changes/<change_id>/` directory.
@@ -218,6 +221,9 @@ Do not merge unless all are true:
   the matched current-head review request and clear comment excerpt. Use that
   returned excerpt as the judgment record that the comment actually means
   "no major issues" for the current cycle.
+- `openspec-buddy/scripts/verify-review-threads-resolved.sh <pr>` passes. This
+  is the final unresolved-thread guard; it must fail if any actionable Codex
+  `P0`, `P1`, or `P2` thread is still open.
 - CI/checks have completed successfully or the repository has no required checks.
 - No unresolved review threads remain.
 - No reviewer has requested changes on the latest commit.
@@ -250,7 +256,7 @@ Do not merge unless all are true:
 - Do not treat shared cache hits or cache-signal updates as review clearance.
   Review truth still comes from the current GitHub REST and GraphQL reads used
   by `wait-for-review-clear.sh` and `verify-review-clear.sh`.
-- Every review-thread resolve must be preceded by a reply in that same thread. The reply must state the fix commit or the reason the thread is non-actionable, plus the verification evidence. Resolve through `openspec-buddy/scripts/resolve-review-thread.sh <thread-id>`, not a raw GraphQL mutation; the helper must independently confirm `isResolved=true` for that thread before the review loop can continue. Do not silently resolve Codex review threads.
+- Every review-thread resolve must be preceded by a reply in that same thread. The reply must state the fix commit or the reason the thread is non-actionable, plus the verification evidence. After a review-fix commit is pushed, run `openspec-buddy/scripts/review-response-gate.sh <pr> --head <head-sha>`; it refuses to resolve threads without an evidence reply, resolves through `resolve-review-thread.sh`, and re-reads GraphQL before the loop can continue. Do not silently resolve Codex review threads.
 - Do not merge while CI is `IN_PROGRESS`, even when every review thread is resolved and the PR is mergeable.
 - OpenSpec Buddy automation targets `$OPENSPEC_BUDDY_BASE_BRANCH`, not `$OPENSPEC_BUDDY_RELEASE_BRANCH`. New changes use the configured base branch, PRs use that base branch, and pre-archived change files land through the same implementation PR. Merging the Buddy base branch to the release branch is a manual release action outside Buddy Auto unless the project configures otherwise.
 - Buddy PRs must pass the core `mark-review.sh` path before review waiting

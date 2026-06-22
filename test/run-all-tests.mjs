@@ -26,6 +26,7 @@ const commands = [
   { label: 'bash skills/openspec-buddy/evals/verify-issue-relationships-wrapper.test.sh', cmd: 'bash', args: ['skills/openspec-buddy/evals/verify-issue-relationships-wrapper.test.sh'] },
   { label: 'node skills/openspec-buddy/evals/pre-archive-change-validation.test.mjs', cmd: 'node', args: ['skills/openspec-buddy/evals/pre-archive-change-validation.test.mjs'] },
   { label: 'bash skills/openspec-buddy/evals/request-pr-review.test.sh', cmd: 'bash', args: ['skills/openspec-buddy/evals/request-pr-review.test.sh'] },
+  { label: 'bash skills/openspec-buddy/evals/review-response-gate.test.sh', cmd: 'bash', args: ['skills/openspec-buddy/evals/review-response-gate.test.sh'] },
   { label: 'bash skills/openspec-buddy/evals/resolve-review-thread.test.sh', cmd: 'bash', args: ['skills/openspec-buddy/evals/resolve-review-thread.test.sh'] },
   { label: 'bash skills/openspec-buddy/evals/sync-base-branch.test.sh', cmd: 'bash', args: ['skills/openspec-buddy/evals/sync-base-branch.test.sh'] },
   { label: 'bash skills/openspec-buddy/evals/wait-for-review-clear.test.sh', cmd: 'bash', args: ['skills/openspec-buddy/evals/wait-for-review-clear.test.sh'] },

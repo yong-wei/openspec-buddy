@@ -170,6 +170,24 @@ issue state exists. This exception applies only to a selected local-only change
 created through `openspec-buddy propose --no-issue`; issue-backed changes keep
 the standard PR and issue synchronization flow.
 
+## Review Fix Loop
+
+If Codex review returns actionable `P0`, `P1`, or `P2` feedback, fix or verify
+the finding, run local verification, commit, and push. That commit is not
+complete at push time. Before requesting another review or entering
+`wait-for-review-clear.sh`, reply in each addressed review thread with the fix
+commit or non-actionable rationale plus verification evidence, then run:
+
+```bash
+<openspec-buddy-skill-dir>/scripts/review-response-gate.sh <pr-number-or-url> --head <head-sha>
+```
+
+The loop may continue only after the helper resolves the addressed actionable
+Codex threads through `resolve-review-thread.sh` and a fresh GraphQL read
+confirms `isResolved=true`. Do not silently resolve review threads. Do not
+request another `@codex review`, wait for review, or merge while
+`verify-review-threads-resolved.sh <pr-number-or-url>` fails.
+
 ## Merge And Achieve
 
 After PR merge:
@@ -191,6 +209,9 @@ After PR merge:
    existing debt unless the claimed change caused it.
 6. Run `mark-achieved.sh <issue-number> <archive-path> <pr-url>` to sync the
    GitHub issue and Project state, then reconcile completed series parents.
+   When a PR URL is supplied, this helper first runs
+   `verify-review-threads-resolved.sh` so unresolved actionable Codex threads
+   cannot be archived into a completed issue.
 7. Verify the issue has exactly one `status:*` label and that it is `status:archived`.
    If the issue is already closed or the Project item is already `Done`, still rerun
    `mark-achieved.sh` to reconcile the label, archive comment, and Project `End`.
