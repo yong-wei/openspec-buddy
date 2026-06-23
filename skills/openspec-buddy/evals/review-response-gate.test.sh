@@ -5,6 +5,48 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 helper="$repo_root/skills/openspec-buddy/scripts/review-response-gate.sh"
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
+export OPENSPEC_BUDDY_REPO_ROOT="$tmp_dir/repo"
+mkdir -p "$OPENSPEC_BUDDY_REPO_ROOT"
+
+cat > "$tmp_dir/git" <<'EOF'
+#!/bin/bash
+set -euo pipefail
+
+if [[ "${1:-}" == "-C" ]]; then
+  shift 2
+fi
+
+case "${1:-}" in
+  rev-parse)
+    if [[ "${2:-}" == "--show-toplevel" ]]; then
+      printf '%s\n' "${OPENSPEC_BUDDY_REPO_ROOT:?}"
+      exit 0
+    fi
+    ;;
+  branch)
+    if [[ "${2:-}" == "--show-current" ]]; then
+      printf 'buddy-test-branch\n'
+      exit 0
+    fi
+    ;;
+  worktree)
+    if [[ "${2:-}" == "list" && "${3:-}" == "--porcelain" ]]; then
+      printf 'worktree %s\nHEAD abc123\nbranch refs/heads/buddy-test-branch\n' "${OPENSPEC_BUDDY_REPO_ROOT:?}"
+      exit 0
+    fi
+    ;;
+  remote)
+    if [[ "${2:-}" == "get-url" ]]; then
+      printf 'https://github.com/yong-wei/openspec-buddy.git\n'
+      exit 0
+    fi
+    ;;
+esac
+
+echo "unexpected git invocation: $*" >&2
+exit 99
+EOF
+chmod +x "$tmp_dir/git"
 
 cat > "$tmp_dir/gh" <<'EOF'
 #!/bin/bash
@@ -18,6 +60,18 @@ if [[ "$1" == "api" && "$2" == "user" ]]; then
 fi
 if [[ "$1" == "api" && "$2" == "rate_limit" ]]; then
   printf '{"remaining":1000,"resetAt":"2026-06-22T00:00:00Z"}\n'
+  exit 0
+fi
+if [[ "$1" == "api" && "$2" == */pulls/123 ]]; then
+  printf '%s\n' '{"number":123,"head":{"ref":"buddy-test-branch","sha":"head-1"},"body":"Origin issue: #42\n<!-- openspec-buddy-origin-issue:42 -->"}'
+  exit 0
+fi
+if [[ "$1" == "api" && "$2" == */issues/42 ]]; then
+  printf '{"number":42,"state":"open","labels":[{"name":"status:claimed"}]}\n'
+  exit 0
+fi
+if [[ "$1" == "api" && "$2" == "--paginate" && "$3" == "--slurp" && "$4" == */issues/42/comments* ]]; then
+  printf '%s\n' '[[{"created_at":"2026-01-01T00:00:00Z","body":"OpenSpec Buddy Claim\n\nclaim_id: claim-42\nstate: active\nagent: @YW\nchange_id: buddy-test-branch\nbranch: buddy-test-branch\nbase_branch: integration\nbase_sha: abc123\nlease_until: 2026-01-02T00:00:00.000Z"}]]'
   exit 0
 fi
 if [[ "$1" == "api" && "$2" == "graphql" ]]; then

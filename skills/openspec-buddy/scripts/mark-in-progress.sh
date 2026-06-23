@@ -20,12 +20,7 @@ node -e 'const fs=require("fs"); const issue=JSON.parse(fs.readFileSync(process.
 node "$script_dir/parse-issue-metadata.mjs" "$body_file" > "$metadata_file"
 
 claim_branch="$(node -e 'const fs=require("fs"); const data=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(data.claim_branch);' "$metadata_file")"
-current_branch="$(git branch --show-current)"
-
-if [[ "$current_branch" != "$claim_branch" ]]; then
-  echo "Current branch '$current_branch' does not match claim_branch '$claim_branch'." >&2
-  exit 1
-fi
+"$script_dir/verify-claim-worktree.sh" --issue "$issue_number" --branch "$claim_branch" >/dev/null
 
 if ! node -e 'const fs=require("fs"); const issue=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); const labels=issue.labels.map((l)=>l.name.replace(/^status:\s+/,"status:")); process.exit(labels.includes("status:claimed") ? 0 : 1);' "$issue_file"; then
   echo "Issue #$issue_number is not status:claimed." >&2

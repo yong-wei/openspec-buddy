@@ -110,7 +110,7 @@ one GitHub Issue = one change_id = one claim branch = one OpenSpec change = one 
 
 The issue metadata must include `claim_branch`, and `claim_branch` must equal `change_id`.
 
-An ordinary open issue can be a source issue before it is adopted. The first Buddy action on that source issue is always `claim`: verify the current worktree is aligned with the configured base branch, read GitHub truth for partial-claim signals, write the minimal claim lock, re-read GitHub truth to prove the latest active claim belongs to this run, and only then create the Development branch lock and Project updates. Hidden Buddy metadata is added to the same original issue as part of the minimal claim lock. After the lock succeeds, decide whether the issue is simple enough to become one executable change or complex enough to become a tracking parent with child change issues. Do not create a mirror issue just to hold Buddy metadata for an existing issue.
+An ordinary open issue can be a source issue before it is adopted. The first Buddy action on that source issue is always `claim`: verify the current worktree is aligned with the configured base branch, read GitHub truth for partial-claim signals, write the minimal claim lock, re-read GitHub truth to prove the latest active claim belongs to this run and worktree identity, and only then create the Development branch lock and Project updates. Hidden Buddy metadata is added to the same original issue as part of the minimal claim lock. After the lock succeeds, decide whether the issue is simple enough to become one executable change or complex enough to become a tracking parent with child change issues. Do not create a mirror issue just to hold Buddy metadata for an existing issue.
 
 ## Execution Retrospective Requirement
 
@@ -142,8 +142,8 @@ Steps:
 3. If the selected issue is an ordinary open issue, the script derives `change_id` as `issue-<number>-<title-slug>` and prepends a hidden `<!-- openspec-buddy ... -->` metadata block as part of the minimal claim lock.
 4. Claim uses a hard gate:
    - before writing, bypass cache and read GitHub truth for issue state/labels/assignees, claim comments, same-name remote branch, Development link, and open PR
-   - write only the minimal lock: assignee, `status:claimed`, Buddy metadata when adopting an ordinary issue, and an `OpenSpec Buddy Claim` comment with `claim_id` and `lease_until`
-   - immediately re-read GitHub truth through REST and confirm the latest active claim belongs to this `claim_id`
+   - write only the minimal lock: assignee, `status:claimed`, Buddy metadata when adopting an ordinary issue, and an `OpenSpec Buddy Claim` comment with `claim_id`, `lease_until`, `worktree_alias`, `worktree_path_hash`, `coordination_branch`, and `run_id`
+   - immediately re-read GitHub truth through REST and confirm the latest active claim belongs to this `claim_id` and this worktree
    - only after that verification succeeds, create `origin/<change_id>` through `gh issue develop`, verify the issue Development branch link, sync Project Status to `In Progress`, and set Project `Start`
    - if verification fails, stop the issue and do not create Development link, branch, Project updates, PR, or implementation changes
 5. Re-read the claimed issue and confirm:
@@ -285,7 +285,7 @@ Steps:
    ```
    The claim first writes only assignee, `status:claimed`, and a structured
    claim comment with lease. It then re-reads GitHub truth through REST and
-   verifies the latest active claim belongs to this `claim_id`. Only after that
+   verifies the latest active claim belongs to this `claim_id` and worktree identity. Only after that
    does it create or reuse `origin/<change_id>` from the declared `base_branch`
    through `gh issue develop`, verify that the issue Development branch list
    contains the claim branch, mirror the issue status to the Project `Status`
@@ -430,6 +430,7 @@ Read only the reference needed for the current mode:
 - Do not set `status:archived`, Project `Done`, or Project `End` merely because files were pre-archived in a PR. Those GitHub states are set only after the PR merges and `mark-achieved.sh` runs.
 - Do not use a branch whose name differs from `change_id` unless the user explicitly cancels OpenSpec Buddy coordination for this change.
 - Do not bypass the remote branch lock in `claim-issue.sh` or `claim-change.sh`; label changes alone are not a reliable lock.
+- Do not bypass `verify-claim-worktree.sh`. It is the hard gate that blocks detached execution, foreign local worktree ownership, mismatched PR head branches, and active claims owned by another worktree.
 - Do not reclaim `status:claimed` or `status:in-progress` work unless the lease is stale and the branch/PR recovery checks prove it is safe.
 - Do not continue after a failed claim or unresolved coupling conflict.
 - GitHub is the task-state source of truth; Git is still the code source of truth.

@@ -17,6 +17,7 @@ export OPENSPEC_BUDDY_CACHE_DIR="$cache_dir"
 export OPENSPEC_BUDDY_GH_CACHE_DIR="$cache_dir"
 buddy_signal_apply "$cache_dir"
 "$script_dir/ensure-pr-base.sh" "$pr_url"
+"$script_dir/verify-claim-worktree.sh" --issue "$issue_number" --pr "$pr_url" >/dev/null
 
 if [[ "$(gh pr view "$pr_url" --json isDraft --jq '.isDraft')" == "true" ]]; then
   echo "Buddy PR must be ready for review, not draft: $pr_url" >&2

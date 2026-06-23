@@ -16,6 +16,7 @@ source "$script_dir/cache-signal.sh"
 cache_dir="$(buddy_cache_dir)"
 buddy_signal_apply "$cache_dir"
 if [[ -n "$pr_url" ]]; then
+  "$script_dir/verify-claim-worktree.sh" --issue "$issue_number" --pr "$pr_url" >/dev/null
   "$script_dir/verify-review-threads-resolved.sh" "$pr_url"
 fi
 OPENSPEC_BUDDY_SKIP_SIGNAL_PUBLISH=1 "$script_dir/set-status-label.sh" "$issue_number" "status:archived"

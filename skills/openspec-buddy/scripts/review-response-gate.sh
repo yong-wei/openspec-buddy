@@ -59,6 +59,7 @@ repo_nwo="$(buddy_repo_nwo)"
 owner="${repo_nwo%%/*}"
 repo="${repo_nwo#*/}"
 cache_dir="$(buddy_cache_dir "$tmp_dir/gh-cache")"
+"$script_dir/verify-claim-worktree.sh" --pr "$pr_number" >/dev/null
 reviewer="${OPENSPEC_BUDDY_PR_REVIEW_AUTHOR:-chatgpt-codex-connector}"
 actor="${OPENSPEC_BUDDY_REVIEW_RESPONSE_AUTHOR:-}"
 resolver="${OPENSPEC_BUDDY_RESOLVE_REVIEW_THREAD_HELPER:-$script_dir/resolve-review-thread.sh}"

@@ -7,6 +7,9 @@ Set `status:needs-human` when:
 ```text
 issue metadata disagrees with OpenSpec files
 status:ready issue already has a claim branch, Development link, claim comment, or open PR
+active claim belongs to another worktree
+claim branch is bound to another local worktree
+current worktree is detached HEAD outside a read-only sync step
 claim branch exists with unknown commits
 open PR exists for the same claim branch
 dependency status is ambiguous
@@ -82,7 +85,20 @@ opening another review round.
 ## Resume Or Branch Drift
 
 After a resume, compaction, or manual branch operation, verify the current
-branch before editing or committing:
+branch before editing or committing. For GitHub-backed Buddy work, prefer the
+core guard over ad hoc checks:
+
+```bash
+<openspec-buddy-skill-dir>/scripts/verify-claim-worktree.sh --issue <issue-number> --pr <pr-number-or-url>
+```
+
+The guard must pass before editing, committing, pushing, requesting review,
+waiting for review, merging, or marking achieved. If it reports
+`foreign-claim-detected` or says the active claim belongs to another worktree,
+stop. Do not switch to the other worktree, do not reuse its branch, and do not
+continue from its claim unless the user explicitly asks for takeover.
+
+For local diagnosis, also inspect:
 
 ```bash
 git status --short --branch

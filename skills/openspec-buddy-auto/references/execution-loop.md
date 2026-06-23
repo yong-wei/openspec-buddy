@@ -21,6 +21,14 @@ Ref, use that layer only to invalidate or reuse local cache between worktrees.
 It is an internal coordination accelerator, not a substitute for current
 GitHub review, Project, or merge truth.
 
+Before editing, committing, pushing, requesting review, waiting for review,
+merging, or marking achieved, the relevant core helper must pass the worktree
+claim guard. The guard rejects detached HEAD, a PR head that does not match the
+current branch, a claim branch bound to another local worktree, or an active
+claim comment whose `worktree_alias` or `worktree_path_hash` belongs to another
+worker. Treat `foreign-claim-detected` as a hard stop unless the user explicitly
+requests a takeover workflow.
+
 ## Claim
 
 For GitHub-coordinated changes, use `openspec-buddy claim [issue-number]`. If
@@ -39,6 +47,7 @@ The minimal claim lock writes only:
 ```text
 status:claimed
 OpenSpec Buddy Claim comment with claim_id and lease_until
+worktree_alias, worktree_path_hash, coordination_branch, and run_id
 issue assignee for the claiming agent
 Buddy metadata body for ordinary open issues adopted in place
 ```
@@ -52,6 +61,8 @@ issue is status:claimed
 latest valid OpenSpec Buddy Claim comment has this claim_id
 latest valid OpenSpec Buddy Claim comment has this lease_until
 latest valid OpenSpec Buddy Claim comment belongs to this agent
+latest valid OpenSpec Buddy Claim comment belongs to this worktree when those
+ownership fields are present
 ```
 
 Only after that verification succeeds may the claim script create:
@@ -82,6 +93,9 @@ branch derived from it.
 
 Then switch to `<change_id>` for a simple or prepared change and mark
 `status:in-progress`; the Project `Status` must remain `In Progress`.
+`mark-in-progress.sh` enforces that the current worktree is on the claimed
+branch and that the active claim belongs to this worktree before changing the
+issue state.
 
 ## Implement
 
@@ -151,7 +165,8 @@ After the ready PR exists, call the core review marker:
 
 Auto mode must not reimplement PR metadata, label, assignee, Project, review
 request, or Development-link rules. `mark-review.sh` verifies the PR base and
-ready state, calls `configure-pr-metadata.sh`, posts
+ready state, verifies the current worktree owns the PR head and claim, calls
+`configure-pr-metadata.sh`, posts
 `OPENSPEC_BUDDY_PR_REVIEW_REQUEST` through `request-pr-review.sh`, runs
 `verify-pr-coordination.sh`, and only then sets the issue to
 `status:in-review`. This must leave the issue and PR Project `Status` as
@@ -187,6 +202,8 @@ Codex threads through `resolve-review-thread.sh` and a fresh GraphQL read
 confirms `isResolved=true`. Do not silently resolve review threads. Do not
 request another `@codex review`, wait for review, or merge while
 `verify-review-threads-resolved.sh <pr-number-or-url>` fails.
+The review gate and wait helpers also run the worktree claim guard before any
+review-thread or polling work; a foreign claim is not waitable.
 
 ## Merge And Achieve
 
@@ -209,9 +226,10 @@ After PR merge:
    existing debt unless the claimed change caused it.
 6. Run `mark-achieved.sh <issue-number> <archive-path> <pr-url>` to sync the
    GitHub issue and Project state, then reconcile completed series parents.
-   When a PR URL is supplied, this helper first runs
-   `verify-review-threads-resolved.sh` so unresolved actionable Codex threads
-   cannot be archived into a completed issue.
+   When a PR URL is supplied, this helper first verifies the current worktree
+   owns the PR head and active claim, then runs `verify-review-threads-resolved.sh`
+   so unresolved actionable Codex threads cannot be archived into a completed
+   issue.
 7. Verify the issue has exactly one `status:*` label and that it is `status:archived`.
    If the issue is already closed or the Project item is already `Done`, still rerun
    `mark-achieved.sh` to reconcile the label, archive comment, and Project `End`.

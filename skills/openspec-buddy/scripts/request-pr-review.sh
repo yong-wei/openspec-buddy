@@ -66,6 +66,7 @@ pr_number="$(resolve_pr_number "$pr_ref")" || {
   exit 1
 }
 
+"$script_dir/verify-claim-worktree.sh" --pr "$pr_number" >/dev/null
 "$script_dir/verify-review-threads-resolved.sh" "$pr_ref"
 
 OPENSPEC_BUDDY_CACHE_REFRESH=1 buddy_pr_rest_bundle "$repo_nwo" "$pr_number" "$cache_dir"

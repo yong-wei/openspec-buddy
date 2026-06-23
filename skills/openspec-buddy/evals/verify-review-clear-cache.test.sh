@@ -26,8 +26,42 @@ cat > "$cache_dir/review-comments-123.json" <<'JSON'
 JSON
 
 cat > "$tmp_dir/gh-env.sh" <<'EOF'
+git() {
+  if [[ "${1:-}" == "-C" ]]; then
+    shift 2
+  fi
+  case "${1:-}" in
+    rev-parse)
+      if [[ "${2:-}" == "--show-toplevel" ]]; then printf '%s\n' "${OPENSPEC_BUDDY_REPO_ROOT:?}"; return 0; fi
+      ;;
+    branch)
+      if [[ "${2:-}" == "--show-current" ]]; then printf 'buddy-test-branch\n'; return 0; fi
+      ;;
+    worktree)
+      if [[ "${2:-}" == "list" && "${3:-}" == "--porcelain" ]]; then printf 'worktree %s\nHEAD abc123\nbranch refs/heads/buddy-test-branch\n' "${OPENSPEC_BUDDY_REPO_ROOT:?}"; return 0; fi
+      ;;
+    remote)
+      if [[ "${2:-}" == "get-url" ]]; then printf 'https://github.com/owner/repo.git\n'; return 0; fi
+      ;;
+  esac
+  echo "unexpected git call: $*" >&2
+  return 99
+}
+export -f git
 gh() {
   printf '%s\n' "$*" >> "$GH_LOG_FILE"
+  if [[ "$1" == "api" && "$2" == */pulls/123 ]]; then
+    printf '%s\n' '{"number":123,"head":{"ref":"buddy-test-branch","sha":"head-1"},"body":"Origin issue: #42\n<!-- openspec-buddy-origin-issue:42 -->"}'
+    return 0
+  fi
+  if [[ "$1" == "api" && "$2" == */issues/42 ]]; then
+    printf '{"number":42,"state":"open","labels":[{"name":"status:claimed"}]}\n'
+    return 0
+  fi
+  if [[ "$1" == "api" && "${2:-}" == "--paginate" && "${3:-}" == "--slurp" && "${4:-}" == */issues/42/comments* ]]; then
+    printf '%s\n' '[[{"created_at":"2026-01-01T00:00:00Z","body":"OpenSpec Buddy Claim\n\nclaim_id: claim-42\nstate: active\nagent: @YW\nchange_id: buddy-test-branch\nbranch: buddy-test-branch\nbase_branch: integration\nbase_sha: abc123\nlease_until: 2026-01-02T00:00:00.000Z"}]]'
+    return 0
+  fi
   if [[ "$1" == "api" && "$2" == "graphql" ]]; then
     cat <<'JSON'
 {"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}
@@ -54,6 +88,8 @@ export OPENSPEC_BUDDY_PROJECT_TITLE=Repo
 export OPENSPEC_BUDDY_PR_REVIEW_REQUEST="@codex review 中文回复，即使没有重大问题也必须给出显式回复"
 export OPENSPEC_BUDDY_GH_CACHE_DIR="$cache_dir"
 export OPENSPEC_BUDDY_REUSE_PR_REST_CACHE=1
+export OPENSPEC_BUDDY_REPO_ROOT="$tmp_dir/repo"
+mkdir -p "$OPENSPEC_BUDDY_REPO_ROOT"
 
 output="$(BASH_ENV="$tmp_dir/gh-env.sh" bash "$helper" 123)"
 
@@ -68,7 +104,7 @@ if [[ "$graphql_calls" != "1" ]]; then
   exit 1
 fi
 
-if grep -E 'repos/.*/pulls/123|repos/.*/issues/123/comments' "$GH_LOG_FILE" >/dev/null; then
+if grep -E 'repos/.*/issues/123/comments|repos/.*/pulls/123/(reviews|comments|commits)' "$GH_LOG_FILE" >/dev/null; then
   echo "verify-review-clear should reuse cached REST payloads" >&2
   exit 1
 fi
@@ -77,8 +113,42 @@ cat > "$cache_dir/review-threads-123.json" <<'JSON'
 {"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}
 JSON
 cat > "$tmp_dir/gh-env.sh" <<'EOF'
+git() {
+  if [[ "${1:-}" == "-C" ]]; then
+    shift 2
+  fi
+  case "${1:-}" in
+    rev-parse)
+      if [[ "${2:-}" == "--show-toplevel" ]]; then printf '%s\n' "${OPENSPEC_BUDDY_REPO_ROOT:?}"; return 0; fi
+      ;;
+    branch)
+      if [[ "${2:-}" == "--show-current" ]]; then printf 'buddy-test-branch\n'; return 0; fi
+      ;;
+    worktree)
+      if [[ "${2:-}" == "list" && "${3:-}" == "--porcelain" ]]; then printf 'worktree %s\nHEAD abc123\nbranch refs/heads/buddy-test-branch\n' "${OPENSPEC_BUDDY_REPO_ROOT:?}"; return 0; fi
+      ;;
+    remote)
+      if [[ "${2:-}" == "get-url" ]]; then printf 'https://github.com/owner/repo.git\n'; return 0; fi
+      ;;
+  esac
+  echo "unexpected git call: $*" >&2
+  return 99
+}
+export -f git
 gh() {
   printf '%s\n' "$*" >> "$GH_LOG_FILE"
+  if [[ "$1" == "api" && "$2" == */pulls/123 ]]; then
+    printf '%s\n' '{"number":123,"head":{"ref":"buddy-test-branch","sha":"head-1"},"body":"Origin issue: #42\n<!-- openspec-buddy-origin-issue:42 -->"}'
+    return 0
+  fi
+  if [[ "$1" == "api" && "$2" == */issues/42 ]]; then
+    printf '{"number":42,"state":"open","labels":[{"name":"status:claimed"}]}\n'
+    return 0
+  fi
+  if [[ "$1" == "api" && "${2:-}" == "--paginate" && "${3:-}" == "--slurp" && "${4:-}" == */issues/42/comments* ]]; then
+    printf '%s\n' '[[{"created_at":"2026-01-01T00:00:00Z","body":"OpenSpec Buddy Claim\n\nclaim_id: claim-42\nstate: active\nagent: @YW\nchange_id: buddy-test-branch\nbranch: buddy-test-branch\nbase_branch: integration\nbase_sha: abc123\nlease_until: 2026-01-02T00:00:00.000Z"}]]'
+    return 0
+  fi
   if [[ "$1" == "api" && "$2" == "graphql" ]]; then
     cat <<'JSON'
 {"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"isResolved":false,"path":"src/demo.js","line":12,"comments":{"nodes":[{"author":{"login":"chatgpt-codex-connector"},"body":"P1: still broken","url":"https://example.test/thread"}]}}]}}}}}

@@ -1,5 +1,15 @@
 #!/usr/bin/env bash
 
+claim_lock_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if ! declare -F buddy_worktree_identity_json >/dev/null 2>&1; then
+  # shellcheck source=./worktree-identity.sh
+  source "$claim_lock_script_dir/worktree-identity.sh"
+fi
+if ! declare -F buddy_cache_dir >/dev/null 2>&1; then
+  # shellcheck source=./github-fetch.sh
+  source "$claim_lock_script_dir/github-fetch.sh"
+fi
+
 buddy_claim_issue_rest() {
   local repo_nwo="$1"
   local issue_number="$2"
@@ -333,12 +343,25 @@ buddy_write_minimal_claim_lock() {
     gh issue edit "$issue_number" --body-file "$adopted_body_file"
   fi
   gh issue edit "$issue_number" --add-assignee "$viewer"
-  buddy_claim_set_status_label_direct "$issue_number" "$issue_file" "status:claimed"
 
   local adopted_line=""
   if [[ "$adopted_from_open_issue" == "true" ]]; then
     adopted_line="adopted_from_open_issue: true"
   fi
+  local identity_file
+  identity_file="$(mktemp)"
+  local cache_dir
+  cache_dir="$(buddy_cache_dir)"
+  buddy_worktree_identity_json "$cache_dir" > "$identity_file"
+  local worktree_alias
+  local worktree_path_hash
+  local coordination_branch
+  local run_id
+  worktree_alias="$(node -e 'const fs=require("node:fs"); const data=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(data.alias || "");' "$identity_file")"
+  worktree_path_hash="$(node -e 'const fs=require("node:fs"); const data=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(data.path_hash || "");' "$identity_file")"
+  coordination_branch="$(node -e 'const fs=require("node:fs"); const data=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(data.coordination_branch || "");' "$identity_file")"
+  run_id="$(node -e 'const fs=require("node:fs"); const data=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(data.run_id || "");' "$identity_file")"
+  rm -f "$identity_file"
 
 gh issue comment "$issue_number" --body "$(cat <<EOF
 OpenSpec Buddy Claim
@@ -351,9 +374,14 @@ branch: $claim_branch
 base_branch: $base_branch
 base_sha: $base_sha
 lease_until: $lease_until
+worktree_alias: $worktree_alias
+worktree_path_hash: $worktree_path_hash
+coordination_branch: $coordination_branch
+run_id: $run_id
 $adopted_line
 EOF
 )"
+  buddy_claim_set_status_label_direct "$issue_number" "$issue_file" "status:claimed"
 }
 
 buddy_release_claim_lock() {

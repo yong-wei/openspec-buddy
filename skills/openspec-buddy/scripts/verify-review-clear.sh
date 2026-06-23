@@ -43,6 +43,7 @@ repo_nwo="$(buddy_repo_nwo)"
 owner="${repo_nwo%%/*}"
 repo="${repo_nwo#*/}"
 cache_dir="$(buddy_cache_dir "$tmp_dir/gh-cache")"
+"$script_dir/verify-claim-worktree.sh" --pr "$pr_number" >/dev/null
 
 if [[ "${OPENSPEC_BUDDY_REUSE_PR_REST_CACHE:-}" != "1" ]]; then
   buddy_invalidate_pr_rest_bundle_cache "$cache_dir" "$pr_number"

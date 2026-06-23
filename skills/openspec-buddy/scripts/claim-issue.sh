@@ -7,6 +7,7 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/load-config.sh"
 source "$script_dir/github-fetch.sh"
 source "$script_dir/claim-lock.sh"
+source "$script_dir/worktree-identity.sh"
 # shellcheck source=./cache-signal.sh
 source "$script_dir/cache-signal.sh"
 openspec_buddy_require_core_config
@@ -36,6 +37,8 @@ cleanup() {
 trap cleanup EXIT
 
 cache_dir="$(buddy_cache_dir)"
+export OPENSPEC_BUDDY_CACHE_DIR="$cache_dir"
+export OPENSPEC_BUDDY_GH_CACHE_DIR="$cache_dir"
 buddy_signal_apply "$cache_dir"
 
 if [[ -z "$issue_number" ]]; then
@@ -124,6 +127,7 @@ owner="${repo_nwo%%/*}"
 repo_name="${repo_nwo#*/}"
 viewer="$(gh api user --jq .login)"
 
+"$script_dir/verify-claim-worktree.sh" --branch "$claim_branch" --allow-coordination-branch >/dev/null
 buddy_preflight_claim_truth_check "$issue_number" "$change_id" "$claim_branch" "$viewer" "$repo_nwo" "$tmp_dir/preflight-before-relationships"
 
 blocked_by_file="$tmp_dir/blocked-by.json"
@@ -159,9 +163,11 @@ claim_id="$(uuidgen 2>/dev/null || node -e 'console.log(crypto.randomUUID())')"
 lease_until="$(node -e 'const hours=Number(process.env.OPENSPEC_BUDDY_CLAIM_TTL_HOURS); console.log(new Date(Date.now()+hours*3600*1000).toISOString())')"
 
 buddy_preflight_claim_truth_check "$issue_number" "$change_id" "$claim_branch" "$viewer" "$repo_nwo" "$tmp_dir/preflight-before-lock"
-buddy_write_minimal_claim_lock "$issue_number" "$change_id" "$claim_branch" "$base_branch" "$base_sha" "$viewer" "$claim_id" "$lease_until" "$issue_file" "$tmp_dir/adopted-body.md" true
 claim_lock_written=1
+buddy_write_minimal_claim_lock "$issue_number" "$change_id" "$claim_branch" "$base_branch" "$base_sha" "$viewer" "$claim_id" "$lease_until" "$issue_file" "$tmp_dir/adopted-body.md" true
 buddy_verify_claim_lock_rest "$issue_number" "$change_id" "$viewer" "$claim_id" "$lease_until" "$repo_nwo" "$tmp_dir/verify-lock" "$claim_branch"
+"$script_dir/verify-claim-worktree.sh" --issue "$issue_number" --allow-coordination-branch >/dev/null
+buddy_worktree_record_claim "$cache_dir" "$issue_number" "$change_id" "$claim_branch" "$claim_id" "$base_branch"
 
 buddy_invalidate_issue_cache "$cache_dir" "$issue_number"
 buddy_invalidate_ready_scan_cache "$cache_dir"
@@ -179,6 +185,7 @@ if [[ "$linked_branches" != *"$claim_branch"* ]]; then
 fi
 
 buddy_verify_claim_lock_rest "$issue_number" "$change_id" "$viewer" "$claim_id" "$lease_until" "$repo_nwo" "$tmp_dir/verify-after-development-link" "$claim_branch"
+"$script_dir/verify-claim-worktree.sh" --issue "$issue_number" --allow-coordination-branch >/dev/null
 
 created_branch_lock=""
 "$script_dir/set-project-status.sh" "$issue_number" "status:claimed"

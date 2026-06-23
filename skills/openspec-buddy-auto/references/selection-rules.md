@@ -20,6 +20,12 @@ parents, and issues labeled with active or terminal `status:*` values. Missing
 status, `status:backlog`, and `status:ready` are claimable.
 Automatic selection uses the lowest issue number among those candidates.
 
+Selection is not authority to execute. Before acting on a selected
+GitHub-backed issue, the claim scripts must pass the worktree claim guard. A
+ready issue whose claim branch is already bound to another local worktree, or
+whose active claim comment carries another `worktree_path_hash`, is not
+claimable by the current worker.
+
 `status:claimed` is skipped by default. Do not inspect its lease while there
 is any `status:ready`, `status:backlog`, or unlabeled claimable issue. Claimed
 issues enter stale-claim investigation only as a fallback when no other
