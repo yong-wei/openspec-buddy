@@ -23,9 +23,21 @@ $OPENSPEC_BUDDY_COMMAND_PREFIX <openspec-buddy-skill-dir>/scripts/wait-for-revie
 The helper preserves the main-thread silence rule while avoiding fixed idle
 rounds. It sleeps for `OPENSPEC_BUDDY_REVIEW_INITIAL_WAIT_SECONDS` first
 (default `300`), then checks every `OPENSPEC_BUDDY_REVIEW_POLL_SECONDS`
-(default `120`) until `OPENSPEC_BUDDY_REVIEW_MAX_WAIT_SECONDS` is reached
+(default `60`) until `OPENSPEC_BUDDY_REVIEW_MAX_WAIT_SECONDS` is reached
 (default `900`). During helper execution, do not call `write_stdin` to poll the
 shell session; wait for the command to finish in one foreground wait window.
+The polling is two-stage. Normal polls read only lightweight PR REST state:
+head, update timestamp, comment count, review-comment count, review count,
+commit count, and state. Only when that lightweight state changes does the
+helper refresh PR reviews, commits, issue comments, and review comments, then
+run `verify-review-clear.sh`.
+
+If the first 900 second window ends without a current-head clean review, the
+helper immediately calls `request-pr-review.sh --force --context-file
+<generated-context>` so the fixed review request is followed by retry context,
+then waits one more 900 second window. If the second window also ends without a
+clean review, stop the auto loop and mark the issue for human attention.
+
 Before sleeping, the helper checks two preconditions. First, the current PR
 head must have a fresh `OPENSPEC_BUDDY_PR_REVIEW_REQUEST` comment; otherwise it
 fails immediately and tells the agent to run `request-pr-review.sh`. Second, it
@@ -116,11 +128,11 @@ release branch.
 ## Helper Query Rule
 
 `wait-for-review-clear.sh` may query GitHub internally, but the main agent must
-not. The helper uses low-frequency REST checks for PR head, issue comments,
-review comments, and reviews. It invokes `verify-review-clear.sh` only on the
-first post-initial-wait check, when that lightweight state changes, or at the
-max-wait boundary. Since `verify-review-clear.sh` is the only path that calls
-GraphQL reviewThreads, idle polling does not repeatedly spend GraphQL quota.
+not. The helper uses lightweight PR REST probes for idle polling. It fetches the
+larger PR REST bundle and invokes `verify-review-clear.sh` only when that
+lightweight state changes. Since `verify-review-clear.sh` is the only path that
+calls GraphQL reviewThreads, idle polling does not repeatedly spend GraphQL
+quota.
 
 If the helper exits `0`, use its printed verifier output as the current-head
 clearance record. If it exits non-zero with actionable review diagnostics,

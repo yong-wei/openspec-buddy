@@ -151,12 +151,19 @@ hatch: keep the normal PR, review, and issue/project synchronization flow.
 13. GitHub-backed path only: wait for the configured reviewer in the same foreground workflow by running
     `openspec-buddy/scripts/wait-for-review-clear.sh <pr-url>` as the single
     blocking wait command. The helper sleeps for the initial wait window
-    (default 300 seconds), then checks every poll window (default 120 seconds)
+    (default 300 seconds), then checks every poll window (default 60 seconds)
     until the total max wait (default 900 seconds). During the helper run, stay
     completely silent: do not check the time, poll the shell, query GitHub,
     inspect files, send progress updates, or perform unrelated work. Do not use
     Codex automations, heartbeats, reminders, or background monitors for this
-    wait. The helper may silently perform its own low-frequency GitHub checks.
+    wait. The helper may silently perform its own GitHub checks. Polling is
+    two-stage: normal polls read only lightweight PR state, and only detected
+    review-state changes trigger a full REST refresh and `verify-review-clear.sh`.
+    If the first 900 second window ends without a clean current-head review, the
+    helper uses `request-pr-review.sh --force` to append the fixed review
+    request plus retry context, then waits one more 900 second window. If the
+    second window also ends without a clean review, stop and mark the issue for
+    human attention.
     It fails immediately if GraphQL shows unresolved actionable Codex review
     threads, and it also fails before sleeping when the current PR head has no
     fresh `OPENSPEC_BUDDY_PR_REVIEW_REQUEST` comment. Do not enter the wait
@@ -277,12 +284,15 @@ Do not merge unless all are true:
 - Keep the review wait separate from CI waiting. Use exactly one foreground
   `wait-for-review-clear.sh` invocation per review pause; do not poll with
   `date`, `time`, `gh`, `git`, `write_stdin`, or any other main-thread tool
-  while the helper is running. The helper may silently do low-frequency REST
-  checks and invokes GraphQL only through `verify-review-clear.sh` on the first
-  post-wait check, on detected review-state changes, or at timeout. Require the
-  configured fallback quiet checks only when no explicit clean review record is
-  available. After review gates are clear, use foreground CI waiting such as
-  `gh run watch --exit-status` when checks are still running.
+  while the helper is running. The helper may silently poll lightweight PR REST
+  state every 60 seconds after the initial 300 second wait, then fetches the
+  full REST bundle and invokes GraphQL through `verify-review-clear.sh` only
+  when that lightweight state changes. The first 900 second timeout triggers
+  one forced follow-up review request with retry context; the second timeout
+  requires human intervention. Require the configured fallback quiet checks
+  only when no explicit clean review record is available. After review gates are
+  clear, use foreground CI waiting such as `gh run watch --exit-status` when
+  checks are still running.
 - Do not treat shared cache hits or cache-signal updates as review clearance.
   Review truth still comes from the current GitHub REST and GraphQL reads used
   by `wait-for-review-clear.sh` and `verify-review-clear.sh`.
@@ -290,7 +300,9 @@ Do not merge unless all are true:
 - After `review-response-gate.sh` passes for a review-fix commit, run
   `request-pr-review.sh <pr> --context-file <review-fix-context.md>` before
   `wait-for-review-clear.sh <pr>`. The wait helper is an observer; it refuses
-  to sleep when the current head has no fresh review-request comment.
+  to sleep when the current head has no fresh review-request comment. Its retry
+  request appends context after the fixed request string; do not replace the
+  configured request with a narrower prompt.
 - Do not merge while CI is `IN_PROGRESS`, even when every review thread is resolved and the PR is mergeable.
 - OpenSpec Buddy automation targets `$OPENSPEC_BUDDY_BASE_BRANCH`, not `$OPENSPEC_BUDDY_RELEASE_BRANCH`. New changes use the configured base branch, PRs use that base branch, and pre-archived change files land through the same implementation PR. Merging the Buddy base branch to the release branch is a manual release action outside Buddy Auto unless the project configures otherwise.
 - Buddy PRs must pass the core `mark-review.sh` path before review waiting

@@ -14,11 +14,12 @@ source "$script_dir/github-fetch.sh"
 openspec_buddy_require_auto_config
 
 initial_wait="${OPENSPEC_BUDDY_REVIEW_INITIAL_WAIT_SECONDS:-300}"
-poll_wait="${OPENSPEC_BUDDY_REVIEW_POLL_SECONDS:-120}"
+poll_wait="${OPENSPEC_BUDDY_REVIEW_POLL_SECONDS:-60}"
 max_wait="${OPENSPEC_BUDDY_REVIEW_MAX_WAIT_SECONDS:-900}"
 reviewer="${OPENSPEC_BUDDY_PR_REVIEW_AUTHOR:-chatgpt-codex-connector}"
 verify_helper="${OPENSPEC_BUDDY_VERIFY_REVIEW_CLEAR_HELPER:-$script_dir/verify-review-clear.sh}"
 command_timeout="${OPENSPEC_BUDDY_REVIEW_COMMAND_TIMEOUT_SECONDS:-60}"
+max_rounds=2
 
 if ! [[ "$initial_wait" =~ ^[0-9]+$ && "$poll_wait" =~ ^[0-9]+$ && "$max_wait" =~ ^[0-9]+$ && "$command_timeout" =~ ^[0-9]+$ ]]; then
   echo "Review wait values must be non-negative integer seconds." >&2
@@ -31,17 +32,6 @@ run_with_timeout() {
   else
     "$@"
   fi
-}
-
-gh_api_paginated_array() {
-  local endpoint="$1"
-  run_with_timeout gh api --paginate --slurp "$endpoint" | node -e '
-const fs = require("node:fs");
-const input = JSON.parse(fs.readFileSync(0, "utf8"));
-const pages = Array.isArray(input) ? input : [];
-const flattened = pages.flatMap((page) => Array.isArray(page) ? page : []);
-process.stdout.write(`${JSON.stringify(flattened)}\n`);
-'
 }
 
 resolve_pr_number() {
@@ -66,47 +56,41 @@ cache_dir="$(buddy_cache_dir "$tmp_dir/gh-cache")"
 "$script_dir/verify-claim-worktree.sh" --pr "$pr_number" >/dev/null
 "$script_dir/verify-review-threads-resolved.sh" "$pr_number"
 last_signature=""
-first_check=1
+last_head_sha=""
 started_at="$SECONDS"
 
-light_state_signature() {
+probe_state_signature() {
   local pr_file="$tmp_dir/pull.json"
-  local issue_comments_file="$tmp_dir/issue-comments.json"
-  local review_comments_file="$tmp_dir/review-comments.json"
-  local reviews_file="$tmp_dir/reviews.json"
-  local commits_file="$tmp_dir/commits.json"
 
   run_with_timeout gh api "repos/$repo_nwo/pulls/$pr_number" > "$pr_file"
-  gh_api_paginated_array "repos/$repo_nwo/issues/$pr_number/comments?per_page=100" > "$issue_comments_file"
-  gh_api_paginated_array "repos/$repo_nwo/pulls/$pr_number/comments?per_page=100" > "$review_comments_file"
-  gh_api_paginated_array "repos/$repo_nwo/pulls/$pr_number/reviews?per_page=100" > "$reviews_file"
-  gh_api_paginated_array "repos/$repo_nwo/pulls/$pr_number/commits?per_page=100" > "$commits_file"
   cp "$pr_file" "$cache_dir/pr-rest-$pr_number.json"
-  cp "$issue_comments_file" "$cache_dir/issue-comments-$pr_number.json"
-  cp "$review_comments_file" "$cache_dir/review-comments-$pr_number.json"
-  cp "$reviews_file" "$cache_dir/reviews-$pr_number.json"
-  cp "$commits_file" "$cache_dir/commits-$pr_number.json"
-  rm -f "$cache_dir/review-threads-$pr_number.json"
 
   node -e '
 const fs = require("node:fs");
-const [prFile, issueCommentsFile, reviewCommentsFile, reviewsFile] = process.argv.slice(1);
-const read = (file) => JSON.parse(fs.readFileSync(file, "utf8"));
-const ids = (items) => Array.isArray(items) ? items.map((item) => [
-  item.id || item.node_id || "",
-  item.updated_at || item.created_at || item.submitted_at || "",
-  item.commit_id || "",
-  item.state || "",
-].join(":")) : [];
-const pr = read(prFile);
+const pr = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
 const signature = {
   head: pr.head?.sha || "",
-  issueComments: ids(read(issueCommentsFile)),
-  reviewComments: ids(read(reviewCommentsFile)),
-  reviews: ids(read(reviewsFile)),
+  updatedAt: pr.updated_at || "",
+  comments: pr.comments ?? "",
+  reviewComments: pr.review_comments ?? "",
+  commits: pr.commits ?? "",
+  state: pr.state || "",
 };
 process.stdout.write(JSON.stringify(signature));
-' "$pr_file" "$issue_comments_file" "$review_comments_file" "$reviews_file"
+' "$pr_file"
+}
+
+probe_head_sha() {
+  local signature="$1"
+  node -e '
+const signature = JSON.parse(process.argv[1]);
+process.stdout.write(signature.head || "");
+' "$signature"
+}
+
+refresh_full_rest_bundle() {
+  OPENSPEC_BUDDY_CACHE_REFRESH=1 buddy_pr_rest_bundle "$repo_nwo" "$pr_number" "$cache_dir"
+  rm -f "$cache_dir/review-threads-$pr_number.json"
 }
 
 is_waitable_review_failure() {
@@ -150,7 +134,10 @@ run_clear_gate() {
 }
 
 verify_current_head_request_gate() {
-  OPENSPEC_BUDDY_GH_CACHE_DIR="$cache_dir" "$script_dir/verify-current-head-review-request.sh" "$pr_number" >/dev/null
+  local reuse_rest_cache="${1:-0}"
+  OPENSPEC_BUDDY_GH_CACHE_DIR="$cache_dir" \
+    OPENSPEC_BUDDY_REUSE_PR_REST_CACHE="$reuse_rest_cache" \
+    "$script_dir/verify-current-head-review-request.sh" "$pr_number" >/dev/null
 }
 
 sleep_if_needed() {
@@ -160,7 +147,44 @@ sleep_if_needed() {
   fi
 }
 
-verify_current_head_request_gate
+run_full_check_after_change() {
+  refresh_full_rest_bundle
+  if ! verify_current_head_request_gate 1; then
+    return 2
+  fi
+  set +e
+  run_clear_gate 1
+  gate_status="$?"
+  set -e
+  return "$gate_status"
+}
+
+write_retry_context() {
+  local round="$1"
+  local context_file="$2"
+  {
+    echo "本轮是 review wait retry，请基于当前 head 重新审查。"
+    echo ""
+    echo "- 当前 head: ${last_head_sha:-unknown}"
+    echo "- 等待轮次: ${round}/${max_rounds}"
+    echo "- 单轮等待上限: ${max_wait}s"
+    echo "- 首轮静默等待: ${initial_wait}s"
+    echo "- 轮询间隔: ${poll_wait}s"
+    echo "- 触发原因: 等待窗口内未观察到当前 head 的 clean Codex review。"
+    echo "- 说明: 旧 review thread 的 resolved 状态不等于当前 head 已通过复审。"
+    echo "- 请求: 请确认当前 head 是否仍有 actionable P0/P1/P2，或明确回复无重大问题。"
+  } > "$context_file"
+}
+
+request_retry_review() {
+  local round="$1"
+  local context_file="$tmp_dir/review-wait-retry-${round}.md"
+  write_retry_context "$round" "$context_file"
+  OPENSPEC_BUDDY_GH_CACHE_DIR="$cache_dir" \
+    run_with_timeout "$script_dir/request-pr-review.sh" "$pr_number" --force --context-file "$context_file" >/dev/null
+}
+
+verify_current_head_request_gate 0
 
 set +e
 run_clear_gate 0
@@ -174,16 +198,55 @@ if [[ "$gate_status" -eq 2 ]]; then
   exit 1
 fi
 
-sleep_if_needed "$initial_wait"
+round=1
+while [[ "$round" -le "$max_rounds" ]]; do
+  started_at="$SECONDS"
+  last_signature="$(probe_state_signature)"
+  last_head_sha="$(probe_head_sha "$last_signature")"
+  sleep_if_needed "$initial_wait"
 
-while true; do
-  elapsed=$((SECONDS - started_at))
-  signature="$(light_state_signature)"
+  while true; do
+    elapsed=$((SECONDS - started_at))
+    if [[ "$elapsed" -ge "$max_wait" ]]; then
+      break
+    fi
 
-  if [[ "$first_check" -eq 1 || "$signature" != "$last_signature" || "$elapsed" -ge "$max_wait" ]]; then
-    verify_current_head_request_gate
+    signature="$(probe_state_signature)"
+    last_head_sha="$(probe_head_sha "$signature")"
+
+    if [[ "$signature" != "$last_signature" ]]; then
+      set +e
+      run_full_check_after_change
+      gate_status="$?"
+      set -e
+
+      if [[ "$gate_status" -eq 0 ]]; then
+        exit 0
+      fi
+      if [[ "$gate_status" -eq 2 ]]; then
+        exit 1
+      fi
+      last_signature="$signature"
+    fi
+
+    elapsed=$((SECONDS - started_at))
+    if [[ "$elapsed" -ge "$max_wait" ]]; then
+      break
+    fi
+
+    remaining=$((max_wait - elapsed))
+    next_sleep="$poll_wait"
+    if [[ "$next_sleep" -gt "$remaining" ]]; then
+      next_sleep="$remaining"
+    fi
+    sleep_if_needed "$next_sleep"
+  done
+
+  signature="$(probe_state_signature)"
+  last_head_sha="$(probe_head_sha "$signature")"
+  if [[ "$signature" != "$last_signature" ]]; then
     set +e
-    run_clear_gate 1
+    run_full_check_after_change
     gate_status="$?"
     set -e
 
@@ -193,21 +256,18 @@ while true; do
     if [[ "$gate_status" -eq 2 ]]; then
       exit 1
     fi
+    last_signature="$signature"
   fi
 
-  first_check=0
-  last_signature="$signature"
+  if [[ "$round" -lt "$max_rounds" ]]; then
+    echo "Timed out waiting for a current-head clean review on PR #$pr_number from $reviewer after ${max_wait}s; requesting one retry review with context." >&2
+    request_retry_review "$((round + 1))"
+    round="$((round + 1))"
+    continue
+  fi
+
   elapsed=$((SECONDS - started_at))
-  if [[ "$elapsed" -ge "$max_wait" ]]; then
-    echo "Timed out waiting for a current-head clean review on PR #$pr_number from $reviewer after ${max_wait}s." >&2
-    echo "Run verify-review-clear.sh for the latest diagnostic before deciding whether to continue waiting or mark needs-human." >&2
-    exit 124
-  fi
-
-  remaining=$((max_wait - elapsed))
-  next_sleep="$poll_wait"
-  if [[ "$next_sleep" -gt "$remaining" ]]; then
-    next_sleep="$remaining"
-  fi
-  sleep_if_needed "$next_sleep"
+  echo "Timed out waiting for a current-head clean review on PR #$pr_number from $reviewer after ${max_rounds} wait rounds (${max_wait}s each)." >&2
+  echo "Run verify-review-clear.sh for the latest diagnostic, then mark the issue needs-human if no clean review exists." >&2
+  exit 124
 done

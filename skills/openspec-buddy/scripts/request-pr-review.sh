@@ -4,17 +4,22 @@ set -euo pipefail
 pr_ref="${1:-}"
 
 if [[ -z "$pr_ref" ]]; then
-  echo "Usage: request-pr-review.sh <pr-number-or-url> [--dry-run] [--context-file <file>]" >&2
+  echo "Usage: request-pr-review.sh <pr-number-or-url> [--dry-run] [--force] [--context-file <file>]" >&2
   exit 2
 fi
 
 dry_run=0
+force_request=0
 context_file=""
 shift
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
     --dry-run)
       dry_run=1
+      shift
+      ;;
+    --force)
+      force_request=1
       shift
       ;;
     --context-file)
@@ -98,7 +103,7 @@ pr_number="$(resolve_pr_number "$pr_ref")" || {
 OPENSPEC_BUDDY_CACHE_REFRESH=1 buddy_pr_rest_bundle "$repo_nwo" "$pr_number" "$cache_dir"
 request_state="$(node "$script_dir/review-request-state.mjs" "$review_request" "$BUDDY_PR_REST_FILE" "$BUDDY_COMMITS_FILE" "$BUDDY_ISSUE_COMMENTS_FILE")"
 
-if [[ "$request_state" == "present-current-head" ]]; then
+if [[ "$request_state" == "present-current-head" && "$force_request" != "1" ]]; then
   printf 'PR review request already present for %s (%s).\n' "$pr_ref" "$request_state"
   exit 0
 fi

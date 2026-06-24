@@ -182,6 +182,24 @@ if ! grep -F 'api graphql' "$GH_LOG_FILE" >/dev/null; then
   exit 1
 fi
 
+cat > "$tmp_dir/force-review-context.md" <<'EOF'
+本轮是 review wait retry，请基于当前 head 重新审查。
+- 当前 head: head-1
+- 触发原因: 等待窗口内未观察到当前 head 的 clean Codex review。
+EOF
+export GH_COMMENTS_FILE="$tmp_dir/comments-present.json"
+export GH_COMMENT_LOG_FILE="$tmp_dir/comment-force.log"
+bash "$helper" 123 --force --context-file "$tmp_dir/force-review-context.md"
+if ! grep -F -- "$OPENSPEC_BUDDY_PR_REVIEW_REQUEST" "$GH_COMMENT_LOG_FILE" >/dev/null; then
+  echo "request-pr-review.sh --force did not post the configured review request" >&2
+  exit 1
+fi
+if ! grep -F -- "本轮是 review wait retry" "$GH_COMMENT_LOG_FILE" >/dev/null; then
+  echo "request-pr-review.sh --force did not append the retry context file" >&2
+  cat "$GH_COMMENT_LOG_FILE" >&2
+  exit 1
+fi
+
 cat > "$tmp_dir/comments-missing.json" <<JSON
 []
 JSON

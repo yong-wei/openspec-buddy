@@ -46,7 +46,20 @@ printf '%s\n' \
   'set -euo pipefail' \
   'printf "%s\n" "$*" >> "${GH_LOG_FILE:?}"' \
   'if [[ "$1" == "api" && "$2" == */pulls/123 ]]; then' \
-  '  cat "${GH_PR_FILE:?}"' \
+  '  if [[ -n "${GH_PR_SEQUENCE_DIR:-}" ]]; then' \
+  '    sequence_count_file="${GH_PR_SEQUENCE_COUNT_FILE:?}"' \
+  '    sequence_count=0' \
+  '    if [[ -f "$sequence_count_file" ]]; then sequence_count="$(cat "$sequence_count_file")"; fi' \
+  '    sequence_count="$((sequence_count + 1))"' \
+  '    printf "%s" "$sequence_count" > "$sequence_count_file"' \
+  '    if [[ "$sequence_count" -le "${GH_PR_SEQUENCE_STATIC_COUNT:-2}" ]]; then' \
+  '      cat "$GH_PR_SEQUENCE_DIR/before.json"' \
+  '    else' \
+  '      cat "$GH_PR_SEQUENCE_DIR/after.json"' \
+  '    fi' \
+  '  else' \
+  '    cat "${GH_PR_FILE:?}"' \
+  '  fi' \
   '  exit 0' \
   'fi' \
   'if [[ "$1" == "api" && "$2" == */issues/42 ]]; then' \
@@ -99,6 +112,10 @@ printf '%s\n' \
   'fi' \
   'if [[ "$1" == "api" && "$2" == "rate_limit" ]]; then' \
   '  printf "%s\n" "{\"remaining\":1000,\"resetAt\":\"2026-06-12T00:30:00Z\"}"' \
+  '  exit 0' \
+  'fi' \
+  'if [[ "$1" == "pr" && "$2" == "comment" ]]; then' \
+  '  printf "%s\n" "$*" >> "${GH_COMMENT_LOG_FILE:-/dev/null}"' \
   '  exit 0' \
   'fi' \
   'echo "unexpected gh invocation: $*" >&2' \
@@ -165,6 +182,7 @@ export GH_COMMITS_FILE="$tmp_dir/commits.json"
 export GH_ISSUE_COMMENTS_FILE="$tmp_dir/issue-comments.json"
 export GH_THREADS_FILE="$tmp_dir/threads.json"
 export GH_LOG_FILE="$tmp_dir/gh.log"
+export GH_COMMENT_LOG_FILE="$tmp_dir/comment.log"
 
 printf '%s\n' \
   '#!/bin/bash' \
@@ -251,7 +269,7 @@ fi
 export OPENSPEC_BUDDY_REVIEW_COMMAND_TIMEOUT_SECONDS=60
 export OPENSPEC_BUDDY_REVIEW_INITIAL_WAIT_SECONDS=0
 export OPENSPEC_BUDDY_REVIEW_POLL_SECONDS=1
-export OPENSPEC_BUDDY_REVIEW_MAX_WAIT_SECONDS=2
+export OPENSPEC_BUDDY_REVIEW_MAX_WAIT_SECONDS=6
 
 printf '%s\n' \
   '{' \
@@ -261,6 +279,33 @@ printf '%s\n' \
   '  "body": "Origin issue: #42\n<!-- openspec-buddy-origin-issue:42 -->"' \
   '}' \
   > "$tmp_dir/pr-head-2.json"
+mkdir -p "$tmp_dir/pr-sequence"
+printf '%s\n' \
+  '{' \
+  '  "number": 123,' \
+  '  "html_url": "https://github.com/opt-de/major/pull/123",' \
+  '  "head": { "sha": "head-2", "ref": "buddy-test-branch" },' \
+  '  "updated_at": "2026-01-01T00:04:00Z",' \
+  '  "comments": 1,' \
+  '  "review_comments": 0,' \
+  '  "commits": 1,' \
+  '  "state": "open",' \
+  '  "body": "Origin issue: #42\n<!-- openspec-buddy-origin-issue:42 -->"' \
+  '}' \
+  > "$tmp_dir/pr-sequence/before.json"
+printf '%s\n' \
+  '{' \
+  '  "number": 123,' \
+  '  "html_url": "https://github.com/opt-de/major/pull/123",' \
+  '  "head": { "sha": "head-2", "ref": "buddy-test-branch" },' \
+  '  "updated_at": "2026-01-01T00:05:00Z",' \
+  '  "comments": 2,' \
+  '  "review_comments": 0,' \
+  '  "commits": 1,' \
+  '  "state": "open",' \
+  '  "body": "Origin issue: #42\n<!-- openspec-buddy-origin-issue:42 -->"' \
+  '}' \
+  > "$tmp_dir/pr-sequence/after.json"
 printf '%s\n' \
   '[' \
   '  {' \
@@ -376,7 +421,7 @@ fi
 export GH_COMMITS_FILE="$tmp_dir/commits-head-2.json"
 export OPENSPEC_BUDDY_REVIEW_INITIAL_WAIT_SECONDS=0
 export OPENSPEC_BUDDY_REVIEW_POLL_SECONDS=1
-export OPENSPEC_BUDDY_REVIEW_MAX_WAIT_SECONDS=2
+export OPENSPEC_BUDDY_REVIEW_MAX_WAIT_SECONDS=6
 node -e '
 const fs = require("node:fs");
 const [file, reviewRequest] = process.argv.slice(1);
@@ -423,8 +468,12 @@ export VERIFY_REUSE_LOG_FILE="$tmp_dir/verify-cache-refresh-reuse.log"
 rm -f "$VERIFY_COUNT_FILE"
 rm -f "$VERIFY_REUSE_LOG_FILE"
 export OPENSPEC_BUDDY_VERIFY_REVIEW_CLEAR_HELPER="$tmp_dir/verify-cache-refresh.sh"
+export GH_PR_SEQUENCE_DIR="$tmp_dir/pr-sequence"
+export GH_PR_SEQUENCE_COUNT_FILE="$tmp_dir/pr-sequence.count"
+export GH_PR_SEQUENCE_STATIC_COUNT=4
+rm -f "$GH_PR_SEQUENCE_COUNT_FILE"
 
-if ! timeout 5s "$helper" 123 > "$tmp_dir/cache-refresh-output.txt" 2> "$tmp_dir/cache-refresh-err.txt"; then
+if ! timeout 10s "$helper" 123 > "$tmp_dir/cache-refresh-output.txt" 2> "$tmp_dir/cache-refresh-err.txt"; then
   echo "wait-for-review-clear.sh did not refresh commit cache before the second verifier run" >&2
   cat "$tmp_dir/cache-refresh-output.txt" >&2
   cat "$tmp_dir/cache-refresh-err.txt" >&2
@@ -440,6 +489,76 @@ if [[ "$(tr '\n' ' ' < "$VERIFY_REUSE_LOG_FILE" | sed 's/ *$//')" != "0 1" ]]; t
   cat "$VERIFY_REUSE_LOG_FILE" >&2
   exit 1
 fi
+unset GH_PR_SEQUENCE_DIR
+unset GH_PR_SEQUENCE_COUNT_FILE
+unset GH_PR_SEQUENCE_STATIC_COUNT
+
+export OPENSPEC_BUDDY_REVIEW_INITIAL_WAIT_SECONDS=0
+export OPENSPEC_BUDDY_REVIEW_POLL_SECONDS=1
+export OPENSPEC_BUDDY_REVIEW_MAX_WAIT_SECONDS=1
+export VERIFY_COUNT_FILE="$tmp_dir/verify-timeout-boundary.count"
+export VERIFY_REUSE_LOG_FILE="$tmp_dir/verify-timeout-boundary-reuse.log"
+rm -f "$VERIFY_COUNT_FILE" "$VERIFY_REUSE_LOG_FILE"
+export GH_PR_SEQUENCE_DIR="$tmp_dir/pr-sequence"
+export GH_PR_SEQUENCE_COUNT_FILE="$tmp_dir/pr-timeout-boundary-sequence.count"
+export GH_PR_SEQUENCE_STATIC_COUNT=4
+rm -f "$GH_PR_SEQUENCE_COUNT_FILE"
+export GH_COMMENT_LOG_FILE="$tmp_dir/comment-timeout-boundary.log"
+if ! timeout 8s "$helper" 123 > "$tmp_dir/timeout-boundary-output.txt" 2> "$tmp_dir/timeout-boundary-err.txt"; then
+  echo "wait-for-review-clear.sh missed a light-state change at the timeout boundary" >&2
+  cat "$tmp_dir/timeout-boundary-output.txt" >&2
+  cat "$tmp_dir/timeout-boundary-err.txt" >&2
+  exit 1
+fi
+if ! grep -F 'cached head and commit state agree' "$tmp_dir/timeout-boundary-output.txt" >/dev/null; then
+  echo "wait-for-review-clear.sh did not run the final timeout-boundary verifier" >&2
+  cat "$tmp_dir/timeout-boundary-output.txt" >&2
+  exit 1
+fi
+if [[ -e "$GH_COMMENT_LOG_FILE" ]]; then
+  echo "wait-for-review-clear.sh should not request a retry after a timeout-boundary clean review" >&2
+  cat "$GH_COMMENT_LOG_FILE" >&2
+  exit 1
+fi
+unset GH_PR_SEQUENCE_DIR
+unset GH_PR_SEQUENCE_COUNT_FILE
+unset GH_PR_SEQUENCE_STATIC_COUNT
+
+export VERIFY_MODE=waitable
+export OPENSPEC_BUDDY_VERIFY_REVIEW_CLEAR_HELPER="$tmp_dir/verify-review-clear.sh"
+export OPENSPEC_BUDDY_REVIEW_INITIAL_WAIT_SECONDS=0
+export OPENSPEC_BUDDY_REVIEW_POLL_SECONDS=1
+export OPENSPEC_BUDDY_REVIEW_MAX_WAIT_SECONDS=1
+export GH_PR_FILE="$tmp_dir/pr-head-2.json"
+export GH_COMMITS_FILE="$tmp_dir/commits-head-2.json"
+export GH_COMMENT_LOG_FILE="$tmp_dir/comment-retry-timeout.log"
+rm -f "$GH_COMMENT_LOG_FILE"
+set +e
+timeout 8s "$helper" 123 > "$tmp_dir/retry-timeout-output.txt" 2> "$tmp_dir/retry-timeout-err.txt"
+retry_timeout_status="$?"
+set -e
+unset VERIFY_MODE
+if [[ "$retry_timeout_status" -ne 124 ]]; then
+  echo "wait-for-review-clear.sh should return 124 after the second wait window times out" >&2
+  cat "$tmp_dir/retry-timeout-output.txt" >&2
+  cat "$tmp_dir/retry-timeout-err.txt" >&2
+  exit 1
+fi
+if ! grep -F -- "$OPENSPEC_BUDDY_PR_REVIEW_REQUEST" "$GH_COMMENT_LOG_FILE" >/dev/null; then
+  echo "wait-for-review-clear.sh did not force a retry review request after the first timeout" >&2
+  cat "$GH_COMMENT_LOG_FILE" >&2 || true
+  exit 1
+fi
+if ! grep -F -- "本轮是 review wait retry" "$GH_COMMENT_LOG_FILE" >/dev/null; then
+  echo "wait-for-review-clear.sh retry request did not include retry context" >&2
+  cat "$GH_COMMENT_LOG_FILE" >&2
+  exit 1
+fi
+if ! grep -F 'after 2 wait rounds' "$tmp_dir/retry-timeout-err.txt" >/dev/null; then
+  echo "wait-for-review-clear.sh did not report second-round human intervention timeout" >&2
+  cat "$tmp_dir/retry-timeout-err.txt" >&2
+  exit 1
+fi
 
 cat > "$tmp_dir/gh-head-change" <<'EOF'
 #!/bin/bash
@@ -451,9 +570,18 @@ if [[ -f "$state_file" ]]; then
   state="$(cat "$state_file")"
 fi
 if [[ "$1" == "api" && "$2" == */pulls/123 ]]; then
-  if [[ "$state" == "head-1" ]]; then
+  count_file="${HEAD_CHANGE_COUNT_FILE:?}"
+  count=0
+  if [[ -f "$count_file" ]]; then
+    count="$(cat "$count_file")"
+  fi
+  count="$((count + 1))"
+  printf '%s' "$count" > "$count_file"
+  if [[ "$count" -le "${HEAD_CHANGE_STATIC_COUNT:-4}" ]]; then
+    printf 'head-1' > "$state_file"
     cat "${GH_PR_HEAD_1_FILE:?}"
   else
+    printf 'head-2' > "$state_file"
     cat "${GH_PR_HEAD_2_FILE:?}"
   fi
   exit 0
@@ -522,6 +650,10 @@ if [[ "$1" == "api" && "$2" == "rate_limit" ]]; then
   printf '%s\n' '{"remaining":1000,"resetAt":"2026-06-12T00:30:00Z"}'
   exit 0
 fi
+if [[ "$1" == "pr" && "$2" == "comment" ]]; then
+  printf '%s\n' "$*" >> "${GH_COMMENT_LOG_FILE:-/dev/null}"
+  exit 0
+fi
 echo "unexpected gh invocation: $*" >&2
 exit 99
 EOF
@@ -547,19 +679,23 @@ fs.writeFileSync(file, `${JSON.stringify([
 ' "$tmp_dir/issue-comments-head-change-stale.json" "$OPENSPEC_BUDDY_PR_REVIEW_REQUEST"
 export GH_HEAD_CHANGE_COMMENTS_FILE="$tmp_dir/issue-comments-head-change-stale.json"
 export HEAD_CHANGE_STATE_FILE="$tmp_dir/head-change-state"
-rm -f "$HEAD_CHANGE_STATE_FILE"
+export HEAD_CHANGE_COUNT_FILE="$tmp_dir/head-change-count"
+export HEAD_CHANGE_STATIC_COUNT=4
+rm -f "$HEAD_CHANGE_STATE_FILE" "$HEAD_CHANGE_COUNT_FILE"
 export OPENSPEC_BUDDY_REVIEW_INITIAL_WAIT_SECONDS=0
 export OPENSPEC_BUDDY_REVIEW_POLL_SECONDS=1
-export OPENSPEC_BUDDY_REVIEW_MAX_WAIT_SECONDS=2
+export OPENSPEC_BUDDY_REVIEW_MAX_WAIT_SECONDS=6
 export OPENSPEC_BUDDY_VERIFY_REVIEW_CLEAR_HELPER="$tmp_dir/verify-cache-refresh.sh"
 export VERIFY_COUNT_FILE="$tmp_dir/verify-head-change.count"
 export VERIFY_REUSE_LOG_FILE="$tmp_dir/verify-head-change-reuse.log"
 rm -f "$VERIFY_COUNT_FILE" "$VERIFY_REUSE_LOG_FILE"
 set +e
-timeout 5s "$helper" 123 > "$tmp_dir/head-change-output.txt" 2> "$tmp_dir/head-change-err.txt"
+timeout 10s "$helper" 123 > "$tmp_dir/head-change-output.txt" 2> "$tmp_dir/head-change-err.txt"
 head_change_status="$?"
 set -e
 mv "$tmp_dir/gh-original" "$tmp_dir/gh"
+unset HEAD_CHANGE_COUNT_FILE
+unset HEAD_CHANGE_STATIC_COUNT
 if [[ "$head_change_status" -eq 0 || "$head_change_status" -eq 124 ]]; then
   echo "wait-for-review-clear.sh should fail when PR head changes and the review request becomes stale during wait" >&2
   cat "$tmp_dir/head-change-err.txt" >&2
@@ -607,7 +743,7 @@ cat > "$tmp_dir/threads-unresolved.json" <<'JSON'
 JSON
 export GH_THREADS_FILE="$tmp_dir/threads-unresolved.json"
 set +e
-timeout 2s "$helper" 123 > "$tmp_dir/unresolved-output.txt" 2> "$tmp_dir/unresolved-err.txt"
+"$helper" 123 > "$tmp_dir/unresolved-output.txt" 2> "$tmp_dir/unresolved-err.txt"
 unresolved_status="$?"
 set -e
 if [[ "$unresolved_status" -eq 0 ]]; then

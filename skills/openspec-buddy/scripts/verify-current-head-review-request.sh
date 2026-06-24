@@ -31,7 +31,11 @@ pr_number="$(resolve_pr_number "$pr_ref")"
 repo_nwo="$(buddy_repo_nwo)"
 cache_dir="$(buddy_cache_dir)"
 
-OPENSPEC_BUDDY_CACHE_REFRESH=1 buddy_pr_rest_bundle "$repo_nwo" "$pr_number" "$cache_dir"
+if [[ "${OPENSPEC_BUDDY_REUSE_PR_REST_CACHE:-0}" == "1" ]]; then
+  buddy_pr_rest_bundle "$repo_nwo" "$pr_number" "$cache_dir"
+else
+  OPENSPEC_BUDDY_CACHE_REFRESH=1 buddy_pr_rest_bundle "$repo_nwo" "$pr_number" "$cache_dir"
+fi
 request_state="$(node "$script_dir/review-request-state.mjs" "$review_request" "$BUDDY_PR_REST_FILE" "$BUDDY_COMMITS_FILE" "$BUDDY_ISSUE_COMMENTS_FILE")"
 
 if [[ "$request_state" == "present-current-head" ]]; then
