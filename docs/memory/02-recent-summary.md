@@ -27,6 +27,7 @@
 - 本机项目目录新增被 git 忽略的 `.agents/skills/release-package/` 项目级发布技能：后续发布默认由代理判定 SemVer、维护 release notes 和相关文档，再用本地 `npm publish` token 文件完成 GitHub Release、npm 打包发布与发布后验证；`.agents/` 不放行进仓库。
 - 从 2026-06-13 起，后续 OpenSpec-buddy 修改默认在隔离 git worktree 中完成，避免本仓库软链接技能影响其他正在运行的项目代理；开发结束后必须经子代理审核通过，再提交、推送、合并到 `main`，删除开发 worktree，将本地 `main` 对齐远端，然后直接发版和打包 npm。可使用 Superpowers 的工作树技能。
 - `v0.9.4` 发布线强化多代理 claim 竞态门禁：claim 前后必须绕过缓存读取 GitHub 真源，先写最小 `status:claimed` 与 claim comment 并通过 REST 复查，之后才允许创建 Development link、远端 claim branch 和 Project Start/Status。
+- `v0.11.0` 发布线补齐 review-fix loop 的 current-head review request 硬闸门：旧 Codex review threads 经 `review-response-gate.sh` 回复并 resolved 后，必须再通过 `request-pr-review.sh` 为当前 head 发起复审，`wait-for-review-clear.sh` 启动前会用 REST 验证 fresh review request，不满足则直接失败而不是静默等待。
 
 ## 当前警惕点
 

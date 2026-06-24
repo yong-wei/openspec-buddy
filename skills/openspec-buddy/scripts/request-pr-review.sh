@@ -2,20 +2,35 @@
 set -euo pipefail
 
 pr_ref="${1:-}"
-mode="${2:-}"
 
 if [[ -z "$pr_ref" ]]; then
-  echo "Usage: request-pr-review.sh <pr-number-or-url> [--dry-run]" >&2
+  echo "Usage: request-pr-review.sh <pr-number-or-url> [--dry-run] [--context-file <file>]" >&2
   exit 2
 fi
 
 dry_run=0
-if [[ "$mode" == "--dry-run" ]]; then
-  dry_run=1
-elif [[ -n "$mode" ]]; then
-  echo "Unknown option: $mode" >&2
-  exit 2
-fi
+context_file=""
+shift
+while [[ "$#" -gt 0 ]]; do
+  case "$1" in
+    --dry-run)
+      dry_run=1
+      shift
+      ;;
+    --context-file)
+      context_file="${2:-}"
+      if [[ -z "$context_file" ]]; then
+        echo "Missing value for --context-file." >&2
+        exit 2
+      fi
+      shift 2
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      exit 2
+      ;;
+  esac
+done
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/load-config.sh"
@@ -28,6 +43,17 @@ review_request="${OPENSPEC_BUDDY_PR_REVIEW_REQUEST:-}"
 if [[ -z "$review_request" ]]; then
   echo "Missing OPENSPEC_BUDDY_PR_REVIEW_REQUEST; configure the explicit PR review request before entering review." >&2
   exit 2
+fi
+review_request_body="$review_request"
+if [[ -n "$context_file" ]]; then
+  if [[ ! -f "$context_file" ]]; then
+    echo "Review request context file not found: $context_file" >&2
+    exit 2
+  fi
+  review_context="$(<"$context_file")"
+  if [[ -n "$review_context" ]]; then
+    review_request_body="${review_request_body}"$'\n\n'"${review_context}"
+  fi
 fi
 
 command_timeout="${OPENSPEC_BUDDY_REVIEW_COMMAND_TIMEOUT_SECONDS:-60}"
@@ -70,86 +96,17 @@ pr_number="$(resolve_pr_number "$pr_ref")" || {
 "$script_dir/verify-review-threads-resolved.sh" "$pr_ref"
 
 OPENSPEC_BUDDY_CACHE_REFRESH=1 buddy_pr_rest_bundle "$repo_nwo" "$pr_number" "$cache_dir"
-pr_json_file="$(mktemp)"
-trap 'rm -f "$pr_json_file"' EXIT
-node -e '
-const fs = require("node:fs");
-const [prFile, commitsFile, commentsFile] = process.argv.slice(1);
-const pr = JSON.parse(fs.readFileSync(prFile, "utf8"));
-const commits = JSON.parse(fs.readFileSync(commitsFile, "utf8"));
-const comments = JSON.parse(fs.readFileSync(commentsFile, "utf8"));
-const output = {
-  headRefOid: pr.head?.sha || pr.headRefOid || "",
-  commits: Array.isArray(commits)
-    ? commits.map((commit) => ({
-        oid: commit.sha,
-        committedDate: commit.commit?.committer?.date || commit.commit?.author?.date || "",
-        authoredDate: commit.commit?.author?.date || "",
-      }))
-    : [],
-  comments: Array.isArray(comments)
-    ? comments.map((comment) => ({
-        body: comment.body || "",
-        createdAt: comment.created_at,
-      }))
-    : [],
-};
-process.stdout.write(JSON.stringify(output));
-' "$BUDDY_PR_REST_FILE" "$BUDDY_COMMITS_FILE" "$BUDDY_ISSUE_COMMENTS_FILE" > "$pr_json_file"
-request_state="$(
-  node -e '
-const fs = require("node:fs");
-const [reviewRequest, prFile] = process.argv.slice(1);
-let pr = {};
-try {
-  const raw = fs.readFileSync(prFile, "utf8").trim();
-  pr = raw ? JSON.parse(raw) : {};
-} catch {
-  pr = {};
-}
+request_state="$(node "$script_dir/review-request-state.mjs" "$review_request" "$BUDDY_PR_REST_FILE" "$BUDDY_COMMITS_FILE" "$BUDDY_ISSUE_COMMENTS_FILE")"
 
-function list(value) {
-  if (Array.isArray(value)) return value;
-  if (Array.isArray(value?.nodes)) return value.nodes;
-  return [];
-}
-
-function entryTime(entry) {
-  const value = entry?.createdAt || entry?.created_at || entry?.committedDate || entry?.committed_at || entry?.authoredDate || entry?.authored_at || "";
-  const time = Date.parse(value);
-  return Number.isFinite(time) ? time : null;
-}
-
-const comments = list(pr.comments);
-const commits = list(pr.commits);
-const headOid = pr.headRefOid || pr.headOid || pr.head?.oid || "";
-const headCommit = commits.find((commit) => commit?.oid === headOid || commit?.sha === headOid) || commits.at(-1);
-const headTime = entryTime(headCommit);
-const matchingRequests = comments.filter((comment) => String(comment?.body || "").includes(reviewRequest));
-
-if (headTime === null) {
-  process.stdout.write(matchingRequests.length > 0 ? "present-unknown-head" : "missing");
-  process.exit(0);
-}
-
-const freshRequest = matchingRequests.some((comment) => {
-  const createdAt = entryTime(comment);
-  return createdAt !== null && createdAt >= headTime;
-});
-
-process.stdout.write(freshRequest ? "present-current-head" : "missing-current-head");
-' "$review_request" "$pr_json_file"
-)"
-
-if [[ "$request_state" == "present-current-head" || "$request_state" == "present-unknown-head" ]]; then
+if [[ "$request_state" == "present-current-head" ]]; then
   printf 'PR review request already present for %s (%s).\n' "$pr_ref" "$request_state"
   exit 0
 fi
 
 if [[ "$dry_run" == "1" ]]; then
-  printf '[dry-run] add PR review request to %s: %s\n' "$pr_ref" "$review_request"
+  printf '[dry-run] add PR review request to %s: %s\n' "$pr_ref" "$review_request_body"
 else
-  run_with_timeout gh pr comment "$pr_ref" --body "$review_request" >/dev/null
+  run_with_timeout gh pr comment "$pr_ref" --body "$review_request_body" >/dev/null
   buddy_invalidate_cache "$(buddy_cache_path pr "$pr_number" "$cache_dir")"
   buddy_invalidate_pr_rest_bundle_cache "$cache_dir" "$pr_number"
   if [[ "${OPENSPEC_BUDDY_SKIP_SIGNAL_PUBLISH:-0}" != "1" ]]; then

@@ -404,9 +404,19 @@ Steps:
    ```bash
    <openspec-buddy-skill-dir>/scripts/review-response-gate.sh <pr-url> --head <head-sha>
    ```
-   Do not request another review or enter `wait-for-review-clear.sh` until the
-   gate resolves the addressed threads and a fresh GraphQL read confirms
-   `isResolved=true`.
+   After the gate resolves the addressed threads and a fresh GraphQL read
+   confirms `isResolved=true`, create a short review-fix context file that
+   names the current head, addressed thread ids or URLs, fix commit, evidence
+   reply status, and the passed review-response gate. Then request the current
+   head review before waiting:
+   ```bash
+   <openspec-buddy-skill-dir>/scripts/request-pr-review.sh <pr-url> --context-file <review-fix-context.md>
+   <openspec-buddy-skill-dir>/scripts/wait-for-review-clear.sh <pr-url>
+   ```
+   `review-response-gate.sh` only proves old addressed threads are resolved.
+   It is not a clean review for the new head. `wait-for-review-clear.sh` is an
+   observer and fails before sleeping when no fresh current-head review request
+   exists.
 
 If claim verification fails, stop before editing files. If the user is starting from an ordinary open issue rather than a prepared Buddy issue, run `claim` first so intake and adoption happen before implementation.
 
@@ -477,6 +487,10 @@ Read only the reference needed for the current mode:
   `review-response-gate.sh` after replying with commit or verification
   evidence; the gate resolves through `resolve-review-thread.sh` and re-reads
   GraphQL.
+- Do not treat resolved review threads as a clean current-head review. After a
+  review-fix commit and `review-response-gate.sh`, run `request-pr-review.sh`
+  with a review-fix `--context-file` before `wait-for-review-clear.sh`; the
+  wait helper refuses to sleep without a fresh current-head review request.
 - Do not leave Buddy PRs without PR-scoped labels, copied non-status
   coordination labels, mirrored issue assignees, the same Project as the
   originating issue, an origin issue record, the configured review request

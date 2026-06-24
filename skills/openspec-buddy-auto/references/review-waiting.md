@@ -26,10 +26,13 @@ rounds. It sleeps for `OPENSPEC_BUDDY_REVIEW_INITIAL_WAIT_SECONDS` first
 (default `120`) until `OPENSPEC_BUDDY_REVIEW_MAX_WAIT_SECONDS` is reached
 (default `900`). During helper execution, do not call `write_stdin` to poll the
 shell session; wait for the command to finish in one foreground wait window.
-Before sleeping, the helper checks GraphQL `reviewThreads`. If any unresolved
-actionable Codex `P0`, `P1`, or `P2` thread exists, it fails immediately and
-prints the thread id, path, line, and URL. Do not retry the wait helper until
-`review-response-gate.sh` has passed.
+Before sleeping, the helper checks two preconditions. First, the current PR
+head must have a fresh `OPENSPEC_BUDDY_PR_REVIEW_REQUEST` comment; otherwise it
+fails immediately and tells the agent to run `request-pr-review.sh`. Second, it
+checks GraphQL `reviewThreads`. If any unresolved actionable Codex `P0`, `P1`,
+or `P2` thread exists, it fails immediately and prints the thread id, path,
+line, and URL. Do not retry the wait helper until `review-response-gate.sh` has
+passed and `request-pr-review.sh` has requested review for the current head.
 
 Forbidden during this phase:
 
@@ -55,6 +58,15 @@ last_seen_comment_ids
 review_round
 quiet_review_checks
 ```
+
+`review-response-gate.sh` proves old addressed threads have same-thread replies
+and are resolved. It does not prove the current head is clean. Only
+`request-pr-review.sh` starts the current-head review cycle, and only
+`wait-for-review-clear.sh` or `verify-review-clear.sh` can prove the current
+head is clean. In a review-fix follow-up, call `request-pr-review.sh` with
+`--context-file`; the file should append the current head, addressed thread ids
+or URLs, fix commit, evidence reply status, and passed review-response gate
+status after the fixed configured request string.
 
 ## Post-Wait Check
 

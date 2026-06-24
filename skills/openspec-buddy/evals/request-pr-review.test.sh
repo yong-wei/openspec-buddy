@@ -204,6 +204,27 @@ for cache_file in \
   fi
 done
 
+cat > "$tmp_dir/review-fix-context.md" <<'EOF'
+本轮是 review-fix follow-up，请重点检查：
+- 当前 head: head-1
+- 已处理的 review thread: THREAD_1
+- 修复提交: head-1
+- same-thread evidence reply 已写入
+- review-response-gate 已确认线程 resolved
+EOF
+export GH_COMMENTS_FILE="$tmp_dir/comments-missing.json"
+export GH_COMMENT_LOG_FILE="$tmp_dir/comment-context.log"
+bash "$helper" 123 --context-file "$tmp_dir/review-fix-context.md"
+if ! grep -F -- "$OPENSPEC_BUDDY_PR_REVIEW_REQUEST" "$GH_COMMENT_LOG_FILE" >/dev/null; then
+  echo "request-pr-review.sh context request omitted the configured review request" >&2
+  exit 1
+fi
+if ! grep -F -- "本轮是 review-fix follow-up" "$GH_COMMENT_LOG_FILE" >/dev/null; then
+  echo "request-pr-review.sh did not append the review-fix context file" >&2
+  cat "$GH_COMMENT_LOG_FILE" >&2
+  exit 1
+fi
+
 cat > "$tmp_dir/pr-head-2.json" <<JSON
 {
   "head": { "sha": "head-2", "ref": "buddy-test-branch" },
@@ -248,6 +269,42 @@ for cache_file in \
     exit 1
   fi
 done
+
+cat > "$tmp_dir/commits-unknown-head-time.json" <<JSON
+[
+  {
+    "sha": "head-2",
+    "commit": {}
+  }
+]
+JSON
+export GH_COMMITS_FILE="$tmp_dir/commits-unknown-head-time.json"
+export GH_COMMENTS_FILE="$tmp_dir/comments-stale.json"
+export GH_COMMENT_LOG_FILE="$tmp_dir/comment-unknown-head.log"
+bash "$helper" 123
+if ! grep -F -- "$OPENSPEC_BUDDY_PR_REVIEW_REQUEST" "$GH_COMMENT_LOG_FILE" >/dev/null; then
+  echo "request-pr-review.sh must refresh the request when the current head time is unknown" >&2
+  exit 1
+fi
+
+cat > "$tmp_dir/commits-missing-current-head.json" <<JSON
+[
+  {
+    "sha": "head-1",
+    "commit": {
+      "committer": { "date": "2026-01-01T00:02:00Z" }
+    }
+  }
+]
+JSON
+export GH_COMMITS_FILE="$tmp_dir/commits-missing-current-head.json"
+export GH_COMMENTS_FILE="$tmp_dir/comments-stale.json"
+export GH_COMMENT_LOG_FILE="$tmp_dir/comment-missing-current-head.log"
+bash "$helper" 123
+if ! grep -F -- "$OPENSPEC_BUDDY_PR_REVIEW_REQUEST" "$GH_COMMENT_LOG_FILE" >/dev/null; then
+  echo "request-pr-review.sh must refresh the request when the current head commit is missing from REST commits" >&2
+  exit 1
+fi
 
 cat > "$tmp_dir/threads-unresolved.json" <<JSON
 {

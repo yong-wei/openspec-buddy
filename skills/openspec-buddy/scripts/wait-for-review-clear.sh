@@ -149,12 +149,18 @@ run_clear_gate() {
   return 2
 }
 
+verify_current_head_request_gate() {
+  OPENSPEC_BUDDY_GH_CACHE_DIR="$cache_dir" "$script_dir/verify-current-head-review-request.sh" "$pr_number" >/dev/null
+}
+
 sleep_if_needed() {
   local seconds="$1"
   if [[ "$seconds" -gt 0 ]]; then
     sleep "$seconds"
   fi
 }
+
+verify_current_head_request_gate
 
 set +e
 run_clear_gate 0
@@ -175,6 +181,7 @@ while true; do
   signature="$(light_state_signature)"
 
   if [[ "$first_check" -eq 1 || "$signature" != "$last_signature" || "$elapsed" -ge "$max_wait" ]]; then
+    verify_current_head_request_gate
     set +e
     run_clear_gate 1
     gate_status="$?"

@@ -278,6 +278,122 @@ export GH_COMMITS_FILE="$tmp_dir/commits-head-2.json"
 printf '%s\n' \
   '#!/bin/bash' \
   'set -euo pipefail' \
+  'printf "%s\n" "$*" >> "${STALE_REQUEST_VERIFY_LOG:?}"' \
+  'echo "Review clearance verification failed:" >&2' \
+  'echo "- No review found from chatgpt-codex-connector." >&2' \
+  'exit 1' \
+  > "$tmp_dir/verify-stale-request.sh"
+chmod +x "$tmp_dir/verify-stale-request.sh"
+export OPENSPEC_BUDDY_VERIFY_REVIEW_CLEAR_HELPER="$tmp_dir/verify-stale-request.sh"
+export STALE_REQUEST_VERIFY_LOG="$tmp_dir/verify-stale-request.log"
+rm -f "$STALE_REQUEST_VERIFY_LOG"
+export OPENSPEC_BUDDY_REVIEW_INITIAL_WAIT_SECONDS=5
+export OPENSPEC_BUDDY_REVIEW_POLL_SECONDS=1
+export OPENSPEC_BUDDY_REVIEW_MAX_WAIT_SECONDS=5
+set +e
+timeout 2s "$helper" 123 > "$tmp_dir/stale-request-output.txt" 2> "$tmp_dir/stale-request-err.txt"
+stale_request_status="$?"
+set -e
+if [[ "$stale_request_status" -eq 0 || "$stale_request_status" -eq 124 ]]; then
+  echo "wait-for-review-clear.sh should fail immediately when current head has no fresh review request" >&2
+  cat "$tmp_dir/stale-request-err.txt" >&2
+  exit 1
+fi
+if ! grep -F 'Current head has no fresh PR review request' "$tmp_dir/stale-request-err.txt" >/dev/null; then
+  echo "wait-for-review-clear.sh did not explain the missing current-head review request" >&2
+  cat "$tmp_dir/stale-request-err.txt" >&2
+  exit 1
+fi
+if [[ -f "$STALE_REQUEST_VERIFY_LOG" ]]; then
+  echo "wait-for-review-clear.sh should not call the review verifier before a current-head request exists" >&2
+  cat "$STALE_REQUEST_VERIFY_LOG" >&2
+  exit 1
+fi
+
+printf '%s\n' \
+  '[' \
+  '  {' \
+  '    "sha": "head-2",' \
+  '    "commit": {}' \
+  '  }' \
+  ']' \
+  > "$tmp_dir/commits-unknown-head-time.json"
+export GH_COMMITS_FILE="$tmp_dir/commits-unknown-head-time.json"
+rm -f "$STALE_REQUEST_VERIFY_LOG"
+set +e
+timeout 2s "$helper" 123 > "$tmp_dir/unknown-head-output.txt" 2> "$tmp_dir/unknown-head-err.txt"
+unknown_head_status="$?"
+set -e
+if [[ "$unknown_head_status" -eq 0 || "$unknown_head_status" -eq 124 ]]; then
+  echo "wait-for-review-clear.sh should fail immediately when current head time is unknown" >&2
+  cat "$tmp_dir/unknown-head-err.txt" >&2
+  exit 1
+fi
+if ! grep -F 'Current head has no fresh PR review request' "$tmp_dir/unknown-head-err.txt" >/dev/null; then
+  echo "wait-for-review-clear.sh did not fail closed for unknown current head time" >&2
+  cat "$tmp_dir/unknown-head-err.txt" >&2
+  exit 1
+fi
+if [[ -f "$STALE_REQUEST_VERIFY_LOG" ]]; then
+  echo "wait-for-review-clear.sh should not call the review verifier when current head time is unknown" >&2
+  cat "$STALE_REQUEST_VERIFY_LOG" >&2
+  exit 1
+fi
+
+printf '%s\n' \
+  '[' \
+  '  {' \
+  '    "sha": "head-1",' \
+  '    "commit": {' \
+  '      "author": { "date": "2026-01-01T00:06:00Z" },' \
+  '      "committer": { "date": "2026-01-01T00:06:00Z" }' \
+  '    }' \
+  '  }' \
+  ']' \
+  > "$tmp_dir/commits-missing-current-head.json"
+export GH_COMMITS_FILE="$tmp_dir/commits-missing-current-head.json"
+rm -f "$STALE_REQUEST_VERIFY_LOG"
+set +e
+timeout 2s "$helper" 123 > "$tmp_dir/missing-current-head-output.txt" 2> "$tmp_dir/missing-current-head-err.txt"
+missing_current_head_status="$?"
+set -e
+if [[ "$missing_current_head_status" -eq 0 || "$missing_current_head_status" -eq 124 ]]; then
+  echo "wait-for-review-clear.sh should fail immediately when current head commit is missing from REST commits" >&2
+  cat "$tmp_dir/missing-current-head-err.txt" >&2
+  exit 1
+fi
+if ! grep -F 'Current head has no fresh PR review request' "$tmp_dir/missing-current-head-err.txt" >/dev/null; then
+  echo "wait-for-review-clear.sh did not fail closed for missing current head commit" >&2
+  cat "$tmp_dir/missing-current-head-err.txt" >&2
+  exit 1
+fi
+if [[ -f "$STALE_REQUEST_VERIFY_LOG" ]]; then
+  echo "wait-for-review-clear.sh should not call the review verifier when current head commit is missing" >&2
+  cat "$STALE_REQUEST_VERIFY_LOG" >&2
+  exit 1
+fi
+
+export GH_COMMITS_FILE="$tmp_dir/commits-head-2.json"
+export OPENSPEC_BUDDY_REVIEW_INITIAL_WAIT_SECONDS=0
+export OPENSPEC_BUDDY_REVIEW_POLL_SECONDS=1
+export OPENSPEC_BUDDY_REVIEW_MAX_WAIT_SECONDS=2
+node -e '
+const fs = require("node:fs");
+const [file, reviewRequest] = process.argv.slice(1);
+fs.writeFileSync(file, `${JSON.stringify([
+  {
+    id: 3,
+    body: reviewRequest,
+    created_at: "2026-01-01T00:04:00Z",
+    user: { login: "yong-wei" },
+    html_url: "https://github.com/opt-de/major/pull/123#issuecomment-3",
+  },
+])}\n`);
+' "$tmp_dir/issue-comments.json" "$OPENSPEC_BUDDY_PR_REVIEW_REQUEST"
+
+printf '%s\n' \
+  '#!/bin/bash' \
+  'set -euo pipefail' \
   'count_file="${VERIFY_COUNT_FILE:?}"' \
   'count=0' \
   'if [[ -f "$count_file" ]]; then' \
@@ -310,6 +426,7 @@ export OPENSPEC_BUDDY_VERIFY_REVIEW_CLEAR_HELPER="$tmp_dir/verify-cache-refresh.
 
 if ! timeout 5s "$helper" 123 > "$tmp_dir/cache-refresh-output.txt" 2> "$tmp_dir/cache-refresh-err.txt"; then
   echo "wait-for-review-clear.sh did not refresh commit cache before the second verifier run" >&2
+  cat "$tmp_dir/cache-refresh-output.txt" >&2
   cat "$tmp_dir/cache-refresh-err.txt" >&2
   exit 1
 fi
@@ -323,6 +440,141 @@ if [[ "$(tr '\n' ' ' < "$VERIFY_REUSE_LOG_FILE" | sed 's/ *$//')" != "0 1" ]]; t
   cat "$VERIFY_REUSE_LOG_FILE" >&2
   exit 1
 fi
+
+cat > "$tmp_dir/gh-head-change" <<'EOF'
+#!/bin/bash
+set -euo pipefail
+printf '%s\n' "$*" >> "${GH_LOG_FILE:?}"
+state_file="${HEAD_CHANGE_STATE_FILE:?}"
+state="head-1"
+if [[ -f "$state_file" ]]; then
+  state="$(cat "$state_file")"
+fi
+if [[ "$1" == "api" && "$2" == */pulls/123 ]]; then
+  if [[ "$state" == "head-1" ]]; then
+    cat "${GH_PR_HEAD_1_FILE:?}"
+  else
+    cat "${GH_PR_HEAD_2_FILE:?}"
+  fi
+  exit 0
+fi
+if [[ "$1" == "api" && "$2" == */issues/42 ]]; then
+  printf '%s\n' '{"number":42,"state":"open","labels":[{"name":"status:claimed"}]}'
+  exit 0
+fi
+if [[ "$1" == "api" && "${2:-}" == "--paginate" && "${3:-}" == "--slurp" && "${4:-}" == */issues/42/comments* ]]; then
+  printf '%s\n' '[[{"created_at":"2026-01-01T00:00:00Z","body":"OpenSpec Buddy Claim\n\nclaim_id: claim-42\nstate: active\nagent: @YW\nchange_id: buddy-test-branch\nbranch: buddy-test-branch\nbase_branch: integration\nbase_sha: abc123\nlease_until: 2026-01-02T00:00:00.000Z"}]]'
+  exit 0
+fi
+if [[ "$1" == "api" && "${2:-}" == "--paginate" && "${3:-}" == "--slurp" && "${4:-}" == */issues/123/comments* ]]; then
+  printf '['
+  cat "${GH_HEAD_CHANGE_COMMENTS_FILE:?}"
+  printf ']\n'
+  exit 0
+fi
+if [[ "$1" == "api" && "$2" == */issues/123/comments* ]]; then
+  cat "${GH_HEAD_CHANGE_COMMENTS_FILE:?}"
+  exit 0
+fi
+if [[ "$1" == "api" && "${2:-}" == "--paginate" && "${3:-}" == "--slurp" && "${4:-}" == */pulls/123/commits* ]]; then
+  if [[ "$state" == "head-1" ]]; then
+    printf '['
+    cat "${GH_COMMITS_HEAD_1_FILE:?}"
+    printf ']\n'
+    printf 'head-2' > "$state_file"
+  else
+    printf '['
+    cat "${GH_COMMITS_HEAD_2_FILE:?}"
+    printf ']\n'
+  fi
+  exit 0
+fi
+if [[ "$1" == "api" && "$2" == */pulls/123/commits* ]]; then
+  if [[ "$state" == "head-1" ]]; then
+    cat "${GH_COMMITS_HEAD_1_FILE:?}"
+    printf 'head-2' > "$state_file"
+  else
+    cat "${GH_COMMITS_HEAD_2_FILE:?}"
+  fi
+  exit 0
+fi
+if [[ "$1" == "api" && "${2:-}" == "--paginate" && "${3:-}" == "--slurp" && "${4:-}" == */pulls/123/comments* ]]; then
+  printf '[[]]\n'
+  exit 0
+fi
+if [[ "$1" == "api" && "$2" == */pulls/123/comments* ]]; then
+  printf '[]\n'
+  exit 0
+fi
+if [[ "$1" == "api" && "${2:-}" == "--paginate" && "${3:-}" == "--slurp" && "${4:-}" == */pulls/123/reviews* ]]; then
+  printf '[[]]\n'
+  exit 0
+fi
+if [[ "$1" == "api" && "$2" == */pulls/123/reviews* ]]; then
+  printf '[]\n'
+  exit 0
+fi
+if [[ "$1" == "api" && "$2" == "graphql" ]]; then
+  cat "${GH_THREADS_FILE:?}"
+  exit 0
+fi
+if [[ "$1" == "api" && "$2" == "rate_limit" ]]; then
+  printf '%s\n' '{"remaining":1000,"resetAt":"2026-06-12T00:30:00Z"}'
+  exit 0
+fi
+echo "unexpected gh invocation: $*" >&2
+exit 99
+EOF
+chmod +x "$tmp_dir/gh-head-change"
+mv "$tmp_dir/gh" "$tmp_dir/gh-original"
+cp "$tmp_dir/gh-head-change" "$tmp_dir/gh"
+export GH_PR_HEAD_1_FILE="$tmp_dir/pr.json"
+export GH_PR_HEAD_2_FILE="$tmp_dir/pr-head-2.json"
+export GH_COMMITS_HEAD_1_FILE="$tmp_dir/commits.json"
+export GH_COMMITS_HEAD_2_FILE="$tmp_dir/commits-head-2.json"
+node -e '
+const fs = require("node:fs");
+const [file, reviewRequest] = process.argv.slice(1);
+fs.writeFileSync(file, `${JSON.stringify([
+  {
+    id: 4,
+    body: reviewRequest,
+    created_at: "2026-01-01T00:01:00Z",
+    user: { login: "yong-wei" },
+    html_url: "https://github.com/opt-de/major/pull/123#issuecomment-4",
+  },
+])}\n`);
+' "$tmp_dir/issue-comments-head-change-stale.json" "$OPENSPEC_BUDDY_PR_REVIEW_REQUEST"
+export GH_HEAD_CHANGE_COMMENTS_FILE="$tmp_dir/issue-comments-head-change-stale.json"
+export HEAD_CHANGE_STATE_FILE="$tmp_dir/head-change-state"
+rm -f "$HEAD_CHANGE_STATE_FILE"
+export OPENSPEC_BUDDY_REVIEW_INITIAL_WAIT_SECONDS=0
+export OPENSPEC_BUDDY_REVIEW_POLL_SECONDS=1
+export OPENSPEC_BUDDY_REVIEW_MAX_WAIT_SECONDS=2
+export OPENSPEC_BUDDY_VERIFY_REVIEW_CLEAR_HELPER="$tmp_dir/verify-cache-refresh.sh"
+export VERIFY_COUNT_FILE="$tmp_dir/verify-head-change.count"
+export VERIFY_REUSE_LOG_FILE="$tmp_dir/verify-head-change-reuse.log"
+rm -f "$VERIFY_COUNT_FILE" "$VERIFY_REUSE_LOG_FILE"
+set +e
+timeout 5s "$helper" 123 > "$tmp_dir/head-change-output.txt" 2> "$tmp_dir/head-change-err.txt"
+head_change_status="$?"
+set -e
+mv "$tmp_dir/gh-original" "$tmp_dir/gh"
+if [[ "$head_change_status" -eq 0 || "$head_change_status" -eq 124 ]]; then
+  echo "wait-for-review-clear.sh should fail when PR head changes and the review request becomes stale during wait" >&2
+  cat "$tmp_dir/head-change-err.txt" >&2
+  exit 1
+fi
+if ! grep -F 'Current head has no fresh PR review request' "$tmp_dir/head-change-err.txt" >/dev/null; then
+  echo "wait-for-review-clear.sh did not fail closed after PR head changed during wait" >&2
+  cat "$tmp_dir/head-change-err.txt" >&2
+  exit 1
+fi
+
+export GH_PR_FILE="$tmp_dir/pr-head-2.json"
+export GH_COMMITS_FILE="$tmp_dir/commits-head-2.json"
+export GH_ISSUE_COMMENTS_FILE="$tmp_dir/issue-comments.json"
+export OPENSPEC_BUDDY_VERIFY_REVIEW_CLEAR_HELPER="$tmp_dir/verify-review-clear.sh"
 
 cat > "$tmp_dir/threads-unresolved.json" <<'JSON'
 {
@@ -363,8 +615,10 @@ if [[ "$unresolved_status" -eq 0 ]]; then
   exit 1
 fi
 if ! grep -F 'Unresolved actionable Codex review threads exist' "$tmp_dir/unresolved-err.txt" >/dev/null; then
-  echo "wait-for-review-clear.sh did not surface the review-response-gate failure" >&2
+  echo "wait-for-review-clear.sh did not surface the review-response-gate failure (status $unresolved_status)" >&2
+  cat "$tmp_dir/unresolved-output.txt" >&2
   cat "$tmp_dir/unresolved-err.txt" >&2
+  tail -n 20 "$GH_LOG_FILE" >&2 || true
   exit 1
 fi
 

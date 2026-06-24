@@ -230,9 +230,18 @@ the fix commit or non-actionable rationale plus verification evidence, then run:
 
 The loop may continue only after the helper resolves the addressed actionable
 Codex threads through `resolve-review-thread.sh` and a fresh GraphQL read
-confirms `isResolved=true`. Do not silently resolve review threads. Do not
-request another `@codex review`, wait for review, or merge while
-`verify-review-threads-resolved.sh <pr-number-or-url>` fails.
+confirms `isResolved=true`. Then write a review-fix context file with the
+current head, addressed thread ids or URLs, fix commit, evidence reply status,
+and passed gate status. Request review for the current head before waiting:
+
+```bash
+<openspec-buddy-skill-dir>/scripts/request-pr-review.sh <pr-number-or-url> --context-file <review-fix-context.md>
+<openspec-buddy-skill-dir>/scripts/wait-for-review-clear.sh <pr-number-or-url>
+```
+
+Do not silently resolve review threads. Do not wait for review or merge while
+`verify-review-threads-resolved.sh <pr-number-or-url>` fails, and do not treat
+resolved old threads as a current-head clean review.
 The review gate and wait helpers also run the worktree claim guard before any
 review-thread or polling work; a foreign claim is not waitable.
 
