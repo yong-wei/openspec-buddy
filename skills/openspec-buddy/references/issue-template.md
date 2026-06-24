@@ -33,14 +33,26 @@ Describe the user-visible or engineering outcome.
 
 - List adjacent changes that must not be implemented here.
 
-## Acceptance Criteria
+## Acceptance Checklist
 
-- [ ] Criteria are observable and testable.
-- [ ] Validation commands or manual checks are named.
+- [ ] AC-1: Observable, testable outcome. Owner: independent reviewer.
+  Evidence: validation command, automated test, or manual check.
+- [ ] AC-2: Another outcome if needed. Owner: independent reviewer.
+  Evidence: validation command, automated test, or manual check.
+
+## Tasks
+
+- [ ] Task 1: Concrete implementation step.
+  Covers: AC-1
+  Acceptance: what must be true for this task to satisfy the linked AC.
+  Evidence: command, test, file check, or manual check expected from implementation.
+  Reviewer Check: what the independent reviewer must confirm before AC-1 can be checked.
 
 ## Agent Guardrails
 
 - Only execute this issue's change.
+- Implementation agents may propose satisfied AC ids with evidence, but must not check Acceptance Checklist items themselves.
+- Check AC items only after an independent reviewer confirms the linked task evidence.
 - Use the claim branch named in front matter.
 - Do not execute other planned OpenSpec changes.
 - Stop if dependency, coupling group, or branch constraints fail.

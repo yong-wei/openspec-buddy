@@ -67,10 +67,14 @@ hatch: keep the normal PR, review, and issue/project synchronization flow.
 1. Start from a clean worktree on the long-lived coordination branch.
 2. Verify the current worktree is aligned with the configured Buddy base branch
    by calling `openspec-buddy/scripts/sync-base-branch.sh`. Auto mode does not
-   maintain a separate base-sync implementation. In worktree mode, this helper
-   must not switch branches; it succeeds only when current `HEAD` matches
-   `origin/$OPENSPEC_BUDDY_BASE_BRANCH`, unless the current branch itself is the
-   base branch and can be fast-forwarded.
+   maintain a separate base-sync implementation. If the worktree config has
+   `buddy.boundBranch`, the helper must run on that bound coordination branch
+   and may fast-forward it to `buddy.boundBase`, defaulting to
+   `origin/$OPENSPEC_BUDDY_BASE_BRANCH` when `buddy.boundBase` is unset;
+   detached HEAD and other branches fail before selection or claim. Without
+   `buddy.boundBranch`, the helper preserves the legacy behavior: it
+   fast-forwards only when current branch is the base branch, otherwise current
+   `HEAD` must already match `origin/$OPENSPEC_BUDDY_BASE_BRANCH`.
 3. Check whether the user explicitly pointed to a local-only change, or whether
    selection over `openspec list --json` produces an active change explicitly
    marked for local-only coordination.
@@ -98,6 +102,13 @@ hatch: keep the normal PR, review, and issue/project synchronization flow.
    - `superpowers:requesting-code-review` before or after PR creation when applicable
    Before opening a PR, `openspec instructions apply --change <change_id> --json`
    must report `remaining: 0`; finish or explicitly reconcile incomplete tasks first.
+   If the issue contains an `Acceptance Checklist`, the implementation thread
+   must not check Acceptance Checklist items itself. It may write evidence such
+   as `Proposed satisfied: AC-1, AC-3` with exact commands, tests, file checks,
+   or manual observations. An independent review pass must decide which AC ids
+   are approved before the issue checklist or issue tasks linked to those AC ids
+   are checked. This does not block normal OpenSpec `tasks.md` completion, which
+   still must reach `remaining: 0` before archive.
 10. Pre-archive the completed OpenSpec change on the claim branch before the implementation commit:
    - if a delta spec introduces a capability whose main spec does not exist,
      create `openspec/specs/<capability>/spec.md` with `## Purpose` and
@@ -123,6 +134,14 @@ hatch: keep the normal PR, review, and issue/project synchronization flow.
     `verify-review-clear.sh`, `mark-achieved.sh`, or any other PR/issue helper
     that requires a GitHub record. If the selected change is GitHub issue-backed,
     do not use `--no-pr`; keep the normal GitHub-backed flow.
+    Before the first implementation commit, before opening a PR, and before a
+    local `--no-pr` merge, run an independent review focused on acceptance
+    coverage. The review must receive the issue body, Acceptance Checklist,
+    task-to-AC mapping, current diff, and evidence. It must explicitly return
+    `approved_to_commit`, `approved_ac`, `rejected_ac`, `scope_status`,
+    `regression_risk`, and `required_fixes`. Commit, PR creation, or local merge
+    may proceed only when `approved_to_commit: yes`. Only `approved_ac` items
+    may be checked.
 12. GitHub-backed path only: call `openspec-buddy/scripts/mark-review.sh <issue-number> <pr-url>`.
     Auto mode must not reimplement PR metadata or review-request logic; the
     Buddy helper configures PR labels, assignees, Project state, origin issue,
@@ -142,7 +161,7 @@ hatch: keep the normal PR, review, and issue/project synchronization flow.
     threads; do not enter the wait until `review-response-gate.sh` has replied,
     resolved, and verified those threads.
 14. GitHub-backed path only: check PR review, unresolved threads, requested changes, CI, mergeability, labels, Project membership, and origin issue traceability. Before any merge, run `openspec-buddy/scripts/verify-review-clear.sh <pr-url>` unless `wait-for-review-clear.sh` already returned a successful clearance record for the current head; do not infer review clearance from `gh pr view --comments`. If either helper passes by using a top-level PR clear comment, read the clear comment excerpt and URL printed by the helper output and treat that returned excerpt as the human judgment record; do not make a second, text-only `gh pr view --comments` judgment.
-15. GitHub-backed path only: if new actionable review exists, including `P0`, `P1`, or `P2`, use `github:gh-address-comments` and `superpowers:receiving-code-review`, then push fixes or document the verified non-actionable rationale. After any review-handling commit is pushed, reply in the corresponding review thread with the fix commit or non-actionable rationale and verification evidence, then run `openspec-buddy/scripts/review-response-gate.sh <pr-url> --head <head-sha>`. The review-fix commit is not complete until this helper has resolved every addressed actionable Codex thread and GraphQL confirms `isResolved=true`. A successful reply comment alone is not enough. Do not request another `@codex review`, enter `wait-for-review-clear.sh`, or merge until this gate passes.
+15. GitHub-backed path only: if new actionable review exists, including `P0`, `P1`, or `P2`, use `github:gh-address-comments` and `superpowers:receiving-code-review`, then fix or document the verified non-actionable rationale. Before committing a review-fix diff, run the independent acceptance review again with the issue body, archived or active tasks, Acceptance Checklist if present, current diff, addressed review comments, and verification evidence. The review must return `approved_to_commit`, `approved_ac`, `rejected_ac`, `scope_status`, `regression_risk`, and `required_fixes`; stop until fixes are complete unless `approved_to_commit: yes`. After the approved review-fix commit is pushed, reply in the corresponding review thread with the fix commit or non-actionable rationale and verification evidence, then run `openspec-buddy/scripts/review-response-gate.sh <pr-url> --head <head-sha>`. The review-fix commit is not complete until this helper has resolved every addressed actionable Codex thread and GraphQL confirms `isResolved=true`. A successful reply comment alone is not enough. Do not request another `@codex review`, enter `wait-for-review-clear.sh`, or merge until this gate passes.
     If review feedback changes requirements, tasks, or specs, edit the archived
     change files and synced main specs in the same PR; do not restore the
     active `openspec/changes/<change_id>/` directory.
@@ -166,7 +185,12 @@ hatch: keep the normal PR, review, and issue/project synchronization flow.
     this parent reconciliation automatically and must fail if a closed child is
     missing the terminal `status:archived` label.
 19. GitHub-backed path only: delete the local and remote claim branch.
-20. Return to the coordination branch and fast-forward it to `$OPENSPEC_BUDDY_BASE_BRANCH`.
+20. Return to the coordination branch. If `buddy.boundBranch` is configured,
+    switch to that branch, fast-forward it to `buddy.boundBase` (or
+    `origin/$OPENSPEC_BUDDY_BASE_BRANCH` when unset), and run
+    `openspec-buddy/scripts/verify-bound-worktree.sh --phase goal-loop-start`
+    before selecting another issue. Do not enter the next loop from detached
+    HEAD or from a deleted claim branch.
 21. Write an execution retrospective before final reporting.
 
 ## Goal Mode

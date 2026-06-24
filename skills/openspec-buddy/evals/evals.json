@@ -4,13 +4,13 @@
     {
       "id": 0,
       "prompt": "openspec-buddy claim：没有指定 issue，请自动接收一个开放 issue。",
-      "expected_output": "先检查 OPENSPEC_BUDDY_* 环境变量并调用 sync-base-branch.sh 校验当前 worktree 与 origin/Buddy base branch 对齐；只有当前分支就是 Buddy base branch 时才允许快进，worktree/topic 分支不得被切换或自动快进；在没有指定 issue 时选择最小编号的可 claim open issue；对已有开放 issue直接在原 issue 顶部加入隐藏 openspec-buddy 元数据，不创建镜像 issue；claim 前绕过缓存读取 GitHub 真源，确认 issue、claim comment、同名远端分支、Development link 和 open PR 均未显示 partial claim；先只写入 assignee、status:claimed、Buddy metadata 和 OpenSpec Buddy Claim comment，再通过 REST 复查最新 active claim 属于本次 claim_id；复查通过后才建立 gh issue develop Development 分支、远端 claim branch、Project Status In Progress 和 Start 日期；随后立即判断 simple/complex，简单 issue 作为一个 change 继续，复杂 issue 先拆分子 issue 后把原 issue 转为 tracking parent。",
+      "expected_output": "先检查 OPENSPEC_BUDDY_* 环境变量并调用 verify-bound-worktree.sh --phase pre-claim 与 sync-base-branch.sh 校验当前 worktree；若配置 buddy.boundBranch，必须在该绑定协调分支上执行，detached HEAD 或其他分支在 GitHub 查询前失败，该绑定分支可快进到 buddy.boundBase，未配置时默认 origin/$OPENSPEC_BUDDY_BASE_BRANCH；未配置绑定分支时保留旧的 base 对齐行为。没有指定 issue 时选择最小编号的可 claim open issue；对已有开放 issue直接在原 issue 顶部加入隐藏 openspec-buddy 元数据，不创建镜像 issue；claim 前绕过缓存读取 GitHub 真源，确认 issue、claim comment、同名远端分支、Development link 和 open PR 均未显示 partial claim；先只写入 assignee、status:claimed、Buddy metadata 和 OpenSpec Buddy Claim comment，再通过 REST 复查最新 active claim 属于本次 claim_id；复查通过后才建立 gh issue develop Development 分支、远端 claim branch、Project Status In Progress 和 Start 日期；随后立即判断 simple/complex，简单 issue 作为一个 change 继续，复杂 issue 先拆分子 issue 后把原 issue 转为 tracking parent。",
       "files": []
     },
     {
       "id": 1,
       "prompt": "openspec-buddy propose：为竞技场排行榜筛选重构注册一个新的 change，要求使用 GitHub Issue 协调。",
-      "expected_output": "生成或确认 change_id，先检查 OPENSPEC_BUDDY_* 环境变量，默认调用 openspec-propose 创建本地 OpenSpec change，确认本地路径为 openspec/changes/<change_id>；使用 YAML front matter issue 模板，设置 claim_branch 等于 change_id 且 base_branch 等于配置的 Buddy base branch；GitHub Issue 默认包含完整协作标签和协调状态，包括 status:ready、type:change、area、series、risk、mode、必要时的 level 和 coupling 标签、父子关系、blockedBy/blocking 依赖关系、GitHub Project membership 与 Project Status Todo；通过 verify-issue-relationships.sh 批量验证父子和依赖关系，避免主流程手写 GraphQL；说明不会 claim 或开始实现。",
+      "expected_output": "生成或确认 change_id，先检查 OPENSPEC_BUDDY_* 环境变量，默认调用 openspec-propose 创建本地 OpenSpec change，确认本地路径为 openspec/changes/<change_id>；使用 YAML front matter issue 模板，设置 claim_branch 等于 change_id 且 base_branch 等于配置的 Buddy base branch；issue body 必须包含编号 Acceptance Checklist（AC-1 等）和 task-to-AC 绑定，每个 task 写明 Acceptance、Evidence、Reviewer Check；propose 后要求独立审查变更是否单一、边界是否清晰、task 是否可验收、是否应拆分；AC 不在 propose 阶段勾选，后续只能由独立审查根据 evidence 批准勾选；GitHub Issue 默认包含完整协作标签和协调状态，包括 status:ready、type:change、area、series、risk、mode、必要时的 level 和 coupling 标签、父子关系、blockedBy/blocking 依赖关系、GitHub Project membership 与 Project Status Todo；通过 verify-issue-relationships.sh 批量验证父子和依赖关系，避免主流程手写 GraphQL；说明不会 claim 或开始实现。",
       "files": []
     },
     {
@@ -22,13 +22,13 @@
     {
       "id": 2,
       "prompt": "openspec-buddy apply #123：开始实现这个 OpenSpec change。",
-      "expected_output": "先调用 sync-base-branch.sh 校验当前 worktree 与 origin/Buddy base branch 对齐；只有当前分支就是 Buddy base branch 时才允许快进，worktree/topic 分支不得被切换或自动快进；再读取并校验 Issue metadata、labels 和 GitHub blockedBy 关系，拒绝 parent issue 与仍被阻塞的 issue，检查耦合组、claim_branch；若 issue 是 status:ready，则 claim 前绕过缓存读取 GitHub 真源，确认不存在同名远端分支、Development link、open PR 或 active claim comment；先只写入 assignee、status:claimed 和结构化 claim comment，再通过 REST 复查最新 active claim 属于本次 claim_id；复查通过后才创建 issue Development 分支链接、远端同名分支、Project Status In Progress 与 Start 日期；若已由当前用户 status:claimed，则校验 assignee、Development 分支、远端分支锁和 claim comment 后继续；claim 校验失败时停止，不修改代码。",
+      "expected_output": "先调用 verify-bound-worktree.sh --phase pre-claim 与 sync-base-branch.sh 校验当前 worktree；若配置 buddy.boundBranch，必须在该绑定协调分支上执行，detached HEAD 或其他分支在 GitHub 查询前失败，该绑定分支可快进到 buddy.boundBase，未配置时默认 origin/$OPENSPEC_BUDDY_BASE_BRANCH；未配置绑定分支时保留旧的 base 对齐行为。再读取并校验 Issue metadata、labels 和 GitHub blockedBy 关系，拒绝 parent issue 与仍被阻塞的 issue，检查耦合组、claim_branch；若 issue 是 status:ready，则 claim 前绕过缓存读取 GitHub 真源，确认不存在同名远端分支、Development link、open PR 或 active claim comment；先只写入 assignee、status:claimed 和结构化 claim comment，再通过 REST 复查最新 active claim 属于本次 claim_id；复查通过后才创建 issue Development 分支链接、远端同名分支、Project Status In Progress 与 Start 日期；若已由当前用户 status:claimed，则校验 assignee、Development 分支、远端分支锁和 claim comment 后继续；claim 校验失败时停止，不修改代码。",
       "files": []
     },
     {
       "id": 4,
       "prompt": "openspec-buddy apply #123：实现完成并已打开 PR，请进入 review。",
-      "expected_output": "PR 必须是 ready 且 base 为 OPENSPEC_BUDDY_BASE_BRANCH；进入 review 前必须确认实现 PR 已在 archive 前运行 openspec validate <change_id> --strict 校验 active change/delta spec，并把代码、测试、同步后的主 spec 与 archive 目录放在同一个 PR；通过 mark-review.sh 统一处理 PR 协调，不手写分散逻辑；该 helper 应调用 configure-pr-metadata.sh 复制 pr:* 和 issue 的非 status 协作标签 type/level/area/series/risk/mode/coupling，镜像 issue assignee，把 PR 加入同一 Project 且 Status 为 In Progress，记录 origin issue 与 Development-link 策略；随后通过 request-pr-review.sh 幂等写入 OPENSPEC_BUDDY_PR_REVIEW_REQUEST，再运行 verify-pr-coordination.sh，通过后才把 issue 置为 status:in-review。",
+      "expected_output": "PR 必须是 ready 且 base 为 OPENSPEC_BUDDY_BASE_BRANCH；进入 review 前必须确认实现 PR 已在 archive 前运行 openspec validate <change_id> --strict 校验 active change/delta spec，并把代码、测试、同步后的主 spec 与 archive 目录放在同一个 PR；如果 issue 有 Acceptance Checklist，实现线程只能提交 Proposed satisfied: AC-... 与 evidence，不能自主勾选；进入 review 前必须由独立审查返回 approved_to_commit、approved_ac、rejected_ac、scope_status、regression_risk、required_fixes，只有 approved_ac 可以勾选；通过 mark-review.sh 统一处理 PR 协调，不手写分散逻辑；该 helper 应调用 configure-pr-metadata.sh 复制 pr:* 和 issue 的非 status 协作标签 type/level/area/series/risk/mode/coupling，镜像 issue assignee，把 PR 加入同一 Project 且 Status 为 In Progress，记录 origin issue 与 Development-link 策略；随后通过 request-pr-review.sh 幂等写入 OPENSPEC_BUDDY_PR_REVIEW_REQUEST，再运行 verify-pr-coordination.sh，通过后才把 issue 置为 status:in-review。",
       "files": []
     },
     {

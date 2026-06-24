@@ -9,12 +9,26 @@ git status --short --branch
 <openspec-buddy-skill-dir>/scripts/sync-base-branch.sh
 ```
 
-The helper fetches `origin/$OPENSPEC_BUDDY_BASE_BRANCH` and verifies the current
-worktree is aligned with it. If the current branch is
-`$OPENSPEC_BUDDY_BASE_BRANCH`, the helper may fast-forward it. In a separate
-worktree or topic branch, it must not switch branches; it succeeds only when the
-current `HEAD` equals `origin/$OPENSPEC_BUDDY_BASE_BRANCH`. Stop if the worktree
-is dirty or the current `HEAD` is not aligned with the base branch.
+The helper fetches the configured alignment ref and verifies the current
+worktree is aligned with it. If the worktree config contains
+`buddy.boundBranch`, the helper must run on that bound coordination branch and
+may fast-forward it to `buddy.boundBase`, defaulting to
+`origin/$OPENSPEC_BUDDY_BASE_BRANCH` when `buddy.boundBase` is unset; detached
+HEAD and other branches fail before selection or claim. Without
+`buddy.boundBranch`, the legacy behavior remains: the helper may fast-forward
+the base branch itself, and other branches pass only when the current `HEAD`
+already equals
+`origin/$OPENSPEC_BUDDY_BASE_BRANCH`. Stop if the worktree is dirty or the bound
+branch/base alignment fails.
+
+For permanent worktrees, initialize the local binding once:
+
+```bash
+git config extensions.worktreeConfig true
+git config --worktree buddy.boundBranch <coordination-branch>
+git config --worktree buddy.boundBase origin/$OPENSPEC_BUDDY_BASE_BRANCH
+git config --worktree buddy.worktreeAlias <alias>
+```
 
 If the project explicitly shares `OPENSPEC_BUDDY_CACHE_DIR` or a cache-signal
 Ref, use that layer only to invalidate or reuse local cache between worktrees.
@@ -175,6 +189,16 @@ not silently continue with an untracked or unreviewed PR.
 
 Call `mark-review.sh` only after OpenSpec task progress is `complete == total`;
 otherwise finish or reconcile the local tasks first.
+For issues that contain an `Acceptance Checklist`, the implementation thread
+may record `Proposed satisfied: AC-...` with evidence, but it must not check AC
+items itself. Before the first implementation commit, PR creation, or local
+`--no-pr` merge, obtain an independent review with the issue body, task-to-AC
+mapping, current diff, and evidence. The review must explicitly return
+`approved_to_commit`, `approved_ac`, `rejected_ac`, `scope_status`,
+`regression_risk`, and `required_fixes`. Only the reviewed AC items in
+`approved_ac` may be checked in the issue checklist or issue tasks linked to
+those AC ids. This does not block normal OpenSpec `tasks.md` completion, which
+still must reach `remaining: 0` before archive.
 
 If the user invoked `openspec-buddy-auto --no-pr`, stop before any `gh pr`
 operation. Run local review and verification only, fix findings in the same
@@ -188,10 +212,17 @@ the standard PR and issue synchronization flow.
 ## Review Fix Loop
 
 If Codex review returns actionable `P0`, `P1`, or `P2` feedback, fix or verify
-the finding, run local verification, commit, and push. That commit is not
-complete at push time. Before requesting another review or entering
-`wait-for-review-clear.sh`, reply in each addressed review thread with the fix
-commit or non-actionable rationale plus verification evidence, then run:
+the finding and run local verification. Before committing a review-fix diff,
+obtain an independent review using the original issue, Acceptance Checklist if
+present, task-to-AC mapping, current diff, addressed review comments, and
+verification evidence. The review must decide whether the diff is still in
+scope and return `approved_to_commit`, `approved_ac`, `rejected_ac`,
+`scope_status`, `regression_risk`, and `required_fixes`. Do not commit until
+`approved_to_commit: yes`. After the approved commit is pushed, check the
+reviewed AC items in the issue checklist or issue tasks only for `approved_ac`.
+That commit is not complete at push time. Before requesting another review or
+entering `wait-for-review-clear.sh`, reply in each addressed review thread with
+the fix commit or non-actionable rationale plus verification evidence, then run:
 
 ```bash
 <openspec-buddy-skill-dir>/scripts/review-response-gate.sh <pr-number-or-url> --head <head-sha>
@@ -245,6 +276,16 @@ After PR merge:
 9. Delete the remote claim branch before deleting the local branch. Local `git branch -d`
    can reject deletion while the local branch still tracks an older remote claim branch,
    even when the branch is merged to current `HEAD`.
+10. Return to the bound coordination branch when configured:
+   ```bash
+   git switch "$(git config --worktree buddy.boundBranch)"
+   git merge --ff-only "$(git config --worktree buddy.boundBase 2>/dev/null || echo origin/$OPENSPEC_BUDDY_BASE_BRANCH)"
+   <openspec-buddy-skill-dir>/scripts/verify-bound-worktree.sh --phase goal-loop-start
+   ```
+   If no `buddy.boundBranch` is configured, return to the repository's normal
+   coordination branch and run `sync-base-branch.sh`. Do not enter the next
+   selection loop from detached HEAD, the deleted claim branch, or another
+   worker's branch.
 
 The post-merge achievement step must set the issue to `status:archived`, close the issue, set Project `Status` to `Done`, and set Project `End` to the current local date.
 The same completion rule applies to a series parent after its last child change is archived.

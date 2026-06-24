@@ -10,6 +10,7 @@ status:ready issue already has a claim branch, Development link, claim comment, 
 active claim belongs to another worktree
 claim branch is bound to another local worktree
 current worktree is detached HEAD outside a read-only sync step
+bound permanent worktree is not on its configured `buddy.boundBranch`
 claim branch exists with unknown commits
 open PR exists for the same claim branch
 dependency status is ambiguous

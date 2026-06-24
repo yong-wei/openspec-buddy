@@ -11,6 +11,7 @@ source "$script_dir/worktree-identity.sh"
 # shellcheck source=./cache-signal.sh
 source "$script_dir/cache-signal.sh"
 openspec_buddy_require_core_config
+"$script_dir/verify-bound-worktree.sh" --phase pre-claim >/dev/null
 "$script_dir/sync-base-branch.sh"
 
 tmp_dir="$(mktemp -d)"

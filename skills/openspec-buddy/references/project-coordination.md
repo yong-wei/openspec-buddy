@@ -73,8 +73,28 @@ Before moving the issue to review, run:
 ```
 
 The review request must come from `OPENSPEC_BUDDY_PR_REVIEW_REQUEST`. For
-projects that require Codex review, configure that value explicitly, for
-example `@codex review 中文回复，即使没有重大问题也必须给出显式回复`.
+projects that require Codex review, configure that value explicitly. The
+request must preserve complete code review scope: correctness, regression
+risk, edge cases, tests, maintainability, security, data consistency, and
+compatibility with existing behavior. Acceptance and scope checks are additional
+checks, not a replacement for normal review. The additional checks are
+Acceptance Checklist coverage, scope drift, and unregistered requirement
+detection. A good request is:
+
+```text
+@codex review
+
+请进行完整代码审查，包括正确性、回归风险、边界条件、测试覆盖、可维护性、安全性、数据一致性和现有行为兼容性。
+
+此外，请额外检查：
+1. 本 PR 是否仍在原 issue / OpenSpec change 的范围内。
+2. 实现是否覆盖 issue 中的 Acceptance Checklist。
+3. 每个已声明完成的 task 是否有足够 evidence 支撑。
+4. 是否引入了未在 issue / spec / task 中登记的新需求或范围扩张。
+5. 如果发现缺陷，请指出它关联的 AC / task；如果无法关联，请说明是否代表 checklist 缺项。
+
+中文回复，即使没有重大问题也必须给出显式回复。
+```
 The helper treats an existing request as fresh only when it was posted after the
 current PR head commit; after a fix push, it appends a new request instead of
 reusing a stale one.

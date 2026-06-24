@@ -13,10 +13,32 @@ buddy_worktree_current_branch() {
   git -C "$repo_root" branch --show-current
 }
 
+buddy_worktree_config_get() {
+  local repo_root="$1"
+  local key="$2"
+  git -C "$repo_root" config --worktree --get "$key" 2>/dev/null || true
+}
+
+buddy_worktree_bound_branch() {
+  local repo_root="$1"
+  buddy_worktree_config_get "$repo_root" buddy.boundBranch
+}
+
+buddy_worktree_bound_base() {
+  local repo_root="$1"
+  buddy_worktree_config_get "$repo_root" buddy.boundBase
+}
+
 buddy_worktree_alias() {
   local repo_root="$1"
   if [[ -n "${OPENSPEC_BUDDY_WORKTREE_ALIAS:-}" ]]; then
     printf '%s\n' "$OPENSPEC_BUDDY_WORKTREE_ALIAS"
+    return 0
+  fi
+  local configured_alias
+  configured_alias="$(buddy_worktree_config_get "$repo_root" buddy.worktreeAlias)"
+  if [[ -n "$configured_alias" ]]; then
+    printf '%s\n' "$configured_alias"
     return 0
   fi
   basename "$(dirname "$repo_root")"

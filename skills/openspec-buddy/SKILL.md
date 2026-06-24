@@ -137,7 +137,16 @@ Steps:
    ```bash
    <openspec-buddy-skill-dir>/scripts/claim-issue.sh [issue-number]
    ```
-   The script first runs `sync-base-branch.sh`, then lists open issues when no number is provided, skips series parents, issues assigned to another user, active or terminal status labels, and accepts unlabeled, `status:backlog`, or `status:ready` issues. The helper does not force a worktree branch switch: it fast-forwards only when the current branch is `$OPENSPEC_BUDDY_BASE_BRANCH`; otherwise it requires the current `HEAD` to match `origin/$OPENSPEC_BUDDY_BASE_BRANCH`.
+   The script first runs `verify-bound-worktree.sh --phase pre-claim`, then
+   `sync-base-branch.sh`, then lists open issues when no number is provided,
+   skips series parents, issues assigned to another user, active or terminal
+   status labels, and accepts unlabeled, `status:backlog`, or `status:ready`
+   issues. If the worktree config contains `buddy.boundBranch`, claim must
+   start on that bound coordination branch; detached HEAD and other branches
+   fail before any GitHub query. Without `buddy.boundBranch`, the legacy
+   alignment rule remains: the helper fast-forwards only when the current branch
+   is `$OPENSPEC_BUDDY_BASE_BRANCH`; otherwise it requires the current `HEAD` to
+   match `origin/$OPENSPEC_BUDDY_BASE_BRANCH`.
 2. If the selected issue already has valid Buddy metadata, the script delegates to `claim-change.sh`.
 3. If the selected issue is an ordinary open issue, the script derives `change_id` as `issue-<number>-<title-slug>` and prepends a hidden `<!-- openspec-buddy ... -->` metadata block as part of the minimal claim lock.
 4. Claim uses a hard gate:
@@ -181,20 +190,45 @@ Steps:
 4. Prepare an issue body from `references/issue-template.md`, using the local
    OpenSpec proposal as the source of the goal, scope, tasks, and acceptance
    criteria.
-5. In issue front matter, keep empty list fields as `[]`, but write every
+5. Write numbered acceptance items as `AC-1`, `AC-2`, and so on. Each AC must
+   describe one observable outcome and name its expected evidence. Each task
+   must reference one or more numbered items such as `AC-1` through `Covers:`
+   and must state task-level `Acceptance`, `Evidence`, and `Reviewer Check`
+   fields.
+   Implementation agents may later propose `Proposed satisfied: AC-...` with
+   evidence, but they must not check AC items themselves. Do not mark an AC
+   complete during `propose`; AC checkoff belongs to an independent reviewer
+   after implementation evidence exists.
+6. Require an independent proposal review before creating the GitHub Issue. The
+   review direction is single-scope clarity, explicit out-of-scope boundaries,
+   task-to-AC binding, evidence quality, and whether the change should split
+   into smaller child issues. Do not name a specific subagent because projects
+   differ; use the project's available review worker, another Codex thread, or
+   a human reviewer. If no independent reviewer path exists, report that gap
+   explicitly instead of treating the proposal as reviewed.
+7. Split instead of creating one large executable issue when the proposal spans
+   multiple capabilities, mixes unrelated UI/data/policy work, has more than
+   eight AC items, has tasks that cannot be verified in a small local scope, or
+   needs multiple independent reviewers to approve unrelated boundaries. Use a
+   `type:series-parent` issue plus child issues for that case.
+8. Compatibility: existing active issues and archived changes that lack AC ids
+   remain valid legacy records. Do not rewrite archived changes solely to add
+   AC ids. When a legacy active issue is edited for new work, add the
+   Acceptance Checklist and task-to-AC mapping only for the newly scoped work.
+9. In issue front matter, keep empty list fields as `[]`, but write every
    non-empty `depends_on`, `blocked_by`, or `blocking` field as a YAML block
    list. Do not use inline lists such as `[other-change]`; the metadata parser
    rejects those so dependency metadata cannot be misread.
-6. Set `claim_branch: <change_id>`.
-7. Set `base_branch` to `$OPENSPEC_BUDDY_BASE_BRANCH`. Do not create new Buddy
+10. Set `claim_branch: <change_id>`.
+11. Set `base_branch` to `$OPENSPEC_BUDDY_BASE_BRANCH`. Do not create new Buddy
    issues against `$OPENSPEC_BUDDY_RELEASE_BRANCH`; release from the Buddy base
    branch to the release branch is a manual action unless the project
    explicitly configures otherwise.
-8. Validate the prepared body before creating or updating the issue:
+12. Validate the prepared body before creating or updating the issue:
    ```bash
    <openspec-buddy-skill-dir>/scripts/parse-issue-metadata.mjs <issue-body-file>
    ```
-9. Add all applicable coordination labels by default:
+13. Add all applicable coordination labels by default:
    - `status:ready`
    - `type:change`
    - `level:<level>` when the project uses level labels or the user supplied one
@@ -203,24 +237,24 @@ Steps:
    - `risk:<low|medium|high>`
    - `mode:<isolated|fixed-branch|stacked|docs-only>`
    - `coupling:<coupling_group>` when `coupling_group` is not `none`
-10. Before creating the issue, verify every planned label exists in the target
+14. Before creating the issue, verify every planned label exists in the target
    repository with `gh label list`. If a required Buddy label such as
    `status:ready`, `type:change`, `area:<area>`, `series:<series>`,
    `risk:<risk>`, or `mode:<mode>` is missing, create the missing label or stop
    and report the exact missing label. Do not silently omit labels or substitute
    a different risk/area/series/mode label without saying so in the final
    retrospective. Re-run the label check after creating any missing label.
-11. Create the issue with `gh issue create`.
-12. If this is a planned series, create or identify the series parent issue, then link the child issue:
+15. Create the issue with `gh issue create`.
+16. If this is a planned series, create or identify the series parent issue, then link the child issue:
    ```bash
    <openspec-buddy-skill-dir>/scripts/create-series-parent.sh <series>
    <openspec-buddy-skill-dir>/scripts/link-issue-parent.sh <parent-issue> <child-issue>
    ```
-13. If this issue depends on another change issue, link the native relationship:
+17. If this issue depends on another change issue, link the native relationship:
    ```bash
    <openspec-buddy-skill-dir>/scripts/link-issue-dependencies.sh <blocked-issue> <blocking-issue>
    ```
-14. Add the created issue to the default GitHub Project:
+18. Add the created issue to the default GitHub Project:
    ```bash
    <openspec-buddy-skill-dir>/scripts/add-issue-to-project.sh <issue-url>
    ```
@@ -228,7 +262,7 @@ Steps:
    registered until labels, parent/dependency relationships, Project membership,
    and Project `Status` have all been applied or explicitly reported as already
    present.
-15. Verify parent and dependency relationships with the batch verifier before
+19. Verify parent and dependency relationships with the batch verifier before
    reporting registration complete:
    ```bash
    <openspec-buddy-skill-dir>/scripts/verify-issue-relationships.sh --require-parent <parent-issue> <child-issue>...
@@ -264,7 +298,13 @@ Steps:
    ```bash
    <openspec-buddy-skill-dir>/scripts/sync-base-branch.sh
    ```
-   If the current branch is `$OPENSPEC_BUDDY_BASE_BRANCH`, the helper may fast-forward it. In a separate worktree or topic branch, the helper must not switch branches; it succeeds only when current `HEAD` equals `origin/$OPENSPEC_BUDDY_BASE_BRANCH`.
+   If the current worktree has `buddy.boundBranch`, the helper must run on that
+   branch and may fast-forward it to `buddy.boundBase`, defaulting to
+   `origin/$OPENSPEC_BUDDY_BASE_BRANCH` when `buddy.boundBase` is unset.
+   Detached HEAD and other branches fail before selection or claim. Without a
+   bound branch, the helper preserves the legacy behavior: it fast-forwards only
+   when the current branch is `$OPENSPEC_BUDDY_BASE_BRANCH`; otherwise it
+   succeeds only when current `HEAD` equals `origin/$OPENSPEC_BUDDY_BASE_BRANCH`.
 3. Read the issue body and labels.
 4. Validate metadata:
    ```bash
@@ -314,12 +354,22 @@ Steps:
     - validate each affected main spec with `openspec validate <capability> --strict`
     The issue must remain `status:in-progress`; file-level pre-archive is not
     the same as GitHub issue archive.
-12. Commit code, tests, synced main specs, and the archived change directory
+12. Before the first implementation commit, if the issue contains an
+    `Acceptance Checklist`, run an independent review with the issue body,
+    issue tasks that bind to AC ids, current diff, and evidence. The
+    implementation thread may record `Proposed satisfied: AC-...`, but must not
+    check AC items itself. The review must return `approved_to_commit`,
+    `approved_ac`, `rejected_ac`, `scope_status`, `regression_risk`, and
+    `required_fixes`. Commit only when `approved_to_commit: yes`; only
+    `approved_ac` items may be checked in the issue checklist or issue tasks.
+    This does not replace OpenSpec `tasks.md` completion: `tasks.md` must still
+    be completed before archive, while AC checkoff requires independent review.
+13. Commit code, tests, synced main specs, and the archived change directory
     together.
-13. Open a ready PR against `$OPENSPEC_BUDDY_BASE_BRANCH`, never a draft PR.
+14. Open a ready PR against `$OPENSPEC_BUDDY_BASE_BRANCH`, never a draft PR.
     Do not hand-write the issue Development link; let the metadata helper apply
     the configured PR Development-link policy.
-14. Mark the ready PR and issue for review through the core review helper:
+15. Mark the ready PR and issue for review through the core review helper:
    ```bash
    <openspec-buddy-skill-dir>/scripts/mark-review.sh <issue-number> <pr-url>
    ```
@@ -341,10 +391,16 @@ Steps:
    Development link; the helper records a manual sidebar-link requirement
    instead of pretending the link is complete. This must leave the issue Project
    `Status` as `In Progress`.
-15. When handling Codex review feedback, a pushed fix commit is not complete
-    until every addressed actionable `P0`, `P1`, or `P2` thread has a same-thread
-    reply with the fix commit or non-actionable rationale plus verification
-    evidence, and this gate passes:
+16. When handling Codex review feedback, a pushed fix commit is not complete.
+    Before committing a review-fix diff, run an independent review with the
+    issue body, archived or active tasks, Acceptance Checklist if present,
+    current diff, addressed review comments, and verification evidence. The
+    review must return `approved_to_commit`, `approved_ac`, `rejected_ac`,
+    `scope_status`, `regression_risk`, and `required_fixes`; do not commit until
+    `approved_to_commit: yes`. After the approved fix commit is pushed, every
+    addressed actionable `P0`, `P1`, or `P2` thread must have a same-thread reply
+    with the fix commit or non-actionable rationale plus verification evidence,
+    and this gate must pass:
    ```bash
    <openspec-buddy-skill-dir>/scripts/review-response-gate.sh <pr-url> --head <head-sha>
    ```

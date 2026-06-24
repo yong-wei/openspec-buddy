@@ -68,6 +68,20 @@ openspec-buddy init
 
 配置会写入当前项目的 `.env.openspec-buddy`。这个文件通常不提交到 Git；如需给团队提供模板，可参考 `.env.openspec-buddy.example`。
 
+长期隔离工作树建议再设置本地绑定分支，避免代理从 detached HEAD 或其他
+工作树分支进入 claim/auto 流程：
+
+```bash
+git config extensions.worktreeConfig true
+git config --worktree buddy.boundBranch dev2
+git config --worktree buddy.boundBase origin/integration
+git config --worktree buddy.worktreeAlias dev2
+```
+
+配置了 `buddy.boundBranch` 后，`sync-base-branch.sh`、`claim-issue.sh` 和
+`claim-change.sh` 会要求进场阶段必须在该分支上执行；未配置的普通仓库保持
+旧的 base 对齐行为。
+
 配置检查：
 
 ```bash
@@ -87,10 +101,11 @@ $HOME/.agents/skills/openspec-buddy/scripts/check-config.sh local
 `OPENSPEC_BUDDY_PR_REVIEW_REQUEST`。
 
 `OPENSPEC_BUDDY_PR_REVIEW_REQUEST` 不由包默认硬编码；每个项目应按自己的
-review 机制显式配置。需要 Codex 正式 review 的 Major 类项目可使用：
+review 机制显式配置。请求文本应保留完整代码审查能力，再追加 scope 与
+Acceptance Checklist 检查。需要 Codex 正式 review 的项目可使用：
 
 ```bash
-OPENSPEC_BUDDY_PR_REVIEW_REQUEST="@codex review 中文回复，即使没有重大问题也必须给出显式回复"
+OPENSPEC_BUDDY_PR_REVIEW_REQUEST="@codex review 请进行完整代码审查，包括正确性、回归风险、边界条件、测试覆盖、可维护性、安全性、数据一致性和现有行为兼容性；此外额外检查本 PR 是否仍在原 issue/OpenSpec change 范围内、是否覆盖 Acceptance Checklist、已完成 task 是否有 evidence、是否引入未登记需求。中文回复，即使没有重大问题也必须给出显式回复"
 ```
 
 `mark-review.sh` 会把该字符串作为 PR 评论写入并做幂等检查；

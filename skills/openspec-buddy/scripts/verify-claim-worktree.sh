@@ -68,6 +68,7 @@ cache_dir="$(buddy_cache_dir)"
 repo_root="$(buddy_worktree_repo_root)"
 current_branch="$(buddy_worktree_current_branch "$repo_root")"
 repo_nwo="$(buddy_repo_nwo)"
+bound_branch="$(buddy_worktree_bound_branch "$repo_root")"
 
 if [[ -z "$current_branch" && "$allow_detached" != "1" ]]; then
   echo "Claim worktree guard failed: detached HEAD is not an executable Buddy state." >&2
@@ -152,7 +153,7 @@ if [[ -n "$issue_number" ]]; then
   buddy_worktree_identity_json "$cache_dir" > "$identity_file"
   node -e '
 const fs = require("node:fs");
-const [issueFile, activeFile, identityFile, expectedBranch] = process.argv.slice(1);
+const [issueFile, activeFile, identityFile, expectedBranch, boundBranch] = process.argv.slice(1);
 const issue = JSON.parse(fs.readFileSync(issueFile, "utf8"));
 const active = JSON.parse(fs.readFileSync(activeFile, "utf8"));
 const identity = JSON.parse(fs.readFileSync(identityFile, "utf8"));
@@ -180,7 +181,15 @@ if (active.worktree_alias && active.worktree_alias !== identity.alias) {
   process.stderr.write("Claim worktree guard failed: active claim belongs to another worktree alias.\n");
   process.exit(51);
 }
-' "$issue_file" "$active_file" "$identity_file" "$expected_branch"
+if (boundBranch && !active.coordination_branch) {
+  process.stderr.write("Claim worktree guard failed: active claim is missing coordination_branch for a bound worktree.\n");
+  process.exit(54);
+}
+if (boundBranch && active.coordination_branch !== boundBranch) {
+  process.stderr.write(`Claim worktree guard failed: active claim coordination branch ${active.coordination_branch} does not match bound branch ${boundBranch}.\n`);
+  process.exit(54);
+}
+' "$issue_file" "$active_file" "$identity_file" "$expected_branch" "$bound_branch"
 fi
 
 printf 'Claim worktree verified'

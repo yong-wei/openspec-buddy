@@ -19,6 +19,24 @@ if [[ "${1:-}" == "-C" ]]; then
 fi
 
 case "${1:-}" in
+  config)
+    if [[ "${2:-}" == "--worktree" && "${3:-}" == "--get" ]]; then
+      case "${4:-}" in
+        buddy.boundBranch)
+          printf '%s\n' "${BUDDY_TEST_BOUND_BRANCH:-}"
+          exit 0
+          ;;
+        buddy.boundBase)
+          printf '%s\n' "${BUDDY_TEST_BOUND_BASE:-}"
+          exit 0
+          ;;
+        buddy.worktreeAlias)
+          printf '%s\n' "${BUDDY_TEST_WORKTREE_ALIAS:-}"
+          exit 0
+          ;;
+      esac
+    fi
+    ;;
   rev-parse)
     if [[ "${2:-}" == "--show-toplevel" ]]; then
       printf '%s\n' "${BUDDY_TEST_REPO_ROOT:?}"
@@ -152,6 +170,9 @@ export OPENSPEC_BUDDY_CACHE_DIR="$tmp_dir/cache"
 export BUDDY_TEST_REPO_ROOT="$current_repo"
 export BUDDY_TEST_ISSUE_FILE="$tmp_dir/issue.json"
 export BUDDY_TEST_PR_FILE="$tmp_dir/pr.json"
+export BUDDY_TEST_BOUND_BRANCH=""
+export BUDDY_TEST_BOUND_BASE=""
+export BUDDY_TEST_WORKTREE_ALIAS=""
 
 write_comments "$tmp_dir/comments-current.json"
 export BUDDY_TEST_COMMENTS_FILE="$tmp_dir/comments-current.json"
@@ -214,6 +235,51 @@ if ! grep -F "Claim worktree verified" "$tmp_dir/pass.out" >/dev/null; then
   cat "$tmp_dir/pass.out" >&2
   exit 1
 fi
+
+export BUDDY_TEST_BOUND_BRANCH="dev2"
+export BUDDY_TEST_CURRENT_BRANCH="make-graph-center-actionable"
+export BUDDY_TEST_WORKTREES_FILE="$tmp_dir/worktrees-current.txt"
+write_comments "$tmp_dir/comments-missing-coordination.json"
+export BUDDY_TEST_COMMENTS_FILE="$tmp_dir/comments-missing-coordination.json"
+set +e
+"$helper" --issue 649 --branch make-graph-center-actionable >"$tmp_dir/missing-coordination.out" 2>"$tmp_dir/missing-coordination.err"
+missing_coordination_status="$?"
+set -e
+if [[ "$missing_coordination_status" -eq 0 ]]; then
+  echo "verify-claim-worktree should reject a bound worktree claim missing coordination_branch" >&2
+  exit 1
+fi
+if ! grep -F "missing coordination_branch" "$tmp_dir/missing-coordination.err" >/dev/null; then
+  echo "verify-claim-worktree did not explain missing coordination branch failure" >&2
+  cat "$tmp_dir/missing-coordination.err" >&2
+  exit 1
+fi
+
+write_comments "$tmp_dir/comments-wrong-coordination.json" '\ncoordination_branch: dev1'
+export BUDDY_TEST_COMMENTS_FILE="$tmp_dir/comments-wrong-coordination.json"
+set +e
+"$helper" --issue 649 --branch make-graph-center-actionable >"$tmp_dir/wrong-coordination.out" 2>"$tmp_dir/wrong-coordination.err"
+wrong_coordination_status="$?"
+set -e
+if [[ "$wrong_coordination_status" -eq 0 ]]; then
+  echo "verify-claim-worktree should reject a bound worktree claim from another coordination branch" >&2
+  exit 1
+fi
+if ! grep -F "does not match bound branch dev2" "$tmp_dir/wrong-coordination.err" >/dev/null; then
+  echo "verify-claim-worktree did not explain coordination branch mismatch" >&2
+  cat "$tmp_dir/wrong-coordination.err" >&2
+  exit 1
+fi
+
+write_comments "$tmp_dir/comments-right-coordination.json" '\ncoordination_branch: dev2'
+export BUDDY_TEST_COMMENTS_FILE="$tmp_dir/comments-right-coordination.json"
+"$helper" --issue 649 --branch make-graph-center-actionable >"$tmp_dir/right-coordination.out"
+if ! grep -F "Claim worktree verified" "$tmp_dir/right-coordination.out" >/dev/null; then
+  echo "verify-claim-worktree did not accept matching coordination_branch" >&2
+  cat "$tmp_dir/right-coordination.out" >&2
+  exit 1
+fi
+export BUDDY_TEST_BOUND_BRANCH=""
 
 current_hash="$(node -e 'const crypto=require("node:crypto"); process.stdout.write(crypto.createHash("sha256").update(process.argv[1]).digest("hex"));' "$current_repo")"
 write_comments "$tmp_dir/comments-current-run.json" "\\nworktree_alias: e734\\nworktree_path_hash: $current_hash\\ncoordination_branch: make-graph-center-actionable\\nrun_id: run-current"
