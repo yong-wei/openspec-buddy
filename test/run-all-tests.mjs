@@ -8,6 +8,7 @@ const commands = [
   { label: 'bash skills/openspec-buddy/evals/load-config-dotenv.test.sh', cmd: 'bash', args: ['skills/openspec-buddy/evals/load-config-dotenv.test.sh'] },
   { label: 'node skills/openspec-buddy/evals/build-pr-development-note.test.mjs', cmd: 'node', args: ['skills/openspec-buddy/evals/build-pr-development-note.test.mjs'] },
   { label: 'node skills/openspec-buddy/evals/build-pr-labels.test.mjs', cmd: 'node', args: ['skills/openspec-buddy/evals/build-pr-labels.test.mjs'] },
+  { label: 'node skills/openspec-buddy/evals/buddy-driver.test.mjs', cmd: 'node', args: ['skills/openspec-buddy/evals/buddy-driver.test.mjs'] },
   { label: 'bash skills/openspec-buddy/evals/cache-signal.test.sh', cmd: 'bash', args: ['skills/openspec-buddy/evals/cache-signal.test.sh'] },
   { label: 'bash skills/openspec-buddy/evals/bound-worktree-guard.test.sh', cmd: 'bash', args: ['skills/openspec-buddy/evals/bound-worktree-guard.test.sh'] },
   { label: 'bash skills/openspec-buddy/evals/claim-race-gate.test.sh', cmd: 'bash', args: ['skills/openspec-buddy/evals/claim-race-gate.test.sh'] },
@@ -38,6 +39,7 @@ const commands = [
   { label: 'bash skills/openspec-buddy/evals/verify-review-clear-cache.test.sh', cmd: 'bash', args: ['skills/openspec-buddy/evals/verify-review-clear-cache.test.sh'] },
   { label: 'node skills/openspec-buddy/evals/verify-pr-coordination.test.mjs', cmd: 'node', args: ['skills/openspec-buddy/evals/verify-pr-coordination.test.mjs'] },
   { label: 'node skills/openspec-buddy/evals/verify-review-clear.test.mjs', cmd: 'node', args: ['skills/openspec-buddy/evals/verify-review-clear.test.mjs'] },
+  { label: 'node skills/openspec-buddy-auto/evals/buddy-auto-driver.test.mjs', cmd: 'node', args: ['skills/openspec-buddy-auto/evals/buddy-auto-driver.test.mjs'] },
   { label: 'node skills/openspec-buddy-auto/evals/select-next-change.test.mjs', cmd: 'node', args: ['skills/openspec-buddy-auto/evals/select-next-change.test.mjs'] },
 ];
 

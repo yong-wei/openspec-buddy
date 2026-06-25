@@ -10,19 +10,20 @@ function read(relativePath) {
 }
 
 const buddySkill = read("skills/openspec-buddy/SKILL.md");
+const coreLifecycle = read("skills/openspec-buddy/references/core-lifecycle.md");
 assert.match(
   buddySkill,
   /openspec-buddy propose --no-issue/,
   "openspec-buddy skill must document the --no-issue local-only propose path",
 );
 assert.match(
-  buddySkill,
-  /without creating or updating any GitHub Issue/i,
+  coreLifecycle,
+  /Use `--no-issue` only for intentionally local-only changes[\s\S]*no GitHub issue/i,
   "openspec-buddy --no-issue flow must explicitly skip GitHub issue creation",
 );
 assert.match(
   buddySkill,
-  /--no-issue[\s\S]*require only\s+`OPENSPEC_BUDDY_BASE_BRANCH`[\s\S]*do not block[\s\S]*GitHub Project fields/i,
+  /`propose --no-issue` only requires `OPENSPEC_BUDDY_BASE_BRANCH`/i,
   "openspec-buddy --no-issue flow must exempt GitHub Project config requirements",
 );
 
@@ -39,27 +40,27 @@ assert.match(
 );
 assert.match(
   autoSkill,
-  /without opening a Pull Request|without opening a PR/i,
+  /do not create GitHub issue,\s+PR, Project, review, or achievement state/i,
   "openspec-buddy-auto --no-pr flow must explicitly skip PR creation",
 );
 assert.match(
   autoSkill,
-  /selected change is an explicit[\s\S]*`openspec-buddy propose --no-issue`[\s\S]*do not block on GitHub Project fields or\s+`OPENSPEC_BUDDY_PR_REVIEW_REQUEST`/i,
+  /`--no-pr` is valid only for a selected local-only change created through\s+`openspec-buddy propose --no-issue`/i,
   "openspec-buddy-auto local-only mode must exempt GitHub review/project prerequisites",
 );
 assert.match(
   autoSkill,
-  /3\.\s+Check whether the user explicitly pointed to a local-only change[\s\S]*4\.\s+If selection returns a local-only active change[\s\S]*skip `claim`[\s\S]*5\.\s+Otherwise run `openspec-buddy claim`/i,
+  /EVERY OPENSPEC-BUDDY-AUTO STEP MUST START BY RUNNING THE AUTO DRIVER/i,
   "openspec-buddy-auto must select local-only changes before any claim step",
 );
 assert.match(
   autoSkill,
-  /If the user invoked `openspec-buddy-auto --no-pr`[\s\S]*do not call[\s\S]*mark-review\.sh[\s\S]*wait-for-review-clear\.sh[\s\S]*verify-review-clear\.sh[\s\S]*mark-achieved\.sh/i,
+  /Forbidden Manual Substitutes[\s\S]*direct `wait-for-review-clear\.sh` when `mark-review` has not passed/i,
   "openspec-buddy-auto --no-pr mode must explicitly skip PR and issue helpers",
 );
 assert.match(
   autoSkill,
-  /If the selected change is GitHub issue-backed, `--no-pr` is not a valid escape[\s\S]*hatch[\s\S]*keep the normal PR, review, and issue\/project synchronization flow/i,
+  /`--no-pr` is valid only for a selected local-only change created through\s+`openspec-buddy propose --no-issue`/i,
   "openspec-buddy-auto must limit --no-pr to local-only changes",
 );
 

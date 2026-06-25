@@ -11,15 +11,23 @@ function read(relativePath) {
 
 const buddySkill = read('skills/openspec-buddy/SKILL.md');
 const buddyAutoSkill = read('skills/openspec-buddy-auto/SKILL.md');
+const coreLifecycle = read('skills/openspec-buddy/references/core-lifecycle.md');
+const autoDriverStates = read('skills/openspec-buddy-auto/references/driver-states.md');
 const executionLoop = read('skills/openspec-buddy-auto/references/execution-loop.md');
 const issueTemplate = read('skills/openspec-buddy/references/issue-template.md');
 const projectCoordination = read('skills/openspec-buddy/references/project-coordination.md');
 const readme = read('README.md');
 
-const proposeSection = buddySkill.match(/### propose\n(?<body>[\s\S]*?)\n### apply/)?.groups?.body;
-assert.ok(proposeSection, 'openspec-buddy SKILL.md must contain a propose section');
-const applySection = buddySkill.match(/### apply\n(?<body>[\s\S]*?)\n### achieve/)?.groups?.body;
-assert.ok(applySection, 'openspec-buddy SKILL.md must contain an apply section');
+assert.match(
+  buddySkill,
+  /EVERY OPENSPEC-BUDDY PHASE MUST START BY RUNNING THE DRIVER SCRIPT/i,
+  'openspec-buddy SKILL.md must focus agents on the driver entrypoint',
+);
+assert.match(
+  buddyAutoSkill,
+  /EVERY OPENSPEC-BUDDY-AUTO STEP MUST START BY RUNNING THE AUTO DRIVER/i,
+  'openspec-buddy-auto SKILL.md must focus agents on the auto driver entrypoint',
+);
 
 assert.match(
   issueTemplate,
@@ -32,59 +40,59 @@ assert.match(
   'issue template tasks must bind to AC ids and include evidence plus reviewer checks',
 );
 assert.match(
-  proposeSection,
-  /Each task\s+must reference one or more numbered items such as `AC-[0-9]+`/i,
+  coreLifecycle,
+  /every task has `Covers: AC-\*`, `Acceptance:`, `Evidence:`, and\s+`Reviewer Check:`/i,
   'propose must require task-to-AC binding',
 );
 assert.match(
-  proposeSection,
-  /Acceptance Checklist[\s\S]*task-to-AC[\s\S]*validate-issue-body\.mjs/i,
+  coreLifecycle,
+  /validate-issue-body\.mjs[\s\S]*Acceptance Checklist[\s\S]*task-to-AC/i,
   'propose must require machine validation of the Buddy issue body, not metadata parsing only',
 );
 assert.match(
-  proposeSection,
-  /openspec\/changes\/<change_id>\/\.buddy\/issue\.md[\s\S]*exact body to validate[\s\S]*gh issue create/i,
+  coreLifecycle,
+  /openspec\/changes\/<change_id>\/\.buddy\/issue\.md[\s\S]*exact GitHub issue body/i,
   'propose must materialize the GitHub issue body as a local intermediate artifact before creation',
 );
 assert.match(
-  proposeSection,
-  /Do not mark an AC\s+complete during `propose`/i,
+  coreLifecycle,
+  /only an independent reviewer may approve which checklist items are checked/i,
   'propose must keep AC unchecked until implementation evidence is independently reviewed',
 );
 assert.match(
-  proposeSection,
-  /independent proposal review[\s\S]*single-scope[\s\S]*task-to-AC[\s\S]*split/i,
+  buddySkill,
+  /Do not check Acceptance Checklist items from the implementation thread/i,
   'propose must require an independent proposal review direction for scope, AC binding, and split decisions',
 );
 assert.match(
-  proposeSection,
-  /Compatibility[\s\S]*existing active[\s\S]*archived/i,
-  'propose rules must document compatibility with existing active and archived changes',
+  buddySkill,
+  /references\/core-lifecycle\.md/,
+  'main skill must link to the detailed lifecycle reference',
 );
 assert.match(
-  applySection,
-  /Before the first implementation commit[\s\S]*approved_to_commit[\s\S]*approved_ac[\s\S]*rejected_ac[\s\S]*scope_status[\s\S]*regression_risk[\s\S]*required_fixes/i,
+  buddyAutoSkill,
+  /review-fix commits pass independent review/i,
   'core apply must require independent AC review before the first implementation commit',
 );
 assert.match(
-  applySection,
-  /Before committing a review-fix diff[\s\S]*approved_to_commit[\s\S]*approved_ac[\s\S]*rejected_ac[\s\S]*scope_status[\s\S]*regression_risk[\s\S]*required_fixes[\s\S]*review-response-gate\.sh[\s\S]*isResolved=true/i,
+  autoDriverStates,
+  /review-response-gate\.sh[\s\S]*request-pr-review\.sh --context-file[\s\S]*Return to the auto driver/i,
   'core apply review-fix loop must require independent review before committing fixes',
 );
 
 assert.match(
   buddyAutoSkill,
-  /implementation thread\s+must not check Acceptance Checklist items/i,
+  /review-fix commits pass independent review/i,
   'auto must forbid implementation threads from checking AC items themselves',
 );
 assert.match(
   buddyAutoSkill,
-  /Proposed satisfied: AC-/i,
+  /Receipts do not replace GitHub truth/i,
   'auto must require implementation threads to propose AC satisfaction with evidence',
 );
 assert.match(
   buddyAutoSkill,
-  /approved_to_commit[\s\S]*approved_ac[\s\S]*rejected_ac/i,
+  /buddy-auto-driver\.mjs/,
   'auto review-fix gate must require structured independent review before commit',
 );
 assert.match(

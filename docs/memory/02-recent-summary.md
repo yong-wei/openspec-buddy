@@ -30,6 +30,7 @@
 - `v0.11.0` 发布线补齐 review-fix loop 的 current-head review request 硬闸门：旧 Codex review threads 经 `review-response-gate.sh` 回复并 resolved 后，必须再通过 `request-pr-review.sh` 为当前 head 发起复审，`wait-for-review-clear.sh` 启动前会用 REST 验证 fresh review request，不满足则直接失败而不是静默等待。
 - `v0.12.0` 发布线将 `wait-for-review-clear.sh` 改成两级等待：初始 300 秒后默认每 60 秒只读轻量 PR REST 状态，状态变化后才刷新完整 PR REST bundle 并触发 `verify-review-clear.sh`；首轮 900 秒无 clean review 时自动用固定 review request 加 retry context 复审一次，第二轮仍超时则转人工介入。
 - `v0.13.0` 发布线为 `openspec-buddy propose` 新增 `validate-issue-body.mjs`：创建或更新 GitHub Issue 前必须同时通过 metadata、Acceptance Checklist、task-to-AC、task Acceptance/Evidence/Reviewer Check 校验；legacy claim/apply 路径继续只要求 metadata 以保持兼容。
+- `v0.14.0` 发布线将 `openspec-buddy` 与 `openspec-buddy-auto` 主技能精简为 driver-first 入口文档，并新增 `buddy-driver.mjs` 与 `buddy-auto-driver.mjs`；Auto driver 使用签名本地 receipt 防止伪造阶段推进，`--no-pr` 仅允许显式 local-only `--change` 路径。
 
 ## 当前警惕点
 

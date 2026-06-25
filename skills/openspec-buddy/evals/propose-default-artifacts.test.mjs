@@ -10,38 +10,37 @@ function read(relativePath) {
 }
 
 const skill = read('skills/openspec-buddy/SKILL.md');
-const proposeSection = skill.match(/### propose\n(?<body>[\s\S]*?)\n### apply/)?.groups?.body;
-assert.ok(proposeSection, 'SKILL.md must contain a propose section before apply');
+const lifecycle = read('skills/openspec-buddy/references/core-lifecycle.md');
 
 assert.match(
-  proposeSection,
-  /Invoke `openspec-propose`[\s\S]*local OpenSpec change under\s+`openspec\/changes\/<change_id>`/,
-  'propose must default to creating the local OpenSpec change via openspec-propose',
+  skill,
+  /EVERY OPENSPEC-BUDDY PHASE MUST START BY RUNNING THE DRIVER SCRIPT[\s\S]*buddy-driver\.mjs/i,
+  'main skill must direct agents to the Buddy driver before detailed propose flow',
 );
 assert.doesNotMatch(
-  proposeSection,
+  skill,
   /If the user also asked to create local OpenSpec artifacts/,
   'local OpenSpec artifacts must not be optional in propose mode',
 );
 assert.match(
-  proposeSection,
-  /all applicable coordination labels[\s\S]*Project `Status` to `Todo`/,
-  'propose-created issues must default to full labels and coordination state',
+  lifecycle,
+  /Use propose to create a local OpenSpec change and, by default, the matching\s+GitHub issue/i,
+  'propose must default to creating the local OpenSpec change and GitHub issue',
 );
 assert.match(
-  proposeSection,
-  /verify-issue-relationships\.sh[\s\S]*batch-fetches native\s+GitHub parent\/sub-issue and blockedBy\/blocking edges in one GraphQL request/,
-  'propose must require batch relationship verification through the helper',
+  lifecycle,
+  /openspec\/changes\/<change_id>\/\.buddy\/issue\.md/,
+  'propose must require a local intermediate GitHub issue body artifact',
 );
 assert.match(
-  proposeSection,
-  /both a series parent and dependencies[\s\S]*one\s+combined verification/,
-  'propose must document combined parent and dependency verification',
+  lifecycle,
+  /validate-issue-body\.mjs/,
+  'propose must validate the issue body before GitHub issue mutation',
 );
 assert.match(
-  proposeSection,
-  /Do not hand-write GraphQL for normal propose\s+relationship verification/,
-  'propose must discourage hand-written GraphQL in the main flow',
+  lifecycle,
+  /independent reviewer/i,
+  'propose must keep checklist approval independent from the implementation thread',
 );
 
 const evals = JSON.parse(read('skills/openspec-buddy/evals/evals.json'));

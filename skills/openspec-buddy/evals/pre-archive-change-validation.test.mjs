@@ -3,8 +3,7 @@ import { readFileSync } from "node:fs";
 
 const read = (path) => readFileSync(path, "utf8");
 
-const buddySkill = read("skills/openspec-buddy/SKILL.md");
-const autoSkill = read("skills/openspec-buddy-auto/SKILL.md");
+const coreLifecycle = read("skills/openspec-buddy/references/core-lifecycle.md");
 const executionLoop = read("skills/openspec-buddy-auto/references/execution-loop.md");
 const buddyEvals = read("skills/openspec-buddy/evals/evals.json");
 const autoEvals = read("skills/openspec-buddy-auto/evals/evals.json");
@@ -25,8 +24,7 @@ function assertValidateBeforeArchive(text, label) {
   );
 }
 
-assertValidateBeforeArchive(buddySkill, "openspec-buddy apply workflow");
-assertValidateBeforeArchive(autoSkill, "openspec-buddy-auto workflow");
+assertValidateBeforeArchive(coreLifecycle, "openspec-buddy lifecycle reference");
 assertValidateBeforeArchive(executionLoop, "openspec-buddy-auto execution loop");
 
 for (const [label, text] of [
