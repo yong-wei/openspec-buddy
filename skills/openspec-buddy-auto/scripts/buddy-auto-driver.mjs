@@ -165,7 +165,7 @@ function emitHandoff({ stage, reason, command = [] }) {
 }
 
 function inferCurrentPr() {
-  return run('gh', ['pr', 'view', '--json', 'number', '--jq', '.number'], { optional: true });
+  return run('gh', ['pr', 'view', '--json', 'number,state', '--jq', 'select(.state == "OPEN") | .number'], { optional: true });
 }
 
 function inferCurrentHead(pr) {

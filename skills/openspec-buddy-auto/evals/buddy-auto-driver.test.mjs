@@ -14,9 +14,13 @@ function makeExecutable(file, body) {
 }
 
 function run(args, options = {}) {
+  const env = { ...process.env };
+  for (const key of Object.keys(env)) {
+    if (key.startsWith('OPENSPEC_BUDDY_AUTO_')) delete env[key];
+  }
   return spawnSync('node', [helper, ...args], {
     cwd: options.cwd || repoRoot,
-    env: { ...process.env, ...options.env },
+    env: { ...env, ...options.env },
     encoding: 'utf8',
   });
 }
@@ -57,6 +61,30 @@ const env = {
   assert.match(result.stdout, /^HANDOFF/m);
   assert.match(result.stdout, /stage: select-or-claim/);
   assert.equal(fs.existsSync(noContextLogFile), false);
+}
+
+{
+  const mergedPrStateDir = path.join(tmp, 'state-merged-pr-context');
+  const mergedPrCoreDir = path.join(tmp, 'core-merged-pr-context');
+  const mergedPrLogFile = path.join(tmp, 'commands-merged-pr-context.log');
+  const mergedPrBinDir = path.join(tmp, 'bin-merged-pr-context');
+  const mergedPrGhLogFile = path.join(tmp, 'gh-merged-pr-context.log');
+  fs.mkdirSync(mergedPrCoreDir, { recursive: true });
+  fs.mkdirSync(mergedPrBinDir, { recursive: true });
+  makeExecutable(path.join(mergedPrCoreDir, 'mark-review.sh'), `#!/usr/bin/env bash\necho "mark-review $*" >> ${JSON.stringify(mergedPrLogFile)}\n`);
+  makeExecutable(path.join(mergedPrBinDir, 'gh'), `#!/usr/bin/env bash\necho "$*" >> ${JSON.stringify(mergedPrGhLogFile)}\nif [[ "$*" == "pr view --json number,state --jq select(.state == \\"OPEN\\") | .number" ]]; then exit 0; fi\nexit 1\n`);
+  const result = run([], {
+    env: {
+      OPENSPEC_BUDDY_AUTO_STATE_DIR: mergedPrStateDir,
+      OPENSPEC_BUDDY_CORE_SCRIPT_DIR: mergedPrCoreDir,
+      PATH: `${mergedPrBinDir}:${process.env.PATH}`,
+    },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^HANDOFF/m);
+  assert.match(result.stdout, /stage: select-or-claim/);
+  assert.equal(fs.existsSync(mergedPrLogFile), false);
+  assert.match(fs.readFileSync(mergedPrGhLogFile, 'utf8'), /pr view --json number,state --jq select\(\.state == "OPEN"\) \| \.number/);
 }
 
 {
