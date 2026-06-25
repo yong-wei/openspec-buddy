@@ -23,23 +23,23 @@ function makeExecutable(file, body) {
 }
 
 {
-  const result = run(['--mode', 'propose', '--change', 'add-driver-gate']);
+  const result = run(['--dry-run', '--mode', 'propose', '--change', 'add-driver-gate']);
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /OpenSpec Buddy Driver/);
+  assert.match(result.stdout, /HANDOFF/);
   assert.match(result.stdout, /validate-issue-body\.mjs/);
   assert.match(result.stdout, /openspec\/changes\/add-driver-gate\/\.buddy\/issue\.md/);
   assert.match(result.stdout, /independent proposal review/i);
 }
 
 {
-  const result = run(['--mode', 'propose', '--change', 'local-change', '--no-issue']);
+  const result = run(['--dry-run', '--mode', 'propose', '--change', 'local-change', '--no-issue']);
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /check-config\.sh local/);
   assert.doesNotMatch(result.stdout, /--local-only/);
 }
 
 {
-  const result = run(['--mode', 'claim', '--issue', '123']);
+  const result = run(['--dry-run', '--mode', 'claim', '--issue', '123']);
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /claim-issue\.sh 123/);
   assert.match(result.stdout, /minimal lock/i);
@@ -55,7 +55,28 @@ function makeExecutable(file, body) {
   const skill = fs.readFileSync(path.resolve(__dirname, '../SKILL.md'), 'utf8');
   assert.match(skill, /<EXTREMELY_IMPORTANT>/);
   assert.match(skill, /buddy-driver\.mjs/);
+  assert.match(skill, /DO NOT OUTPUT/);
+  assert.match(skill, /WAIT SILENTLY/);
   assert.ok(skill.split('\n').length < 140, 'openspec-buddy SKILL.md should stay focused on the driver entrypoint');
+}
+
+{
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'buddy-driver-no-context-'));
+  const scriptDir = path.join(tmp, 'skills/openspec-buddy/scripts');
+  fs.mkdirSync(scriptDir, { recursive: true });
+  fs.cpSync(helper, path.join(scriptDir, 'buddy-driver.mjs'));
+  const logFile = path.join(tmp, 'commands.log');
+  makeExecutable(path.join(scriptDir, 'check-config.sh'), `#!/usr/bin/env bash\necho check >> ${JSON.stringify(logFile)}\n`);
+  makeExecutable(path.join(scriptDir, 'claim-issue.sh'), `#!/usr/bin/env bash\necho claim >> ${JSON.stringify(logFile)}\n`);
+  spawnSync('git', ['init', '-q'], { cwd: tmp });
+  const result = spawnSync('node', [path.join(scriptDir, 'buddy-driver.mjs')], {
+    cwd: tmp,
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^HANDOFF/m);
+  assert.match(result.stdout, /context-needed/);
+  assert.equal(fs.existsSync(logFile), false);
 }
 
 {
@@ -74,9 +95,8 @@ function makeExecutable(file, body) {
     },
   });
   const result = run(['--mode', 'apply', '--issue', '7'], { cwd: tmp });
-  assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /dirty: no/);
-  assert.match(result.stdout, /mark-in-progress\.sh 7/);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stdout, /BLOCKED/);
 }
 
 {
@@ -89,12 +109,18 @@ function makeExecutable(file, body) {
   makeExecutable(path.join(scriptDir, 'claim-change.sh'), `#!/usr/bin/env bash\necho claim-change "$@" >> ${JSON.stringify(logFile)}\n`);
   makeExecutable(path.join(scriptDir, 'mark-in-progress.sh'), `#!/usr/bin/env bash\necho mark-in-progress "$@" >> ${JSON.stringify(logFile)}\n`);
   spawnSync('git', ['init', '-q'], { cwd: tmp });
-  const result = spawnSync('node', [path.join(scriptDir, 'buddy-driver.mjs'), '--mode', 'apply', '--issue', '9', '--run-next'], {
+  const result = spawnSync('node', [path.join(scriptDir, 'buddy-driver.mjs'), '--mode', 'apply', '--issue', '9'], {
     cwd: tmp,
     encoding: 'utf8',
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(fs.readFileSync(logFile, 'utf8').trim(), 'sync');
+  assert.match(result.stdout, /^DONE/m);
+  assert.doesNotMatch(result.stdout, /^sync$/m);
+  assert.equal(fs.readFileSync(logFile, 'utf8').trim(), [
+    'sync',
+    'claim-change 9',
+    'mark-in-progress 9',
+  ].join('\n'));
 }
 
 console.log('buddy-driver tests passed');

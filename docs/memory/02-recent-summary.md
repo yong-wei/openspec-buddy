@@ -31,6 +31,7 @@
 - `v0.12.0` 发布线将 `wait-for-review-clear.sh` 改成两级等待：初始 300 秒后默认每 60 秒只读轻量 PR REST 状态，状态变化后才刷新完整 PR REST bundle 并触发 `verify-review-clear.sh`；首轮 900 秒无 clean review 时自动用固定 review request 加 retry context 复审一次，第二轮仍超时则转人工介入。
 - `v0.13.0` 发布线为 `openspec-buddy propose` 新增 `validate-issue-body.mjs`：创建或更新 GitHub Issue 前必须同时通过 metadata、Acceptance Checklist、task-to-AC、task Acceptance/Evidence/Reviewer Check 校验；legacy claim/apply 路径继续只要求 metadata 以保持兼容。
 - `v0.14.0` 发布线将 `openspec-buddy` 与 `openspec-buddy-auto` 主技能精简为 driver-first 入口文档，并新增 `buddy-driver.mjs` 与 `buddy-auto-driver.mjs`；Auto driver 使用签名本地 receipt 防止伪造阶段推进，`--no-pr` 仅允许显式 local-only `--change` 路径。
+- `v0.15.0` 发布线将两个 driver 改为默认无参执行：确定性 helper 成功时静默推进并只返回 `DONE`，失败返回 `BLOCKED`，需要代理接管时返回 `HANDOFF`；技能入口明确要求 driver 运行期间不得执行命令、查询 GitHub、检查时间或输出进度，必须静默等待 driver 反馈。
 
 ## 当前警惕点
 

@@ -16,18 +16,19 @@ const stages = new Set([
   'mark_review_passed',
   'review_requested',
   'review_clear',
+  'merge_gates_passed',
   'merged',
   'achieved',
 ]);
 
 function parseArgs(argv) {
   const opts = {
-    issue: '',
-    pr: '',
-    change: '',
+    issue: process.env.OPENSPEC_BUDDY_AUTO_ISSUE || '',
+    pr: process.env.OPENSPEC_BUDDY_AUTO_PR || '',
+    change: process.env.OPENSPEC_BUDDY_AUTO_CHANGE || '',
     head: process.env.OPENSPEC_BUDDY_AUTO_HEAD || '',
     noPr: false,
-    runNext: false,
+    dryRun: false,
   };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -36,7 +37,8 @@ function parseArgs(argv) {
     else if (arg === '--change') opts.change = argv[++i] || '';
     else if (arg === '--head') opts.head = argv[++i] || '';
     else if (arg === '--no-pr') opts.noPr = true;
-    else if (arg === '--run-next') opts.runNext = true;
+    else if (arg === '--run-next') continue;
+    else if (arg === '--dry-run') opts.dryRun = true;
     else if (arg === '-h' || arg === '--help') opts.help = true;
     else throw new Error(`Unknown argument: ${arg}`);
   }
@@ -65,6 +67,82 @@ function shellQuote(value) {
 
 function commandLine(command) {
   return command.map(shellQuote).join(' ');
+}
+
+function outputBlock(title, entries = []) {
+  console.log(title);
+  for (const [key, value] of entries) {
+    if (value === undefined || value === null || value === '') continue;
+    console.log(`${key}: ${value}`);
+  }
+}
+
+function compactOutput(result) {
+  const text = [result.stdout || '', result.stderr || ''].join('\n').trim();
+  if (!text) return '';
+  return text.split('\n').map((line) => line.trim()).filter(Boolean).slice(-20).join('\n');
+}
+
+function emitDone({ stage, command = [], state, next, output = '' }) {
+  outputBlock('DONE', [
+    ['stage', stage],
+    ['state_file', statePath(state)],
+    ['command', command.length ? commandLine(command) : ''],
+    ['next_stage', next?.stage || ''],
+    ['next_action', next?.reason || ''],
+    ['next_command', next?.command?.length ? commandLine(next.command) : ''],
+  ]);
+  if (output) {
+    console.log('output_excerpt:');
+    console.log(output);
+  }
+}
+
+function emitBlocked({ stage, reason, command = [], output = '' }) {
+  outputBlock('BLOCKED', [
+    ['stage', stage],
+    ['reason', reason],
+    ['command', command.length ? commandLine(command) : ''],
+  ]);
+  if (output) {
+    console.log('diagnostic:');
+    console.log(output);
+  }
+}
+
+function emitHandoff({ stage, reason, command = [] }) {
+  outputBlock('HANDOFF', [
+    ['stage', stage],
+    ['required_action', reason],
+    ['command', command.length ? commandLine(command) : ''],
+  ]);
+}
+
+function inferCurrentPr() {
+  return run('gh', ['pr', 'view', '--json', 'number', '--jq', '.number'], { optional: true });
+}
+
+function inferCurrentHead(pr) {
+  const args = pr ? ['pr', 'view', String(pr), '--json', 'headRefOid', '--jq', '.headRefOid'] : ['pr', 'view', '--json', 'headRefOid', '--jq', '.headRefOid'];
+  return run('gh', args, { optional: true });
+}
+
+function inferIssueFromPrBody() {
+  const body = run('gh', ['pr', 'view', '--json', 'body', '--jq', '.body'], { optional: true });
+  if (!body) return '';
+  const metadataMatch = body.match(/origin[_ -]?issue\s*[:#]\s*#?(\d+)/i);
+  if (metadataMatch) return metadataMatch[1];
+  const closesMatch = body.match(/\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)/i);
+  if (closesMatch) return closesMatch[1];
+  return '';
+}
+
+function inferContext(opts) {
+  const inferred = { ...opts };
+  if (!inferred.pr) inferred.pr = inferCurrentPr();
+  if (inferred.pr && !inferred.issue) inferred.issue = inferIssueFromPrBody();
+  if (inferred.pr && !inferred.head) inferred.head = inferCurrentHead(inferred.pr);
+  return inferred;
 }
 
 function gitRoot() {
@@ -122,6 +200,7 @@ function signReceipt(state, stage, receipt) {
 function validReceipt(state, stage) {
   const receipt = state.stages?.[stage];
   if (!receipt?.signature || receipt.source !== 'buddy-auto-driver/run-next') return false;
+  if (state.pr && receipt.head !== state.head) return false;
   const secret = receiptSecret();
   if (!secret) return false;
   const expected = crypto.createHmac('sha256', secret).update(receiptPayload(state, stage, receipt)).digest('hex');
@@ -143,9 +222,11 @@ function stateMatchesContext(opts, state) {
 function readState(opts) {
   const file = statePath(opts);
   if (!fs.existsSync(file)) {
-    return { version: 1, key: stateKey(opts), issue: opts.issue || '', pr: opts.pr || '', change: opts.change || '', stages: {} };
+    return { version: 1, key: stateKey(opts), issue: opts.issue || '', pr: opts.pr || '', change: opts.change || '', head: opts.head || '', stages: {} };
   }
-  return JSON.parse(fs.readFileSync(file, 'utf8'));
+  const state = JSON.parse(fs.readFileSync(file, 'utf8'));
+  state.head = opts.head || '';
+  return state;
 }
 
 function writeState(opts, state) {
@@ -159,6 +240,7 @@ function recordStage(opts, stage, command = []) {
   state.issue ||= opts.issue || '';
   state.pr ||= opts.pr || '';
   state.change ||= opts.change || '';
+  state.head = opts.head || '';
   const receipt = {
     at: new Date().toISOString(),
     head: opts.head || '',
@@ -190,8 +272,8 @@ function commandFor(opts, state) {
   if (!opts.issue && !opts.pr) {
     return {
       stage: 'select-or-claim',
-      command: [path.join(coreScriptDir, 'claim-issue.sh')],
-      reason: 'No issue or PR context was supplied. Select or claim the smallest executable issue first.',
+      command: [],
+      reason: 'No issue or PR context was inferred. Do not claim new work or mutate GitHub state until a concrete phase context exists.',
     };
   }
 
@@ -211,10 +293,19 @@ function commandFor(opts, state) {
     };
   }
 
+  if (!opts.head) {
+    return {
+      stage: 'blocked',
+      command: [],
+      reason: 'PR review phases require the current PR head. Set OPENSPEC_BUDDY_AUTO_HEAD or run from a worktree where gh pr view <pr> can read headRefOid.',
+    };
+  }
+
   const contextMatches = stateMatchesContext(opts, state);
   const markReviewPassed = contextMatches && validReceipt(state, 'mark_review_passed');
   const reviewRequested = contextMatches && validReceipt(state, 'review_requested');
   const reviewClear = contextMatches && validReceipt(state, 'review_clear');
+  const mergeGatesPassed = contextMatches && validReceipt(state, 'merge_gates_passed');
 
   if (!markReviewPassed || !reviewRequested) {
     return {
@@ -234,30 +325,26 @@ function commandFor(opts, state) {
     };
   }
 
+  if (!mergeGatesPassed) {
+    return {
+      stage: 'merge-gates',
+      command: [path.join(coreScriptDir, 'verify-review-clear.sh'), opts.pr],
+      reason: 'Current state has review_clear. Run final merge gates before merge or achievement.',
+      records: ['merge_gates_passed'],
+    };
+  }
+
   return {
-    stage: 'merge-gates',
-    command: [path.join(coreScriptDir, 'verify-review-clear.sh'), opts.pr],
-    reason: 'Current state has review_clear. Run final merge gates, merge, then mark achieved through core helpers.',
+    stage: 'merge-or-achieve',
+    command: [],
+    reason: 'Review and merge gates passed. Merge the PR, archive the local change, then mark achieved through core helpers.',
   };
 }
 
 function printNext(opts) {
   const state = readState(opts);
   const next = commandFor(opts, state);
-  console.log('OpenSpec Buddy Auto Driver');
-  console.log(`state_file: ${statePath(opts)}`);
-  console.log(`stage: ${next.stage}`);
-  console.log(`reason: ${next.reason}`);
-  console.log('');
-  if (next.command.length) {
-    console.log('NEXT LEGAL COMMAND');
-    console.log(commandLine(next.command));
-  } else {
-    console.log('NEXT LEGAL ACTION');
-    console.log(next.reason);
-  }
-  console.log('');
-  console.log('Receipts');
+  emitHandoff({ stage: next.stage, reason: next.reason, command: next.command });
   if (!stateMatchesContext(opts, state)) {
     console.log('- state_context: invalid');
   }
@@ -266,39 +353,69 @@ function printNext(opts) {
     const validity = validReceipt(state, stage) ? 'valid' : 'invalid';
     console.log(`- ${stage}: ${receipt.at}${receipt.head ? ` head=${receipt.head}` : ''} (${validity})`);
   }
-  console.log('');
-  console.log('Rules: run this driver before every auto phase; do not replace its command with manual gh, git, or sleep polling.');
 }
 
-function runNext(opts) {
-  const state = readState(opts);
-  const next = commandFor(opts, state);
-  if (!next.command.length) {
-    printNext(opts);
+function shouldContinue(stage) {
+  return stage === 'mark-review';
+}
+
+function runDriver(opts) {
+  for (let i = 0; i < 4; i += 1) {
+    const state = readState(opts);
+    const next = commandFor(opts, state);
+    if (next.stage === 'blocked') {
+      emitBlocked({ stage: next.stage, reason: next.reason, command: next.command });
+      return;
+    }
+    if (!next.command.length) {
+      emitHandoff({ stage: next.stage, reason: next.reason, command: next.command });
+      return;
+    }
+
+    const result = spawnSync(next.command[0], next.command.slice(1), {
+      cwd: process.cwd(),
+      env: process.env,
+      encoding: 'utf8',
+      stdio: 'pipe',
+    });
+    if (result.status !== 0) {
+      emitBlocked({
+        stage: next.stage,
+        reason: `${next.command[0]} exited with status ${result.status ?? 1}`,
+        command: next.command,
+        output: compactOutput(result),
+      });
+      process.exit(result.status ?? 1);
+    }
+
+    for (const stage of next.records || []) {
+      recordStage(opts, stage, next.command);
+    }
+
+    if (shouldContinue(next.stage)) continue;
+
+    const afterState = readState(opts);
+    const after = commandFor(opts, afterState);
+    emitDone({
+      stage: next.stage,
+      command: next.command,
+      state: opts,
+      next: after,
+    });
     return;
   }
-
-  const result = spawnSync(next.command[0], next.command.slice(1), {
-    cwd: process.cwd(),
-    env: process.env,
-    stdio: 'inherit',
-  });
-  if (result.status !== 0) process.exit(result.status ?? 1);
-
-  for (const stage of next.records || []) {
-    recordStage(opts, stage, next.command);
-  }
-  printNext(opts);
+  emitBlocked({ stage: 'driver-loop', reason: 'Auto driver exceeded its deterministic step limit.' });
+  process.exit(1);
 }
 
 function main() {
-  const opts = parseArgs(process.argv.slice(2));
+  const opts = inferContext(parseArgs(process.argv.slice(2)));
   if (opts.help) {
-    console.log('Usage: buddy-auto-driver.mjs [--issue N] [--pr N] [--change ID] [--head SHA] [--no-pr] [--run-next]');
+    console.log('Usage: buddy-auto-driver.mjs [--dry-run] [--issue N] [--pr N] [--change ID] [--head SHA] [--no-pr]');
     return;
   }
-  if (opts.runNext) runNext(opts);
-  else printNext(opts);
+  if (opts.dryRun) printNext(opts);
+  else runDriver(opts);
 }
 
 try {

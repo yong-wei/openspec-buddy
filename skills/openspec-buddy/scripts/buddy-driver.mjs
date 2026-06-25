@@ -14,7 +14,7 @@ function parseArgs(argv) {
     change: '',
     noIssue: false,
     noPr: false,
-    runNext: false,
+    dryRun: false,
   };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -24,7 +24,8 @@ function parseArgs(argv) {
     else if (arg === '--change') opts.change = argv[++i] || '';
     else if (arg === '--no-issue') opts.noIssue = true;
     else if (arg === '--no-pr') opts.noPr = true;
-    else if (arg === '--run-next') opts.runNext = true;
+    else if (arg === '--run-next') continue;
+    else if (arg === '--dry-run') opts.dryRun = true;
     else if (arg === '-h' || arg === '--help') opts.help = true;
     else {
       throw new Error(`Unknown argument: ${arg}`);
@@ -56,6 +57,55 @@ function commandLine(command) {
   return command.map(shellQuote).join(' ');
 }
 
+function outputBlock(title, entries = []) {
+  console.log(title);
+  for (const [key, value] of entries) {
+    if (value === undefined || value === null || value === '') continue;
+    console.log(`${key}: ${value}`);
+  }
+}
+
+function compactOutput(result) {
+  const text = [result.stdout || '', result.stderr || ''].join('\n').trim();
+  if (!text) return '';
+  return text.split('\n').map((line) => line.trim()).filter(Boolean).slice(-20).join('\n');
+}
+
+function emitDone({ mode, commands, state, output = '' }) {
+  outputBlock('DONE', [
+    ['mode', mode],
+    ['repo', state.root],
+    ['branch', state.branch],
+    ['dirty', state.dirty ? 'yes' : 'no'],
+    ['commands', commands.map(commandLine).join(' && ')],
+    ['next_action', 'Continue only with the driver-provided phase result; run the driver again after agent-owned work or external state changes.'],
+  ]);
+  if (output) {
+    console.log('output_excerpt:');
+    console.log(output);
+  }
+}
+
+function emitBlocked({ mode, command = [], reason, output = '' }) {
+  outputBlock('BLOCKED', [
+    ['mode', mode],
+    ['reason', reason],
+    ['command', command.length ? commandLine(command) : ''],
+  ]);
+  if (output) {
+    console.log('diagnostic:');
+    console.log(output);
+  }
+}
+
+function emitHandoff({ mode, commands, notes }) {
+  outputBlock('HANDOFF', [
+    ['mode', mode],
+    ['required_action', notes.join(' ')],
+    ['commands', commands.map(commandLine).join(' && ')],
+  ]);
+}
+
 function repoState() {
   return {
     root: run('git', ['rev-parse', '--show-toplevel'], { optional: true }) || process.cwd(),
@@ -69,7 +119,7 @@ function inferMode(opts) {
   if (opts.noIssue || opts.change) return 'propose';
   if (opts.pr) return 'achieve';
   if (opts.issue) return 'claim';
-  return 'claim';
+  return 'context-needed';
 }
 
 function describeNext(opts) {
@@ -81,7 +131,9 @@ function describeNext(opts) {
     throw new Error('--no-pr is not a core Buddy option. It is valid only in openspec-buddy-auto for explicit local-only --change runs.');
   }
 
-  if (mode === 'claim') {
+  if (mode === 'context-needed') {
+    notes.push('No phase context was inferred. Do not claim or mutate GitHub state until the agent or caller provides a concrete phase context.');
+  } else if (mode === 'claim') {
     commands.push([path.join(scriptDir, 'check-config.sh')]);
     commands.push([path.join(scriptDir, 'claim-issue.sh'), ...(opts.issue ? [opts.issue] : [])]);
     notes.push('Claim uses the minimal lock and post-write GitHub truth verification before branch, Project, or Development-link mutations.');
@@ -111,48 +163,46 @@ function describeNext(opts) {
 }
 
 function printPlan(opts) {
-  const state = repoState();
   const { mode, commands, notes } = describeNext(opts);
-  console.log('OpenSpec Buddy Driver');
-  console.log(`mode: ${mode}`);
-  console.log(`repo: ${state.root}`);
-  console.log(`branch: ${state.branch}`);
-  console.log(`dirty: ${state.dirty ? 'yes' : 'no'}`);
-  console.log('');
-  console.log('NEXT LEGAL ACTION');
-  commands.forEach((command, index) => {
-    console.log(`${index + 1}. ${commandLine(command)}`);
-  });
-  if (notes.length) {
-    console.log('');
-    console.log('NOTES');
-    notes.forEach((note) => console.log(`- ${note}`));
-  }
-  console.log('');
-  console.log('Reference: skills/openspec-buddy/references/core-lifecycle.md');
+  emitHandoff({ mode, commands, notes });
 }
 
-function runNext(opts) {
-  const { commands } = describeNext(opts);
-  const command = commands[0];
-  if (!command) throw new Error('No command available to run.');
-  const result = spawnSync(command[0], command.slice(1), {
-    cwd: process.cwd(),
-    env: process.env,
-    stdio: 'inherit',
-  });
-  process.exit(result.status ?? 1);
+function runDriver(opts) {
+  const state = repoState();
+  const { mode, commands, notes } = describeNext(opts);
+  if (!commands.length) {
+    emitHandoff({ mode, commands, notes });
+    return;
+  }
+  for (const command of commands) {
+    const result = spawnSync(command[0], command.slice(1), {
+      cwd: process.cwd(),
+      env: process.env,
+      encoding: 'utf8',
+      stdio: 'pipe',
+    });
+    if (result.status !== 0) {
+      emitBlocked({
+        mode,
+        command,
+        reason: `${command[0]} exited with status ${result.status ?? 1}`,
+        output: compactOutput(result),
+      });
+      process.exit(result.status ?? 1);
+    }
+  }
+  emitDone({ mode, commands, state });
 }
 
 function main() {
   const opts = parseArgs(process.argv.slice(2));
   if (opts.help) {
-    console.log('Usage: buddy-driver.mjs [--mode claim|propose|apply|achieve] [--issue N] [--pr PR] [--change ID] [--no-issue] [--run-next]');
+    console.log('Usage: buddy-driver.mjs [--dry-run] [--mode claim|propose|apply|achieve] [--issue N] [--pr PR] [--change ID] [--no-issue]');
     return;
   }
   if (!fs.existsSync(scriptDir)) throw new Error(`Missing script directory: ${scriptDir}`);
-  if (opts.runNext) runNext(opts);
-  else printPlan(opts);
+  if (opts.dryRun) printPlan(opts);
+  else runDriver(opts);
 }
 
 try {

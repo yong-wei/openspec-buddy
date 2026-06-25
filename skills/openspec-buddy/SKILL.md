@@ -17,8 +17,12 @@ RUN THIS BEFORE CLAIM, PROPOSE, APPLY, ACHIEVE, REVIEW, MERGE, OR ISSUE STATE
 SYNC:
 
 ```bash
-<openspec-buddy-skill-dir>/scripts/buddy-driver.mjs --mode <claim|propose|apply|achieve>
+<openspec-buddy-skill-dir>/scripts/buddy-driver.mjs
 ```
+
+AFTER STARTING THE DRIVER: DO NOT RUN COMMANDS, DO NOT QUERY GITHUB, DO NOT
+CHECK TIME, DO NOT OUTPUT PROGRESS, AND DO NOT SUMMARIZE. WAIT SILENTLY UNTIL
+THE DRIVER RETURNS `DONE`, `BLOCKED`, OR `HANDOFF`.
 
 DO NOT SUBSTITUTE MANUAL `gh`, `git`, `sleep`, HANDWRITTEN GRAPHQL, OR TEXT
 INSPECTION FOR THE DRIVER'S NEXT LEGAL ACTION.
@@ -29,18 +33,17 @@ Resolve `<openspec-buddy-skill-dir>` to the directory containing this
 
 ## First Command
 
-Run the driver with the known context:
+Run the driver without arguments:
 
 ```bash
-<openspec-buddy-skill-dir>/scripts/buddy-driver.mjs --mode claim --issue <issue-number>
-<openspec-buddy-skill-dir>/scripts/buddy-driver.mjs --mode propose --change <change_id>
-<openspec-buddy-skill-dir>/scripts/buddy-driver.mjs --mode apply --issue <issue-number>
-<openspec-buddy-skill-dir>/scripts/buddy-driver.mjs --mode achieve --issue <issue-number> --pr <pr-number-or-url>
+<openspec-buddy-skill-dir>/scripts/buddy-driver.mjs
 ```
 
-If the driver prints an exact command, run that command. If it reports a
-blocked state, fix the blocker before continuing. After any meaningful state
-change, run the driver again.
+The driver owns deterministic helper execution for the current phase. It
+returns only when the phase has a result, a blocker, or an agent-owned handoff.
+If it reports `BLOCKED`, fix only that blocker. If it reports `HANDOFF`, do
+only the requested agent work. After agent-owned work or external state changes,
+run the driver again.
 
 ## Core Invariant
 
@@ -88,6 +91,9 @@ Default GitHub-backed flows require `OPENSPEC_BUDDY_BASE_BRANCH`,
   independent review decides approved AC ids.
 - Do not treat `--no-pr` as valid for issue-backed changes. It only applies to
   explicitly local-only `--no-issue` changes.
+- Do not use driver options in normal operation. Options such as `--dry-run`,
+  `--mode`, `--issue`, `--pr`, and `--change` are compatibility and diagnostic
+  controls for exceptional recovery only.
 
 ## Final Report
 

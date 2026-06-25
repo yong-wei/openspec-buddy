@@ -3,11 +3,16 @@
 The auto driver is the only entry point for automatic phase progression:
 
 ```bash
-<openspec-buddy-auto-skill-dir>/scripts/buddy-auto-driver.mjs --issue <issue> --pr <pr>
+<openspec-buddy-auto-skill-dir>/scripts/buddy-auto-driver.mjs
 ```
 
-Use `--run-next` only when you want the driver to execute the next legal helper
-and write a local receipt.
+Normal operation uses no arguments. The driver may infer context from the
+current PR or from `OPENSPEC_BUDDY_AUTO_ISSUE`, `OPENSPEC_BUDDY_AUTO_PR`, and
+`OPENSPEC_BUDDY_AUTO_CHANGE`. If no concrete context is available, it must
+return `HANDOFF` and must not claim new work or mutate GitHub state.
+
+Options such as `--dry-run`, `--issue`, `--pr`, `--change`, and `--no-pr` are
+diagnostic or recovery controls only.
 
 ## Receipts
 
@@ -32,6 +37,7 @@ Known receipt stages:
 - `mark_review_passed`
 - `review_requested`
 - `review_clear`
+- `merge_gates_passed`
 - `merged`
 - `achieved`
 
@@ -47,8 +53,12 @@ For a GitHub-backed PR:
    ```bash
    <openspec-buddy-skill-dir>/scripts/wait-for-review-clear.sh <pr>
    ```
-3. `review_clear` exists:
-   run merge gates, merge, then call `mark-achieved.sh`.
+3. `review_clear` exists but `merge_gates_passed` does not:
+   ```bash
+   <openspec-buddy-skill-dir>/scripts/verify-review-clear.sh <pr>
+   ```
+4. `merge_gates_passed` exists:
+   merge the PR, archive the local change, then call `mark-achieved.sh`.
 
 Do not manually use `sleep`, `gh pr view`, `gh api`, or text inspection to move
 between these states. If a manual observation contradicts the driver, rerun the

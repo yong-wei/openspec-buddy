@@ -20,11 +20,9 @@ REVIEW-FIX, MERGE, ACHIEVE, OR GOAL-LOOP CONTINUATION:
 <openspec-buddy-auto-skill-dir>/scripts/buddy-auto-driver.mjs
 ```
 
-WHEN ISSUE OR PR CONTEXT IS KNOWN, PASS IT:
-
-```bash
-<openspec-buddy-auto-skill-dir>/scripts/buddy-auto-driver.mjs --issue <issue-number> --pr <pr-number-or-url>
-```
+AFTER STARTING THE DRIVER: DO NOT RUN COMMANDS, DO NOT QUERY GITHUB, DO NOT
+CHECK TIME, DO NOT OUTPUT PROGRESS, AND DO NOT SUMMARIZE. WAIT SILENTLY UNTIL
+THE DRIVER RETURNS `DONE`, `BLOCKED`, OR `HANDOFF`.
 
 DO NOT HAND-WRITE `sleep`, `gh pr view`, `gh api`, REVIEW POLLING, MERGE
 JUDGMENTS, OR STATE TRANSITIONS IN PLACE OF THE DRIVER'S NEXT LEGAL COMMAND.
@@ -35,15 +33,13 @@ Resolve `<openspec-buddy-auto-skill-dir>` to the directory containing this
 
 ## Operating Rule
 
-Run the driver. Execute only the next legal command it prints. Then run the
-driver again. If the driver reports a blocked state, fix that state before
-continuing.
+Run the driver without arguments. The driver owns deterministic helper
+execution for the current phase. It returns only when the phase has a result, a
+blocker, or an agent-owned handoff.
 
-For review phases, prefer:
-
-```bash
-<openspec-buddy-auto-skill-dir>/scripts/buddy-auto-driver.mjs --issue <issue-number> --pr <pr-number-or-url> --run-next
-```
+If it reports `BLOCKED`, fix only that blocker. If it reports `HANDOFF`, do
+only the requested agent work. After agent-owned work or external state changes,
+run the driver again.
 
 The driver writes local receipts under `openspec/.buddy-cache/auto-state/`.
 Receipts do not replace GitHub truth; they only prevent the agent from skipping
@@ -76,6 +72,10 @@ The driver and helpers must enforce:
 `openspec-buddy propose --no-issue`. In that path, do not create GitHub issue,
 PR, Project, review, or achievement state. Run local review and verification
 instead.
+
+Driver options such as `--dry-run`, `--issue`, `--pr`, `--change`, and
+`--no-pr` are compatibility and diagnostic controls for exceptional recovery
+only. Do not use them in normal operation.
 
 ## Forbidden Manual Substitutes
 
