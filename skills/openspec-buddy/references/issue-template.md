@@ -47,6 +47,11 @@ Describe the user-visible or engineering outcome.
   Acceptance: what must be true for this task to satisfy the linked AC.
   Evidence: command, test, file check, or manual check expected from implementation.
   Reviewer Check: what the independent reviewer must confirm before AC-1 can be checked.
+- [ ] Task 2: Another concrete implementation or validation step.
+  Covers: AC-2
+  Acceptance: what must be true for this task to satisfy the linked AC.
+  Evidence: command, test, file check, or manual check expected from implementation.
+  Reviewer Check: what the independent reviewer must confirm before AC-2 can be checked.
 
 ## Agent Guardrails
 

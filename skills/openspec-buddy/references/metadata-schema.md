@@ -24,10 +24,13 @@ area: workflow
 ```
 
 `parse-issue-metadata.mjs` accepts both forms. If both are present, front matter
-wins; avoid that mixed state unless repairing an old issue. Do not create a
-second "Buddy" issue to mirror the original task; that breaks PR association
-and issue history. Complex issues may create child executable issues, but only
-after the original issue has been claimed and kept as the tracking parent.
+wins; avoid that mixed state unless repairing an old issue. `propose` must run
+`validate-issue-body.mjs` before creating or updating a GitHub Issue; that
+script first applies metadata parsing and then checks the Buddy Acceptance
+Checklist and task-to-AC contract. Do not create a second "Buddy" issue to
+mirror the original task; that breaks PR association and issue history. Complex
+issues may create child executable issues, but only after the original issue has
+been claimed and kept as the tracking parent.
 
 ## Required Fields
 

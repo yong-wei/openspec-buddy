@@ -20,6 +20,7 @@ const commands = [
   { label: 'node skills/openspec-buddy/evals/open-issue-claim.test.mjs', cmd: 'node', args: ['skills/openspec-buddy/evals/open-issue-claim.test.mjs'] },
   { label: 'node skills/openspec-buddy/evals/propose-default-artifacts.test.mjs', cmd: 'node', args: ['skills/openspec-buddy/evals/propose-default-artifacts.test.mjs'] },
   { label: 'node skills/openspec-buddy/evals/propose-acceptance-gates.test.mjs', cmd: 'node', args: ['skills/openspec-buddy/evals/propose-acceptance-gates.test.mjs'] },
+  { label: 'node skills/openspec-buddy/evals/propose-issue-body-validation.test.mjs', cmd: 'node', args: ['skills/openspec-buddy/evals/propose-issue-body-validation.test.mjs'] },
   { label: 'node skills/openspec-buddy/evals/no-issue-no-pr.test.mjs', cmd: 'node', args: ['skills/openspec-buddy/evals/no-issue-no-pr.test.mjs'] },
   { label: 'bash skills/openspec-buddy/evals/project-cache.test.sh', cmd: 'bash', args: ['skills/openspec-buddy/evals/project-cache.test.sh'] },
   { label: 'bash skills/openspec-buddy/evals/relationship-cache-invalidation.test.sh', cmd: 'bash', args: ['skills/openspec-buddy/evals/relationship-cache-invalidation.test.sh'] },

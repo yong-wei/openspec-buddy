@@ -187,9 +187,13 @@ Steps:
    `openspec/changes/<change_id>` path and note that `openspec-buddy-auto` may
    execute it later as a no-issue local run. In this path, require
    `OPENSPEC_BUDDY_BASE_BRANCH` but do not require GitHub Project fields.
-4. Prepare an issue body from `references/issue-template.md`, using the local
-   OpenSpec proposal as the source of the goal, scope, tasks, and acceptance
-   criteria.
+4. Prepare an issue body from `references/issue-template.md` and write it as a
+   local intermediate artifact at
+   `openspec/changes/<change_id>/.buddy/issue.md`, using the local OpenSpec
+   proposal as the source of the goal, scope, tasks, and acceptance criteria.
+   This file is the exact body to validate, independently review, and pass to
+   `gh issue create`; do not compose the GitHub issue body only in a prompt or
+   shell heredoc.
 5. Write numbered acceptance items as `AC-1`, `AC-2`, and so on. Each AC must
    describe one observable outcome and name its expected evidence. Each task
    must reference one or more numbered items such as `AC-1` through `Covers:`
@@ -224,9 +228,12 @@ Steps:
    issues against `$OPENSPEC_BUDDY_RELEASE_BRANCH`; release from the Buddy base
    branch to the release branch is a manual action unless the project
    explicitly configures otherwise.
-12. Validate the prepared body before creating or updating the issue:
+12. Validate the prepared body before creating or updating the issue. This is
+   stronger than metadata parsing: it verifies front matter plus the Buddy
+   Acceptance Checklist, task-to-AC mapping, task `Acceptance`, task `Evidence`,
+   and task `Reviewer Check` fields:
    ```bash
-   <openspec-buddy-skill-dir>/scripts/parse-issue-metadata.mjs <issue-body-file>
+   <openspec-buddy-skill-dir>/scripts/validate-issue-body.mjs <issue-body-file>
    ```
 13. Add all applicable coordination labels by default:
    - `status:ready`

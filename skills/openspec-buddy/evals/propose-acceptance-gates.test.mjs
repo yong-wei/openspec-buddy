@@ -38,6 +38,16 @@ assert.match(
 );
 assert.match(
   proposeSection,
+  /Acceptance Checklist[\s\S]*task-to-AC[\s\S]*validate-issue-body\.mjs/i,
+  'propose must require machine validation of the Buddy issue body, not metadata parsing only',
+);
+assert.match(
+  proposeSection,
+  /openspec\/changes\/<change_id>\/\.buddy\/issue\.md[\s\S]*exact body to validate[\s\S]*gh issue create/i,
+  'propose must materialize the GitHub issue body as a local intermediate artifact before creation',
+);
+assert.match(
+  proposeSection,
   /Do not mark an AC\s+complete during `propose`/i,
   'propose must keep AC unchecked until implementation evidence is independently reviewed',
 );
