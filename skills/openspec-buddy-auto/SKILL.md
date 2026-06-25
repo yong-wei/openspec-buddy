@@ -37,6 +37,17 @@ Run the driver without arguments. The driver owns deterministic helper
 execution for the current phase. It returns only when the phase has a result, a
 blocker, or an agent-owned handoff.
 
+If the user names a specific issue or PR, seed that target before running the
+same driver:
+
+```bash
+OPENSPEC_BUDDY_AUTO_TARGET_ISSUE=<issue-number> <openspec-buddy-auto-skill-dir>/scripts/buddy-auto-driver.mjs
+OPENSPEC_BUDDY_AUTO_TARGET_PR=<pr-number> <openspec-buddy-auto-skill-dir>/scripts/buddy-auto-driver.mjs
+```
+
+Target seeds are normal operation, not manual workflow substitution. A target
+issue must not be overwritten by an ambient current PR from the worktree.
+
 If it reports `BLOCKED`, fix only that blocker. If it reports `HANDOFF`, do
 only the requested agent work. After agent-owned work or external state changes,
 run the driver again.
@@ -74,8 +85,8 @@ PR, Project, review, or achievement state. Run local review and verification
 instead.
 
 Driver options such as `--dry-run`, `--issue`, `--pr`, `--change`, and
-`--no-pr` are compatibility and diagnostic controls for exceptional recovery
-only. Do not use them in normal operation.
+`--no-pr` are compatibility and diagnostic controls. Prefer the target
+environment variables above for user-specified issue or PR work.
 
 ## Forbidden Manual Substitutes
 

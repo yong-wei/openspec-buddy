@@ -32,6 +32,7 @@
 - `v0.13.0` 发布线为 `openspec-buddy propose` 新增 `validate-issue-body.mjs`：创建或更新 GitHub Issue 前必须同时通过 metadata、Acceptance Checklist、task-to-AC、task Acceptance/Evidence/Reviewer Check 校验；legacy claim/apply 路径继续只要求 metadata 以保持兼容。
 - `v0.14.0` 发布线将 `openspec-buddy` 与 `openspec-buddy-auto` 主技能精简为 driver-first 入口文档，并新增 `buddy-driver.mjs` 与 `buddy-auto-driver.mjs`；Auto driver 使用签名本地 receipt 防止伪造阶段推进，`--no-pr` 仅允许显式 local-only `--change` 路径。
 - `v0.15.0` 发布线将两个 driver 改为默认无参执行：确定性 helper 成功时静默推进并只返回 `DONE`，失败返回 `BLOCKED`，需要代理接管时返回 `HANDOFF`；技能入口明确要求 driver 运行期间不得执行命令、查询 GitHub、检查时间或输出进度，必须静默等待 driver 反馈。
+- `v0.16.0` 发布线为 Buddy Auto driver 增加用户指定目标绑定：`OPENSPEC_BUDDY_AUTO_TARGET_ISSUE` 不会被当前工作树历史 PR 覆盖，`OPENSPEC_BUDDY_AUTO_TARGET_PR` 只从目标 PR 读取 origin issue 和 head；issue-only 目标由 driver 执行 `claim-issue.sh` 并记录 `claimed` receipt 后再 handoff 实现。
 
 ## 当前警惕点
 

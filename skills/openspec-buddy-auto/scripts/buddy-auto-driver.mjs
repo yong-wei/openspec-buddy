@@ -22,18 +22,51 @@ const stages = new Set([
 ]);
 
 function parseArgs(argv) {
+  const targetIssue = process.env.OPENSPEC_BUDDY_AUTO_TARGET_ISSUE || '';
+  const targetPr = process.env.OPENSPEC_BUDDY_AUTO_TARGET_PR || '';
   const opts = {
-    issue: process.env.OPENSPEC_BUDDY_AUTO_ISSUE || '',
-    pr: process.env.OPENSPEC_BUDDY_AUTO_PR || '',
+    issue: targetIssue || (targetPr ? '' : process.env.OPENSPEC_BUDDY_AUTO_ISSUE || ''),
+    pr: targetPr || (targetIssue ? '' : process.env.OPENSPEC_BUDDY_AUTO_PR || ''),
     change: process.env.OPENSPEC_BUDDY_AUTO_CHANGE || '',
-    head: process.env.OPENSPEC_BUDDY_AUTO_HEAD || '',
+    head: targetPr ? '' : process.env.OPENSPEC_BUDDY_AUTO_HEAD || '',
     noPr: false,
     dryRun: false,
+    explicitIssue: Boolean(targetIssue || (!targetPr && process.env.OPENSPEC_BUDDY_AUTO_ISSUE)),
+    explicitPr: Boolean(targetPr || (!targetIssue && process.env.OPENSPEC_BUDDY_AUTO_PR)),
+    targetIssueLocked: Boolean(targetIssue),
+    targetPrLocked: Boolean(targetPr),
+    targetIssueValue: targetIssue,
+    targetPrValue: targetPr,
   };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
-    if (arg === '--issue') opts.issue = argv[++i] || '';
-    else if (arg === '--pr') opts.pr = argv[++i] || '';
+    if (arg === '--target-issue') {
+      opts.issue = argv[++i] || '';
+      opts.pr = '';
+      opts.head = '';
+      opts.explicitIssue = true;
+      opts.explicitPr = false;
+      opts.targetIssueLocked = true;
+      opts.targetPrLocked = false;
+      opts.targetIssueValue = opts.issue;
+      opts.targetPrValue = '';
+    } else if (arg === '--target-pr') {
+      opts.pr = argv[++i] || '';
+      opts.issue = '';
+      opts.head = '';
+      opts.explicitPr = true;
+      opts.explicitIssue = false;
+      opts.targetPrLocked = true;
+      opts.targetIssueLocked = false;
+      opts.targetPrValue = opts.pr;
+      opts.targetIssueValue = '';
+    } else if (arg === '--issue') {
+      opts.issue = argv[++i] || '';
+      opts.explicitIssue = true;
+    } else if (arg === '--pr') {
+      opts.pr = argv[++i] || '';
+      opts.explicitPr = true;
+    }
     else if (arg === '--change') opts.change = argv[++i] || '';
     else if (arg === '--head') opts.head = argv[++i] || '';
     else if (arg === '--no-pr') opts.noPr = true;
@@ -41,6 +74,19 @@ function parseArgs(argv) {
     else if (arg === '--dry-run') opts.dryRun = true;
     else if (arg === '-h' || arg === '--help') opts.help = true;
     else throw new Error(`Unknown argument: ${arg}`);
+  }
+  if (opts.targetPrLocked) {
+    opts.pr = opts.targetPrValue || opts.pr;
+    opts.issue = '';
+    opts.head = '';
+    opts.explicitPr = true;
+    opts.explicitIssue = false;
+  } else if (opts.targetIssueLocked) {
+    opts.issue = opts.targetIssueValue || opts.issue;
+    opts.pr = '';
+    opts.head = '';
+    opts.explicitIssue = true;
+    opts.explicitPr = false;
   }
   return opts;
 }
@@ -127,8 +173,9 @@ function inferCurrentHead(pr) {
   return run('gh', args, { optional: true });
 }
 
-function inferIssueFromPrBody() {
-  const body = run('gh', ['pr', 'view', '--json', 'body', '--jq', '.body'], { optional: true });
+function inferIssueFromPrBody(pr = '') {
+  const args = pr ? ['pr', 'view', String(pr), '--json', 'body', '--jq', '.body'] : ['pr', 'view', '--json', 'body', '--jq', '.body'];
+  const body = run('gh', args, { optional: true });
   if (!body) return '';
   const metadataMatch = body.match(/origin[_ -]?issue\s*[:#]\s*#?(\d+)/i);
   if (metadataMatch) return metadataMatch[1];
@@ -139,8 +186,9 @@ function inferIssueFromPrBody() {
 
 function inferContext(opts) {
   const inferred = { ...opts };
-  if (!inferred.pr) inferred.pr = inferCurrentPr();
-  if (inferred.pr && !inferred.issue) inferred.issue = inferIssueFromPrBody();
+  if (inferred.targetPrLocked) inferred.issue = '';
+  if (!inferred.pr && !inferred.explicitIssue) inferred.pr = inferCurrentPr();
+  if (inferred.pr && !inferred.issue) inferred.issue = inferIssueFromPrBody(inferred.pr);
   if (inferred.pr && !inferred.head) inferred.head = inferCurrentHead(inferred.pr);
   return inferred;
 }
@@ -278,10 +326,20 @@ function commandFor(opts, state) {
   }
 
   if (!opts.pr) {
+    const contextMatches = stateMatchesContext(opts, state);
+    const claimed = contextMatches && validReceipt(state, 'claimed');
+    if (!claimed) {
+      return {
+        stage: 'claim-issue',
+        command: [path.join(coreScriptDir, 'claim-issue.sh'), opts.issue],
+        reason: 'Explicit issue target must be claimed by the driver before implementation or PR work.',
+        records: ['claimed'],
+      };
+    }
     return {
       stage: 'implement-or-open-pr',
       command: [],
-      reason: 'No PR was supplied. Continue implementation, independent acceptance review, commit, push, and open a ready PR through the core workflow.',
+      reason: 'Issue is claimed for this driver context. Continue implementation, independent acceptance review, commit, push, and open a ready PR through the core workflow.',
     };
   }
 
@@ -411,7 +469,7 @@ function runDriver(opts) {
 function main() {
   const opts = inferContext(parseArgs(process.argv.slice(2)));
   if (opts.help) {
-    console.log('Usage: buddy-auto-driver.mjs [--dry-run] [--issue N] [--pr N] [--change ID] [--head SHA] [--no-pr]');
+    console.log('Usage: buddy-auto-driver.mjs [--dry-run] [--target-issue N] [--target-pr N] [--issue N] [--pr N] [--change ID] [--head SHA] [--no-pr]');
     return;
   }
   if (opts.dryRun) printNext(opts);

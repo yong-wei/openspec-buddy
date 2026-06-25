@@ -6,10 +6,18 @@ The auto driver is the only entry point for automatic phase progression:
 <openspec-buddy-auto-skill-dir>/scripts/buddy-auto-driver.mjs
 ```
 
-Normal operation uses no arguments. The driver may infer context from the
-current PR or from `OPENSPEC_BUDDY_AUTO_ISSUE`, `OPENSPEC_BUDDY_AUTO_PR`, and
-`OPENSPEC_BUDDY_AUTO_CHANGE`. If no concrete context is available, it must
-return `HANDOFF` and must not claim new work or mutate GitHub state.
+Normal selection/continuation uses no arguments. When the user specifies a
+target, seed the target with `OPENSPEC_BUDDY_AUTO_TARGET_ISSUE` or
+`OPENSPEC_BUDDY_AUTO_TARGET_PR` before running the same driver.
+
+Target rules:
+
+- A target issue is authoritative. The driver must not replace it with an
+  ambient PR from the current worktree.
+- A target PR is authoritative. The driver may infer its origin issue and head
+  only by reading that target PR.
+- If no concrete context is available, the driver must return `HANDOFF` and
+  must not claim new work or mutate GitHub state.
 
 Options such as `--dry-run`, `--issue`, `--pr`, `--change`, and `--no-pr` are
 diagnostic or recovery controls only.
@@ -75,3 +83,18 @@ After a review-fix commit:
 4. Return to the auto driver for review waiting.
 
 Resolved old threads are not a clean current-head review.
+
+## Claim Progression
+
+For a target issue without a PR:
+
+1. No `claimed` receipt:
+   ```bash
+   <openspec-buddy-skill-dir>/scripts/claim-issue.sh <issue>
+   ```
+2. `claimed` exists:
+   continue implementation, independent acceptance review, commit, push, and
+   open a ready PR through the Buddy workflow.
+
+The driver may hand off implementation after claim; it must not infer an
+unrelated current PR from the worktree while a target issue is active.

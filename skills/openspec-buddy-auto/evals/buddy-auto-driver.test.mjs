@@ -60,6 +60,159 @@ const env = {
 }
 
 {
+  const targetIssueStateDir = path.join(tmp, 'state-target-issue');
+  const targetIssueCoreDir = path.join(tmp, 'core-target-issue');
+  const targetIssueLogFile = path.join(tmp, 'commands-target-issue.log');
+  const targetIssueBinDir = path.join(tmp, 'bin-target-issue');
+  const targetIssueGhLogFile = path.join(tmp, 'gh-target-issue.log');
+  fs.mkdirSync(targetIssueCoreDir, { recursive: true });
+  fs.mkdirSync(targetIssueBinDir, { recursive: true });
+  makeExecutable(path.join(targetIssueCoreDir, 'claim-issue.sh'), `#!/usr/bin/env bash\necho "claim $*" >> ${JSON.stringify(targetIssueLogFile)}\n`);
+  makeExecutable(path.join(targetIssueBinDir, 'gh'), `#!/usr/bin/env bash\necho "$*" >> ${JSON.stringify(targetIssueGhLogFile)}\nif [[ "$*" == "pr view --json number --jq .number" ]]; then echo 448; exit 0; fi\nexit 1\n`);
+  const result = run([], {
+    env: {
+      OPENSPEC_BUDDY_AUTO_STATE_DIR: targetIssueStateDir,
+      OPENSPEC_BUDDY_CORE_SCRIPT_DIR: targetIssueCoreDir,
+      OPENSPEC_BUDDY_AUTO_TARGET_ISSUE: '693',
+      OPENSPEC_BUDDY_AUTO_PR: '448',
+      OPENSPEC_BUDDY_AUTO_HEAD: 'stale-head',
+      PATH: `${targetIssueBinDir}:${process.env.PATH}`,
+    },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^DONE/m);
+  assert.match(result.stdout, /stage: claim-issue/);
+  assert.match(result.stdout, /next_stage: implement-or-open-pr/);
+  assert.equal(fs.readFileSync(targetIssueLogFile, 'utf8').trim(), 'claim 693');
+  assert.equal(fs.existsSync(targetIssueGhLogFile), false);
+
+  const second = run([], {
+    env: {
+      OPENSPEC_BUDDY_AUTO_STATE_DIR: targetIssueStateDir,
+      OPENSPEC_BUDDY_CORE_SCRIPT_DIR: targetIssueCoreDir,
+      OPENSPEC_BUDDY_AUTO_TARGET_ISSUE: '693',
+      OPENSPEC_BUDDY_AUTO_PR: '448',
+      OPENSPEC_BUDDY_AUTO_HEAD: 'stale-head',
+      PATH: `${targetIssueBinDir}:${process.env.PATH}`,
+    },
+  });
+  assert.equal(second.status, 0, second.stderr);
+  assert.match(second.stdout, /^HANDOFF/m);
+  assert.match(second.stdout, /stage: implement-or-open-pr/);
+  assert.equal(fs.readFileSync(targetIssueLogFile, 'utf8').trim(), 'claim 693');
+}
+
+{
+  const targetPrStateDir = path.join(tmp, 'state-target-pr');
+  const targetPrCoreDir = path.join(tmp, 'core-target-pr');
+  const targetPrLogFile = path.join(tmp, 'commands-target-pr.log');
+  const targetPrBinDir = path.join(tmp, 'bin-target-pr');
+  const targetPrGhLogFile = path.join(tmp, 'gh-target-pr.log');
+  fs.mkdirSync(targetPrCoreDir, { recursive: true });
+  fs.mkdirSync(targetPrBinDir, { recursive: true });
+  makeExecutable(path.join(targetPrCoreDir, 'mark-review.sh'), `#!/usr/bin/env bash\necho "mark-review $*" >> ${JSON.stringify(targetPrLogFile)}\n`);
+  makeExecutable(path.join(targetPrCoreDir, 'wait-for-review-clear.sh'), `#!/usr/bin/env bash\necho "wait-review $*" >> ${JSON.stringify(targetPrLogFile)}\n`);
+  makeExecutable(path.join(targetPrCoreDir, 'verify-review-clear.sh'), `#!/usr/bin/env bash\necho "verify-review $*" >> ${JSON.stringify(targetPrLogFile)}\n`);
+  makeExecutable(path.join(targetPrBinDir, 'gh'), `#!/usr/bin/env bash\necho "$*" >> ${JSON.stringify(targetPrGhLogFile)}\nif [[ "$*" == "pr view 694 --json body --jq .body" ]]; then echo "origin issue: #693"; exit 0; fi\nif [[ "$*" == "pr view 694 --json headRefOid --jq .headRefOid" ]]; then echo target-head; exit 0; fi\nif [[ "$*" == "pr view --json number --jq .number" ]]; then echo 448; exit 0; fi\nexit 1\n`);
+  const result = run([], {
+    env: {
+      OPENSPEC_BUDDY_AUTO_STATE_DIR: targetPrStateDir,
+      OPENSPEC_BUDDY_CORE_SCRIPT_DIR: targetPrCoreDir,
+      OPENSPEC_BUDDY_AUTO_TARGET_PR: '694',
+      OPENSPEC_BUDDY_AUTO_ISSUE: '12',
+      OPENSPEC_BUDDY_AUTO_HEAD: 'stale-head',
+      PATH: `${targetPrBinDir}:${process.env.PATH}`,
+    },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^DONE/m);
+  assert.match(result.stdout, /stage: wait-review/);
+  assert.equal(fs.readFileSync(targetPrLogFile, 'utf8').trim(), [
+    'mark-review 693 694',
+    'wait-review 694',
+  ].join('\n'));
+  const ghLog = fs.readFileSync(targetPrGhLogFile, 'utf8');
+  assert.match(ghLog, /pr view 694 --json body --jq \.body/);
+  assert.match(ghLog, /pr view 694 --json headRefOid --jq \.headRefOid/);
+  assert.doesNotMatch(ghLog, /pr view --json number --jq \.number/);
+}
+
+{
+  const bothTargetStateDir = path.join(tmp, 'state-both-targets');
+  const bothTargetCoreDir = path.join(tmp, 'core-both-targets');
+  const bothTargetLogFile = path.join(tmp, 'commands-both-targets.log');
+  const bothTargetBinDir = path.join(tmp, 'bin-both-targets');
+  fs.mkdirSync(bothTargetCoreDir, { recursive: true });
+  fs.mkdirSync(bothTargetBinDir, { recursive: true });
+  makeExecutable(path.join(bothTargetCoreDir, 'mark-review.sh'), `#!/usr/bin/env bash\necho "mark-review $*" >> ${JSON.stringify(bothTargetLogFile)}\n`);
+  makeExecutable(path.join(bothTargetCoreDir, 'wait-for-review-clear.sh'), `#!/usr/bin/env bash\necho "wait-review $*" >> ${JSON.stringify(bothTargetLogFile)}\n`);
+  makeExecutable(path.join(bothTargetCoreDir, 'verify-review-clear.sh'), '#!/usr/bin/env bash\nexit 0\n');
+  makeExecutable(path.join(bothTargetBinDir, 'gh'), `#!/usr/bin/env bash\nif [[ "$*" == "pr view 694 --json body --jq .body" ]]; then echo "origin issue: #693"; exit 0; fi\nif [[ "$*" == "pr view 694 --json headRefOid --jq .headRefOid" ]]; then echo target-head; exit 0; fi\nexit 1\n`);
+  const result = run([], {
+    env: {
+      OPENSPEC_BUDDY_AUTO_STATE_DIR: bothTargetStateDir,
+      OPENSPEC_BUDDY_CORE_SCRIPT_DIR: bothTargetCoreDir,
+      OPENSPEC_BUDDY_AUTO_TARGET_ISSUE: '999',
+      OPENSPEC_BUDDY_AUTO_TARGET_PR: '694',
+      PATH: `${bothTargetBinDir}:${process.env.PATH}`,
+    },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.readFileSync(bothTargetLogFile, 'utf8').trim(), [
+    'mark-review 693 694',
+    'wait-review 694',
+  ].join('\n'));
+}
+
+{
+  const cliTargetStateDir = path.join(tmp, 'state-cli-targets');
+  const cliTargetCoreDir = path.join(tmp, 'core-cli-targets');
+  const cliTargetLogFile = path.join(tmp, 'commands-cli-targets.log');
+  const cliTargetBinDir = path.join(tmp, 'bin-cli-targets');
+  fs.mkdirSync(cliTargetCoreDir, { recursive: true });
+  fs.mkdirSync(cliTargetBinDir, { recursive: true });
+  makeExecutable(path.join(cliTargetCoreDir, 'claim-issue.sh'), `#!/usr/bin/env bash\necho "claim $*" >> ${JSON.stringify(cliTargetLogFile)}\n`);
+  makeExecutable(path.join(cliTargetBinDir, 'gh'), '#!/usr/bin/env bash\nexit 1\n');
+  const result = run(['--target-issue', '701'], {
+    env: {
+      OPENSPEC_BUDDY_AUTO_STATE_DIR: cliTargetStateDir,
+      OPENSPEC_BUDDY_CORE_SCRIPT_DIR: cliTargetCoreDir,
+      OPENSPEC_BUDDY_AUTO_PR: '448',
+      OPENSPEC_BUDDY_AUTO_HEAD: 'stale-head',
+      PATH: `${cliTargetBinDir}:${process.env.PATH}`,
+    },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /stage: claim-issue/);
+  assert.equal(fs.readFileSync(cliTargetLogFile, 'utf8').trim(), 'claim 701');
+}
+
+{
+  const cliTargetPrStateDir = path.join(tmp, 'state-cli-target-pr');
+  const cliTargetPrCoreDir = path.join(tmp, 'core-cli-target-pr');
+  const cliTargetPrLogFile = path.join(tmp, 'commands-cli-target-pr.log');
+  const cliTargetPrBinDir = path.join(tmp, 'bin-cli-target-pr');
+  fs.mkdirSync(cliTargetPrCoreDir, { recursive: true });
+  fs.mkdirSync(cliTargetPrBinDir, { recursive: true });
+  makeExecutable(path.join(cliTargetPrCoreDir, 'mark-review.sh'), `#!/usr/bin/env bash\necho "mark-review $*" >> ${JSON.stringify(cliTargetPrLogFile)}\n`);
+  makeExecutable(path.join(cliTargetPrCoreDir, 'wait-for-review-clear.sh'), `#!/usr/bin/env bash\necho "wait-review $*" >> ${JSON.stringify(cliTargetPrLogFile)}\n`);
+  makeExecutable(path.join(cliTargetPrCoreDir, 'verify-review-clear.sh'), '#!/usr/bin/env bash\nexit 0\n');
+  makeExecutable(path.join(cliTargetPrBinDir, 'gh'), `#!/usr/bin/env bash\nif [[ "$*" == "pr view 694 --json body --jq .body" ]]; then echo "origin issue: #693"; exit 0; fi\nif [[ "$*" == "pr view 694 --json headRefOid --jq .headRefOid" ]]; then echo target-head; exit 0; fi\nexit 1\n`);
+  const result = run(['--target-pr', '694', '--issue', '999', '--pr', '448', '--head', 'stale-head'], {
+    env: {
+      OPENSPEC_BUDDY_AUTO_STATE_DIR: cliTargetPrStateDir,
+      OPENSPEC_BUDDY_CORE_SCRIPT_DIR: cliTargetPrCoreDir,
+      PATH: `${cliTargetPrBinDir}:${process.env.PATH}`,
+    },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.readFileSync(cliTargetPrLogFile, 'utf8').trim(), [
+    'mark-review 693 694',
+    'wait-review 694',
+  ].join('\n'));
+}
+
+{
   const result = run(['--dry-run', '--issue', '12', '--pr', '34'], { env });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /stage: mark-review/);
