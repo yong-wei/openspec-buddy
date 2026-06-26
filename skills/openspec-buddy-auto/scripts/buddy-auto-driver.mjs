@@ -21,6 +21,10 @@ const stages = new Set([
   'achieved',
 ]);
 
+function truthy(value) {
+  return ['1', 'true', 'yes', 'on'].includes(String(value || '').toLowerCase());
+}
+
 function parseArgs(argv) {
   const targetIssue = process.env.OPENSPEC_BUDDY_AUTO_TARGET_ISSUE || '';
   const targetPr = process.env.OPENSPEC_BUDDY_AUTO_TARGET_PR || '';
@@ -31,6 +35,7 @@ function parseArgs(argv) {
     head: targetPr ? '' : process.env.OPENSPEC_BUDDY_AUTO_HEAD || '',
     noPr: false,
     dryRun: false,
+    goal: truthy(process.env.OPENSPEC_BUDDY_AUTO_GOAL),
     explicitIssue: Boolean(targetIssue || (!targetPr && process.env.OPENSPEC_BUDDY_AUTO_ISSUE)),
     explicitPr: Boolean(targetPr || (!targetIssue && process.env.OPENSPEC_BUDDY_AUTO_PR)),
     targetIssueLocked: Boolean(targetIssue),
@@ -70,6 +75,7 @@ function parseArgs(argv) {
     else if (arg === '--change') opts.change = argv[++i] || '';
     else if (arg === '--head') opts.head = argv[++i] || '';
     else if (arg === '--no-pr') opts.noPr = true;
+    else if (arg === '--goal' || arg === '--goal-loop') opts.goal = true;
     else if (arg === '--run-next') continue;
     else if (arg === '--dry-run') opts.dryRun = true;
     else if (arg === '-h' || arg === '--help') opts.help = true;
@@ -187,7 +193,7 @@ function inferIssueFromPrBody(pr = '') {
 function inferContext(opts) {
   const inferred = { ...opts };
   if (inferred.targetPrLocked) inferred.issue = '';
-  if (!inferred.pr && !inferred.explicitIssue) inferred.pr = inferCurrentPr();
+  if (!inferred.pr && !inferred.explicitIssue && !inferred.goal) inferred.pr = inferCurrentPr();
   if (inferred.pr && !inferred.issue) inferred.issue = inferIssueFromPrBody(inferred.pr);
   if (inferred.pr && !inferred.head) inferred.head = inferCurrentHead(inferred.pr);
   return inferred;
@@ -301,6 +307,31 @@ function recordStage(opts, stage, command = []) {
   return state;
 }
 
+function parseGoalSelection(stdout) {
+  let data;
+  try {
+    data = JSON.parse(stdout || '{}');
+  } catch {
+    return { error: 'select-next-change.sh did not return JSON.' };
+  }
+
+  const selected = data.selected || null;
+  if (!selected) {
+    return { selected: null, reason: data.reason || 'No executable OpenSpec Buddy issue.' };
+  }
+  if (selected.local_only || selected.no_issue || !selected.number) {
+    return {
+      selected: null,
+      localOnly: Boolean(selected.change_id),
+      change: selected.change_id || '',
+      reason: selected.change_id
+        ? 'Selector chose a local-only change; continue through the local-only --no-pr handoff.'
+        : 'Selector chose a local-only change without a change_id.',
+    };
+  }
+  return { selected: String(selected.number), change: selected.change_id || '', reason: selected.title || '' };
+}
+
 function commandFor(opts, state) {
   if (opts.noPr) {
     if (opts.issue || opts.pr || !opts.change) {
@@ -318,8 +349,16 @@ function commandFor(opts, state) {
   }
 
   if (!opts.issue && !opts.pr) {
+    if (opts.goal) {
+      return {
+        stage: 'goal-select',
+        command: [path.join(coreScriptDir, 'select-next-change.sh')],
+        precommands: [[path.join(coreScriptDir, 'verify-bound-worktree.sh'), '--phase', 'goal-loop-start']],
+        reason: 'Goal-loop is authorized. Recalculate executable issues, select the smallest claimable issue, then claim it through the driver.',
+      };
+    }
     return {
-      stage: 'select-or-claim',
+      stage: 'no-goal-context',
       command: [],
       reason: 'No issue or PR context was inferred. Do not claim new work or mutate GitHub state until a concrete phase context exists.',
     };
@@ -417,6 +456,15 @@ function shouldContinue(stage) {
   return stage === 'mark-review';
 }
 
+function runProcess(command) {
+  return spawnSync(command[0], command.slice(1), {
+    cwd: process.cwd(),
+    env: process.env,
+    encoding: 'utf8',
+    stdio: 'pipe',
+  });
+}
+
 function runDriver(opts) {
   for (let i = 0; i < 4; i += 1) {
     const state = readState(opts);
@@ -430,12 +478,20 @@ function runDriver(opts) {
       return;
     }
 
-    const result = spawnSync(next.command[0], next.command.slice(1), {
-      cwd: process.cwd(),
-      env: process.env,
-      encoding: 'utf8',
-      stdio: 'pipe',
-    });
+    for (const precommand of next.precommands || []) {
+      const preflight = runProcess(precommand);
+      if (preflight.status !== 0) {
+        emitBlocked({
+          stage: next.stage,
+          reason: `${precommand[0]} exited with status ${preflight.status ?? 1}`,
+          command: precommand,
+          output: compactOutput(preflight),
+        });
+        process.exit(preflight.status ?? 1);
+      }
+    }
+
+    const result = runProcess(next.command);
     if (result.status !== 0) {
       emitBlocked({
         stage: next.stage,
@@ -444,6 +500,38 @@ function runDriver(opts) {
         output: compactOutput(result),
       });
       process.exit(result.status ?? 1);
+    }
+
+    if (next.stage === 'goal-select') {
+      const selection = parseGoalSelection(result.stdout || '');
+      if (selection.error) {
+        emitBlocked({ stage: next.stage, reason: selection.error, command: next.command, output: compactOutput(result) });
+        process.exit(1);
+      }
+      if (!selection.selected) {
+        if (selection.localOnly) {
+          opts.change = selection.change;
+          opts.noPr = true;
+          opts.issue = '';
+          opts.pr = '';
+          opts.head = '';
+          continue;
+        }
+        emitDone({
+          stage: 'no-available-changes',
+          command: next.command,
+          state: opts,
+          next: { stage: '', reason: selection.reason, command: [] },
+        });
+        return;
+      }
+      opts.issue = selection.selected;
+      opts.change ||= selection.change || '';
+      opts.pr = '';
+      opts.head = '';
+      opts.explicitIssue = true;
+      opts.explicitPr = false;
+      continue;
     }
 
     for (const stage of next.records || []) {
@@ -469,7 +557,7 @@ function runDriver(opts) {
 function main() {
   const opts = inferContext(parseArgs(process.argv.slice(2)));
   if (opts.help) {
-    console.log('Usage: buddy-auto-driver.mjs [--dry-run] [--target-issue N] [--target-pr N] [--issue N] [--pr N] [--change ID] [--head SHA] [--no-pr]');
+    console.log('Usage: buddy-auto-driver.mjs [--dry-run] [--goal] [--target-issue N] [--target-pr N] [--issue N] [--pr N] [--change ID] [--head SHA] [--no-pr]');
     return;
   }
   if (opts.dryRun) printNext(opts);

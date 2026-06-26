@@ -48,6 +48,17 @@ OPENSPEC_BUDDY_AUTO_TARGET_PR=<pr-number> <openspec-buddy-auto-skill-dir>/script
 Target seeds are normal operation, not manual workflow substitution. A target
 issue must not be overwritten by an ambient current PR from the worktree.
 
+If the user explicitly asks for goal mode, completion of all available changes,
+or continuing until no executable changes remain, authorize the same driver to
+select the next issue:
+
+```bash
+OPENSPEC_BUDDY_AUTO_GOAL=1 <openspec-buddy-auto-skill-dir>/scripts/buddy-auto-driver.mjs
+```
+
+Goal authorization is the only empty-context path that may run the selector and
+claim the next issue. Without it, an empty worktree context must stop.
+
 If it reports `BLOCKED`, fix only that blocker. If it reports `HANDOFF`, do
 only the requested agent work. After agent-owned work or external state changes,
 run the driver again.

@@ -18,6 +18,9 @@ Target rules:
   only by reading that target PR.
 - If no concrete context is available, the driver must return `HANDOFF` and
   must not claim new work or mutate GitHub state.
+- If goal mode is explicitly authorized with `OPENSPEC_BUDDY_AUTO_GOAL=1` or
+  `--goal`, an empty context may run the selector, choose the smallest
+  executable issue-backed candidate, and claim it through the same driver.
 
 Options such as `--dry-run`, `--issue`, `--pr`, `--change`, and `--no-pr` are
 diagnostic or recovery controls only.
@@ -85,6 +88,25 @@ After a review-fix commit:
 Resolved old threads are not a clean current-head review.
 
 ## Claim Progression
+
+For an authorized goal loop with no current issue or PR:
+
+1. Run the bound-worktree gate:
+   ```bash
+   <openspec-buddy-skill-dir>/scripts/verify-bound-worktree.sh --phase goal-loop-start
+   ```
+2. Recalculate selection:
+   ```bash
+   <openspec-buddy-skill-dir>/scripts/select-next-change.sh
+   ```
+3. If an issue-backed candidate is selected, treat that issue as the next
+   context and continue to claim progression below.
+4. If a local-only `--no-issue` change is selected, enter the local-only review
+   handoff; do not claim or create GitHub state.
+5. If no candidate is selected, return `DONE no-available-changes`.
+
+Without explicit goal authorization, an empty context is `HANDOFF
+no-goal-context`; it must not run selection or claim.
 
 For a target issue without a PR:
 

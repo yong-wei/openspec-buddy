@@ -59,7 +59,7 @@ const env = {
   });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /^HANDOFF/m);
-  assert.match(result.stdout, /stage: select-or-claim/);
+  assert.match(result.stdout, /stage: no-goal-context/);
   assert.equal(fs.existsSync(noContextLogFile), false);
 }
 
@@ -82,9 +82,94 @@ const env = {
   });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /^HANDOFF/m);
-  assert.match(result.stdout, /stage: select-or-claim/);
+  assert.match(result.stdout, /stage: no-goal-context/);
   assert.equal(fs.existsSync(mergedPrLogFile), false);
   assert.match(fs.readFileSync(mergedPrGhLogFile, 'utf8'), /pr view --json number,state --jq select\(\.state == "OPEN"\) \| \.number/);
+}
+
+{
+  const goalStateDir = path.join(tmp, 'state-goal-selected');
+  const goalCoreDir = path.join(tmp, 'core-goal-selected');
+  const goalLogFile = path.join(tmp, 'commands-goal-selected.log');
+  const goalBinDir = path.join(tmp, 'bin-goal-selected');
+  const goalGhLogFile = path.join(tmp, 'gh-goal-selected.log');
+  fs.mkdirSync(goalCoreDir, { recursive: true });
+  fs.mkdirSync(goalBinDir, { recursive: true });
+  makeExecutable(path.join(goalCoreDir, 'verify-bound-worktree.sh'), `#!/usr/bin/env bash\necho "verify-bound $*" >> ${JSON.stringify(goalLogFile)}\n`);
+  makeExecutable(path.join(goalCoreDir, 'select-next-change.sh'), `#!/usr/bin/env bash\necho "select" >> ${JSON.stringify(goalLogFile)}\nprintf '%s\\n' '{"selected":{"number":675,"title":"Next change","change_id":"next-change"}}'\n`);
+  makeExecutable(path.join(goalCoreDir, 'claim-issue.sh'), `#!/usr/bin/env bash\necho "claim $*" >> ${JSON.stringify(goalLogFile)}\n`);
+  makeExecutable(path.join(goalBinDir, 'gh'), `#!/usr/bin/env bash\necho "$*" >> ${JSON.stringify(goalGhLogFile)}\nif [[ "$*" == "pr view --json number,state --jq select(.state == \\"OPEN\\") | .number" ]]; then echo 448; exit 0; fi\nexit 1\n`);
+  const result = run([], {
+    env: {
+      OPENSPEC_BUDDY_AUTO_STATE_DIR: goalStateDir,
+      OPENSPEC_BUDDY_CORE_SCRIPT_DIR: goalCoreDir,
+      OPENSPEC_BUDDY_AUTO_GOAL: '1',
+      PATH: `${goalBinDir}:${process.env.PATH}`,
+    },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^DONE/m);
+  assert.match(result.stdout, /stage: claim-issue/);
+  assert.match(result.stdout, /next_stage: implement-or-open-pr/);
+  assert.equal(fs.readFileSync(goalLogFile, 'utf8').trim(), [
+    'verify-bound --phase goal-loop-start',
+    'select',
+    'claim 675',
+  ].join('\n'));
+  assert.equal(fs.existsSync(goalGhLogFile), false);
+  const state = JSON.parse(fs.readFileSync(path.join(goalStateDir, 'issue-675.json'), 'utf8'));
+  assert.equal(state.issue, '675');
+  assert.ok(state.stages.claimed);
+}
+
+{
+  const goalEmptyStateDir = path.join(tmp, 'state-goal-empty');
+  const goalEmptyCoreDir = path.join(tmp, 'core-goal-empty');
+  const goalEmptyLogFile = path.join(tmp, 'commands-goal-empty.log');
+  fs.mkdirSync(goalEmptyCoreDir, { recursive: true });
+  makeExecutable(path.join(goalEmptyCoreDir, 'verify-bound-worktree.sh'), `#!/usr/bin/env bash\necho "verify-bound $*" >> ${JSON.stringify(goalEmptyLogFile)}\n`);
+  makeExecutable(path.join(goalEmptyCoreDir, 'select-next-change.sh'), `#!/usr/bin/env bash\necho "select" >> ${JSON.stringify(goalEmptyLogFile)}\nprintf '%s\\n' '{"selected":null,"reason":"No executable OpenSpec Buddy issue."}'\n`);
+  makeExecutable(path.join(goalEmptyCoreDir, 'claim-issue.sh'), `#!/usr/bin/env bash\necho "claim $*" >> ${JSON.stringify(goalEmptyLogFile)}\n`);
+  const result = run([], {
+    env: {
+      OPENSPEC_BUDDY_AUTO_STATE_DIR: goalEmptyStateDir,
+      OPENSPEC_BUDDY_CORE_SCRIPT_DIR: goalEmptyCoreDir,
+      OPENSPEC_BUDDY_AUTO_GOAL: 'true',
+    },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^DONE/m);
+  assert.match(result.stdout, /stage: no-available-changes/);
+  assert.match(result.stdout, /No executable OpenSpec Buddy issue/);
+  assert.equal(fs.readFileSync(goalEmptyLogFile, 'utf8').trim(), [
+    'verify-bound --phase goal-loop-start',
+    'select',
+  ].join('\n'));
+}
+
+{
+  const goalLocalStateDir = path.join(tmp, 'state-goal-local-only');
+  const goalLocalCoreDir = path.join(tmp, 'core-goal-local-only');
+  const goalLocalLogFile = path.join(tmp, 'commands-goal-local-only.log');
+  fs.mkdirSync(goalLocalCoreDir, { recursive: true });
+  makeExecutable(path.join(goalLocalCoreDir, 'verify-bound-worktree.sh'), `#!/usr/bin/env bash\necho "verify-bound $*" >> ${JSON.stringify(goalLocalLogFile)}\n`);
+  makeExecutable(path.join(goalLocalCoreDir, 'select-next-change.sh'), `#!/usr/bin/env bash\necho "select" >> ${JSON.stringify(goalLocalLogFile)}\nprintf '%s\\n' '{"selected":{"number":null,"change_id":"local-change","local_only":true,"no_issue":true}}'\n`);
+  makeExecutable(path.join(goalLocalCoreDir, 'claim-issue.sh'), `#!/usr/bin/env bash\necho "claim $*" >> ${JSON.stringify(goalLocalLogFile)}\n`);
+  const result = run([], {
+    env: {
+      OPENSPEC_BUDDY_AUTO_STATE_DIR: goalLocalStateDir,
+      OPENSPEC_BUDDY_CORE_SCRIPT_DIR: goalLocalCoreDir,
+      OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^HANDOFF/m);
+  assert.match(result.stdout, /stage: local-review/);
+  assert.match(result.stdout, /Local-only --no-pr path/);
+  assert.equal(fs.readFileSync(goalLocalLogFile, 'utf8').trim(), [
+    'verify-bound --phase goal-loop-start',
+    'select',
+  ].join('\n'));
 }
 
 {

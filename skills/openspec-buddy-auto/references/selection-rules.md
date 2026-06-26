@@ -9,6 +9,10 @@ the user supplies an issue number, claim that issue. If not, select the
 smallest claimable open issue number and claim it before doing deeper
 exploration or decomposition.
 
+Automatic empty-context selection is allowed only in explicit goal mode. The
+auto driver must see `OPENSPEC_BUDDY_AUTO_GOAL=1` or `--goal`; otherwise it
+must stop instead of claiming new work.
+
 For ordinary open issues, use:
 
 ```bash

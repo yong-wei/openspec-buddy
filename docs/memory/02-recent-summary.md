@@ -33,6 +33,7 @@
 - `v0.14.0` 发布线将 `openspec-buddy` 与 `openspec-buddy-auto` 主技能精简为 driver-first 入口文档，并新增 `buddy-driver.mjs` 与 `buddy-auto-driver.mjs`；Auto driver 使用签名本地 receipt 防止伪造阶段推进，`--no-pr` 仅允许显式 local-only `--change` 路径。
 - `v0.15.0` 发布线将两个 driver 改为默认无参执行：确定性 helper 成功时静默推进并只返回 `DONE`，失败返回 `BLOCKED`，需要代理接管时返回 `HANDOFF`；技能入口明确要求 driver 运行期间不得执行命令、查询 GitHub、检查时间或输出进度，必须静默等待 driver 反馈。
 - `v0.16.0` 发布线为 Buddy Auto driver 增加用户指定目标绑定：`OPENSPEC_BUDDY_AUTO_TARGET_ISSUE` 不会被当前工作树历史 PR 覆盖，`OPENSPEC_BUDDY_AUTO_TARGET_PR` 只从目标 PR 读取 origin issue 和 head；issue-only 目标由 driver 执行 `claim-issue.sh` 并记录 `claimed` receipt 后再 handoff 实现。
+- `v0.17.0` 发布线修复 Buddy Auto goal-loop 空上下文入口：只有 `OPENSPEC_BUDDY_AUTO_GOAL=1` 或 `--goal` 明确授权时，driver 才会在无 issue/PR 上下文时运行 selector，并把选中的 issue-backed 候选转入 `claim-issue.sh`；普通空上下文仍停止，且 goal 模式不再被协调分支上的历史 PR 推断覆盖。
 
 ## 当前警惕点
 
