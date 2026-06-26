@@ -4,6 +4,10 @@ set -euo pipefail
 issue_number="${1:-}"
 archive_path="${2:-}"
 pr_url="${3:-}"
+if [[ "$issue_number" == "-h" || "$issue_number" == "--help" ]]; then
+  echo "Usage: mark-achieved.sh <issue-number> <archive-path> [pr-url]"
+  exit 0
+fi
 if [[ -z "$issue_number" || -z "$archive_path" ]]; then
   echo "Usage: mark-achieved.sh <issue-number> <archive-path> [pr-url]" >&2
   exit 2

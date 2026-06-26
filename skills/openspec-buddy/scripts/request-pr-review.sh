@@ -3,14 +3,20 @@ set -euo pipefail
 
 pr_ref="${1:-}"
 
+if [[ "$pr_ref" == "-h" || "$pr_ref" == "--help" ]]; then
+  echo "Usage: request-pr-review.sh <pr-number-or-url> [--dry-run] [--force] [--context-file <file>] [--require-threads-resolved]"
+  exit 0
+fi
+
 if [[ -z "$pr_ref" ]]; then
-  echo "Usage: request-pr-review.sh <pr-number-or-url> [--dry-run] [--force] [--context-file <file>]" >&2
+  echo "Usage: request-pr-review.sh <pr-number-or-url> [--dry-run] [--force] [--context-file <file>] [--require-threads-resolved]" >&2
   exit 2
 fi
 
 dry_run=0
 force_request=0
 context_file=""
+require_threads_resolved=0
 shift
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
@@ -29,6 +35,10 @@ while [[ "$#" -gt 0 ]]; do
         exit 2
       fi
       shift 2
+      ;;
+    --require-threads-resolved)
+      require_threads_resolved=1
+      shift
       ;;
     *)
       echo "Unknown option: $1" >&2
@@ -98,7 +108,9 @@ pr_number="$(resolve_pr_number "$pr_ref")" || {
 }
 
 "$script_dir/verify-claim-worktree.sh" --pr "$pr_number" >/dev/null
-"$script_dir/verify-review-threads-resolved.sh" "$pr_ref"
+if [[ "$require_threads_resolved" == "1" || "${OPENSPEC_BUDDY_REVIEW_FIX_CONTEXT:-0}" == "1" ]]; then
+  "$script_dir/verify-review-threads-resolved.sh" "$pr_ref"
+fi
 
 OPENSPEC_BUDDY_CACHE_REFRESH=1 buddy_pr_rest_bundle "$repo_nwo" "$pr_number" "$cache_dir"
 request_state="$(node "$script_dir/review-request-state.mjs" "$review_request" "$BUDDY_PR_REST_FILE" "$BUDDY_COMMITS_FILE" "$BUDDY_ISSUE_COMMENTS_FILE")"

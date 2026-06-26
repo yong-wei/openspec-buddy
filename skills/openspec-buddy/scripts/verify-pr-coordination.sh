@@ -4,6 +4,11 @@ set -euo pipefail
 issue_number="${1:-}"
 pr_ref="${2:-}"
 
+if [[ "$issue_number" == "-h" || "$issue_number" == "--help" ]]; then
+  echo "Usage: verify-pr-coordination.sh <issue-number> <pr-number-or-url>"
+  exit 0
+fi
+
 if [[ -z "$issue_number" || -z "$pr_ref" ]]; then
   echo "Usage: verify-pr-coordination.sh <issue-number> <pr-number-or-url>" >&2
   exit 2

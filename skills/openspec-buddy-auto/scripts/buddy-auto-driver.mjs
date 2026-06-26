@@ -11,14 +11,28 @@ const coreScriptDir = process.env.OPENSPEC_BUDDY_CORE_SCRIPT_DIR || defaultCoreS
 
 const stages = new Set([
   'claimed',
+  'issue_pr_bound',
   'in_progress',
   'pr_opened',
   'mark_review_passed',
   'review_requested',
+  'review_response_gate_passed',
   'review_clear',
   'merge_gates_passed',
+  'post_merge_achieved',
   'merged',
   'achieved',
+]);
+
+const deterministicStages = new Set([
+  'goal-select',
+  'claim-issue',
+  'issue-pr-bridge',
+  'mark-review',
+  'review-response-gate',
+  'wait-review',
+  'merge-gates',
+  'achieved-truth',
 ]);
 
 function truthy(value) {
@@ -288,7 +302,7 @@ function writeState(opts, state) {
   fs.writeFileSync(statePath(opts), `${JSON.stringify(state, null, 2)}\n`);
 }
 
-function recordStage(opts, stage, command = []) {
+function recordStage(opts, stage, command = [], extras = {}) {
   if (!stages.has(stage)) throw new Error(`Unknown stage: ${stage}`);
   const state = readState(opts);
   state.issue ||= opts.issue || '';
@@ -300,6 +314,7 @@ function recordStage(opts, stage, command = []) {
     head: opts.head || '',
     command: command.length ? commandLine(command) : '',
     source: 'buddy-auto-driver/run-next',
+    ...extras,
   };
   receipt.signature = signReceipt(state, stage, receipt);
   state.stages[stage] = receipt;
@@ -330,6 +345,14 @@ function parseGoalSelection(stdout) {
     };
   }
   return { selected: String(selected.number), change: selected.change_id || '', reason: selected.title || '' };
+}
+
+function parseJsonOutput(stdout, fallbackReason) {
+  try {
+    return JSON.parse(stdout || '{}');
+  } catch {
+    return { error: fallbackReason };
+  }
 }
 
 function commandFor(opts, state) {
@@ -376,9 +399,9 @@ function commandFor(opts, state) {
       };
     }
     return {
-      stage: 'implement-or-open-pr',
-      command: [],
-      reason: 'Issue is claimed for this driver context. Continue implementation, independent acceptance review, commit, push, and open a ready PR through the core workflow.',
+      stage: 'issue-pr-bridge',
+      command: [path.join(coreScriptDir, 'find-issue-pr.sh'), opts.issue],
+      reason: 'Issue is claimed for this driver context. Check for an exact issue-bound PR before handing implementation back to the agent.',
     };
   }
 
@@ -401,6 +424,7 @@ function commandFor(opts, state) {
   const contextMatches = stateMatchesContext(opts, state);
   const markReviewPassed = contextMatches && validReceipt(state, 'mark_review_passed');
   const reviewRequested = contextMatches && validReceipt(state, 'review_requested');
+  const reviewResponseGatePassed = contextMatches && validReceipt(state, 'review_response_gate_passed');
   const reviewClear = contextMatches && validReceipt(state, 'review_clear');
   const mergeGatesPassed = contextMatches && validReceipt(state, 'merge_gates_passed');
 
@@ -414,6 +438,14 @@ function commandFor(opts, state) {
   }
 
   if (!reviewClear) {
+    if (truthy(process.env.OPENSPEC_BUDDY_REVIEW_FIX_CONTEXT) && !reviewResponseGatePassed) {
+      return {
+        stage: 'review-response-gate',
+        command: [path.join(coreScriptDir, 'review-response-gate.sh'), opts.pr, '--head', opts.head],
+        reason: 'Review-fix context requires reply -> resolve -> verify before requesting or waiting for another review.',
+        records: ['review_response_gate_passed'],
+      };
+    }
     return {
       stage: 'wait-review',
       command: [path.join(coreScriptDir, 'wait-for-review-clear.sh'), opts.pr],
@@ -432,10 +464,94 @@ function commandFor(opts, state) {
   }
 
   return {
-    stage: 'merge-or-achieve',
-    command: [],
-    reason: 'Review and merge gates passed. Merge the PR, archive the local change, then mark achieved through core helpers.',
+    stage: 'achieved-truth',
+    command: [path.join(coreScriptDir, 'verify-achieved-truth.mjs'), opts.issue, opts.pr],
+    reason: 'Review and merge gates passed. Read GitHub and archive truth before merge handoff or post-merge achievement sync.',
   };
+}
+
+function runProcess(command) {
+  return spawnSync(command[0], command.slice(1), {
+    cwd: process.cwd(),
+    env: process.env,
+    encoding: 'utf8',
+    stdio: 'pipe',
+  });
+}
+
+function emitImplementHandoff(opts, command = []) {
+  emitHandoff({
+    stage: 'implement-or-open-pr',
+    reason: 'Issue is claimed for this driver context and no exact issue-bound PR exists yet. Continue implementation, independent acceptance review, commit, push, and open a ready PR through the core workflow.',
+    command,
+  });
+}
+
+function recordIssuePrBound(opts, bridge, command) {
+  opts.pr = String(bridge.pr || '');
+  opts.head = bridge.head || bridge.headRefOid || '';
+  opts.explicitPr = true;
+  opts.explicitIssue = true;
+  recordStage(opts, 'issue_pr_bound', command, {
+    issue: String(bridge.issue || opts.issue || ''),
+    pr: opts.pr,
+    headRefName: bridge.headRefName || '',
+    prUrl: bridge.url || '',
+    bridgeSource: 'find-issue-pr.sh',
+    bridgeReason: bridge.reason || '',
+  });
+}
+
+function runPostMergeAchievement(opts, truth, command) {
+  const archivePath = truth.archivePath || truth.archive_path || '';
+  if (!archivePath) {
+    emitBlocked({
+      stage: 'post-merge-achieve',
+      reason: 'verify-achieved-truth requested post-merge achievement but did not return archivePath.',
+      command,
+    });
+    process.exit(1);
+  }
+  const achieveCommand = [path.join(coreScriptDir, 'mark-achieved-post-merge.sh'), opts.issue, archivePath, opts.pr];
+  const result = runProcess(achieveCommand);
+  if (result.status !== 0) {
+    emitBlocked({
+      stage: 'post-merge-achieve',
+      reason: `${achieveCommand[0]} exited with status ${result.status ?? 1}`,
+      command: achieveCommand,
+      output: compactOutput(result),
+    });
+    process.exit(result.status ?? 1);
+  }
+  const verify = runProcess(command);
+  if (verify.status !== 0) {
+    emitBlocked({
+      stage: 'post-merge-achieve',
+      reason: `${command[0]} exited with status ${verify.status ?? 1} after post-merge achievement sync`,
+      command,
+      output: compactOutput(verify),
+    });
+    process.exit(verify.status ?? 1);
+  }
+  const verifiedTruth = parseJsonOutput(verify.stdout || '', 'verify-achieved-truth.mjs did not return JSON after post-merge achievement sync.');
+  if (verifiedTruth.achieved !== true) {
+    emitBlocked({
+      stage: 'post-merge-achieve',
+      reason: verifiedTruth.reason || 'Post-merge achievement sync completed, but terminal truth is still incomplete.',
+      command,
+      output: compactOutput(verify),
+    });
+    process.exit(1);
+  }
+  recordStage(opts, 'post_merge_achieved', achieveCommand);
+  recordStage(opts, 'achieved', achieveCommand);
+  emitDone({
+    stage: 'mark-achieved-post-merge',
+    command: achieveCommand,
+    state: opts,
+    next: { stage: 'achieved', reason: 'Post-merge achievement sync completed.', command: [] },
+    output: compactOutput(result),
+  });
 }
 
 function printNext(opts) {
@@ -452,23 +568,12 @@ function printNext(opts) {
   }
 }
 
-function shouldContinue(stage) {
-  return stage === 'mark-review';
-}
-
-function runProcess(command) {
-  return spawnSync(command[0], command.slice(1), {
-    cwd: process.cwd(),
-    env: process.env,
-    encoding: 'utf8',
-    stdio: 'pipe',
-  });
-}
-
 function runDriver(opts) {
-  for (let i = 0; i < 4; i += 1) {
+  let lastStage = '';
+  for (let i = 0; i < 8; i += 1) {
     const state = readState(opts);
     const next = commandFor(opts, state);
+    lastStage = next.stage;
     if (next.stage === 'blocked') {
       emitBlocked({ stage: next.stage, reason: next.reason, command: next.command });
       return;
@@ -534,11 +639,71 @@ function runDriver(opts) {
       continue;
     }
 
+    if (next.stage === 'issue-pr-bridge') {
+      const bridge = parseJsonOutput(result.stdout || '', 'find-issue-pr.sh did not return JSON.');
+      if (bridge.error) {
+        emitBlocked({ stage: next.stage, reason: bridge.error, command: next.command, output: compactOutput(result) });
+        process.exit(1);
+      }
+      if (!bridge.pr) {
+        emitImplementHandoff(opts, next.command);
+        return;
+      }
+      if (String(bridge.issue || opts.issue) !== String(opts.issue)) {
+        emitBlocked({
+          stage: next.stage,
+          reason: `find-issue-pr.sh returned issue ${bridge.issue}, expected ${opts.issue}.`,
+          command: next.command,
+          output: compactOutput(result),
+        });
+        process.exit(1);
+      }
+      recordIssuePrBound(opts, bridge, next.command);
+      continue;
+    }
+
+    if (next.stage === 'achieved-truth') {
+      const truth = parseJsonOutput(result.stdout || '', 'verify-achieved-truth.mjs did not return JSON.');
+      if (truth.error) {
+        emitBlocked({ stage: next.stage, reason: truth.error, command: next.command, output: compactOutput(result) });
+        process.exit(1);
+      }
+      if (truth.achieved === true) {
+        recordStage(opts, 'achieved', next.command);
+        emitDone({
+          stage: 'achieved',
+          command: next.command,
+          state: opts,
+          next: { stage: 'achieved', reason: truth.reason || 'Terminal truth already satisfied.', command: [] },
+        });
+        return;
+      }
+      if (truth.next === 'mark-achieved-post-merge') {
+        runPostMergeAchievement(opts, truth, next.command);
+        return;
+      }
+      if (truth.next === 'merge-pr') {
+        emitHandoff({
+          stage: 'merge-pr',
+          reason: truth.reason || 'PR is not merged. Merge the PR through the allowed project workflow, then rerun the driver.',
+          command: [],
+        });
+        return;
+      }
+      emitBlocked({
+        stage: next.stage,
+        reason: truth.reason || 'Achievement truth is incomplete and no safe deterministic next step was provided.',
+        command: next.command,
+        output: compactOutput(result),
+      });
+      process.exit(1);
+    }
+
     for (const stage of next.records || []) {
       recordStage(opts, stage, next.command);
     }
 
-    if (shouldContinue(next.stage)) continue;
+    if (deterministicStages.has(next.stage)) continue;
 
     const afterState = readState(opts);
     const after = commandFor(opts, afterState);
@@ -550,7 +715,7 @@ function runDriver(opts) {
     });
     return;
   }
-  emitBlocked({ stage: 'driver-loop', reason: 'Auto driver exceeded its deterministic step limit.' });
+  emitBlocked({ stage: 'driver-loop', reason: `Auto driver exceeded its deterministic step limit after stage ${lastStage || 'unknown'}.` });
   process.exit(1);
 }
 

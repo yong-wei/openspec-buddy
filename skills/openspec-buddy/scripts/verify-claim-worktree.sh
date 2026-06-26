@@ -9,6 +9,10 @@ allow_detached=0
 
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
+    -h|--help)
+      echo "Usage: verify-claim-worktree.sh [--issue <number>] [--pr <number-or-url>] [--branch <name>] [--allow-coordination-branch] [--allow-detached]"
+      exit 0
+      ;;
     --issue)
       issue_number="${2:-}"
       shift 2
@@ -37,7 +41,7 @@ while [[ "$#" -gt 0 ]]; do
 done
 
 if [[ -z "$issue_number" && -z "$pr_ref" && -z "$expected_branch" ]]; then
-  echo "Usage: verify-claim-worktree.sh [--issue <number>] [--pr <number-or-url>] [--branch <name>] [--allow-coordination-branch]" >&2
+  echo "Usage: verify-claim-worktree.sh [--issue <number>] [--pr <number-or-url>] [--branch <name>] [--allow-coordination-branch] [--allow-detached]" >&2
   exit 2
 fi
 

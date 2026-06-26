@@ -31,9 +31,13 @@ const coreDir = path.join(tmp, 'core');
 const logFile = path.join(tmp, 'commands.log');
 fs.mkdirSync(coreDir, { recursive: true });
 makeExecutable(path.join(coreDir, 'mark-review.sh'), `#!/usr/bin/env bash\necho "mark-review $*" >> ${JSON.stringify(logFile)}\n`);
+makeExecutable(path.join(coreDir, 'review-response-gate.sh'), `#!/usr/bin/env bash\necho "review-response-gate $*" >> ${JSON.stringify(logFile)}\n`);
 makeExecutable(path.join(coreDir, 'wait-for-review-clear.sh'), `#!/usr/bin/env bash\necho "helper stdout should stay quiet"\necho "wait-review $*" >> ${JSON.stringify(logFile)}\n`);
 makeExecutable(path.join(coreDir, 'verify-review-clear.sh'), `#!/usr/bin/env bash\necho "verify-review $*" >> ${JSON.stringify(logFile)}\n`);
 makeExecutable(path.join(coreDir, 'claim-issue.sh'), `#!/usr/bin/env bash\necho "claim $*" >> ${JSON.stringify(logFile)}\n`);
+makeExecutable(path.join(coreDir, 'find-issue-pr.sh'), `#!/usr/bin/env bash\necho "find-pr $*" >> ${JSON.stringify(logFile)}\nprintf '{"issue":%s,"pr":null,"reason":"no exact PR"}\\n' "$1"\n`);
+makeExecutable(path.join(coreDir, 'verify-achieved-truth.mjs'), `#!/usr/bin/env node\nimport fs from 'node:fs';\nfs.appendFileSync(${JSON.stringify(logFile)}, \`achieved-truth \${process.argv.slice(2).join(' ')}\\n\`);\nconsole.log(JSON.stringify({achieved:false,next:'merge-pr',reason:'PR is not merged'}));\n`);
+makeExecutable(path.join(coreDir, 'mark-achieved-post-merge.sh'), `#!/usr/bin/env bash\necho "post-merge-achieve $*" >> ${JSON.stringify(logFile)}\n`);
 
 const env = {
   OPENSPEC_BUDDY_AUTO_STATE_DIR: stateDir,
@@ -98,6 +102,7 @@ const env = {
   makeExecutable(path.join(goalCoreDir, 'verify-bound-worktree.sh'), `#!/usr/bin/env bash\necho "verify-bound $*" >> ${JSON.stringify(goalLogFile)}\n`);
   makeExecutable(path.join(goalCoreDir, 'select-next-change.sh'), `#!/usr/bin/env bash\necho "select" >> ${JSON.stringify(goalLogFile)}\nprintf '%s\\n' '{"selected":{"number":675,"title":"Next change","change_id":"next-change"}}'\n`);
   makeExecutable(path.join(goalCoreDir, 'claim-issue.sh'), `#!/usr/bin/env bash\necho "claim $*" >> ${JSON.stringify(goalLogFile)}\n`);
+  makeExecutable(path.join(goalCoreDir, 'find-issue-pr.sh'), `#!/usr/bin/env bash\necho "find-pr $*" >> ${JSON.stringify(goalLogFile)}\nprintf '%s\\n' '{"issue":675,"pr":null,"reason":"no exact PR"}'\n`);
   makeExecutable(path.join(goalBinDir, 'gh'), `#!/usr/bin/env bash\necho "$*" >> ${JSON.stringify(goalGhLogFile)}\nif [[ "$*" == "pr view --json number,state --jq select(.state == \\"OPEN\\") | .number" ]]; then echo 448; exit 0; fi\nexit 1\n`);
   const result = run([], {
     env: {
@@ -108,13 +113,13 @@ const env = {
     },
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /^DONE/m);
-  assert.match(result.stdout, /stage: claim-issue/);
-  assert.match(result.stdout, /next_stage: implement-or-open-pr/);
+  assert.match(result.stdout, /^HANDOFF/m);
+  assert.match(result.stdout, /stage: implement-or-open-pr/);
   assert.equal(fs.readFileSync(goalLogFile, 'utf8').trim(), [
     'verify-bound --phase goal-loop-start',
     'select',
     'claim 675',
+    'find-pr 675',
   ].join('\n'));
   assert.equal(fs.existsSync(goalGhLogFile), false);
   const state = JSON.parse(fs.readFileSync(path.join(goalStateDir, 'issue-675.json'), 'utf8'));
@@ -130,6 +135,7 @@ const env = {
   makeExecutable(path.join(goalEmptyCoreDir, 'verify-bound-worktree.sh'), `#!/usr/bin/env bash\necho "verify-bound $*" >> ${JSON.stringify(goalEmptyLogFile)}\n`);
   makeExecutable(path.join(goalEmptyCoreDir, 'select-next-change.sh'), `#!/usr/bin/env bash\necho "select" >> ${JSON.stringify(goalEmptyLogFile)}\nprintf '%s\\n' '{"selected":null,"reason":"No executable OpenSpec Buddy issue."}'\n`);
   makeExecutable(path.join(goalEmptyCoreDir, 'claim-issue.sh'), `#!/usr/bin/env bash\necho "claim $*" >> ${JSON.stringify(goalEmptyLogFile)}\n`);
+  makeExecutable(path.join(goalEmptyCoreDir, 'find-issue-pr.sh'), `#!/usr/bin/env bash\necho "find-pr $*" >> ${JSON.stringify(goalEmptyLogFile)}\nprintf '{"issue":%s,"pr":null}\\n' "$1"\n`);
   const result = run([], {
     env: {
       OPENSPEC_BUDDY_AUTO_STATE_DIR: goalEmptyStateDir,
@@ -155,6 +161,7 @@ const env = {
   makeExecutable(path.join(goalLocalCoreDir, 'verify-bound-worktree.sh'), `#!/usr/bin/env bash\necho "verify-bound $*" >> ${JSON.stringify(goalLocalLogFile)}\n`);
   makeExecutable(path.join(goalLocalCoreDir, 'select-next-change.sh'), `#!/usr/bin/env bash\necho "select" >> ${JSON.stringify(goalLocalLogFile)}\nprintf '%s\\n' '{"selected":{"number":null,"change_id":"local-change","local_only":true,"no_issue":true}}'\n`);
   makeExecutable(path.join(goalLocalCoreDir, 'claim-issue.sh'), `#!/usr/bin/env bash\necho "claim $*" >> ${JSON.stringify(goalLocalLogFile)}\n`);
+  makeExecutable(path.join(goalLocalCoreDir, 'find-issue-pr.sh'), `#!/usr/bin/env bash\necho "find-pr $*" >> ${JSON.stringify(goalLocalLogFile)}\nprintf '{"issue":%s,"pr":null}\\n' "$1"\n`);
   const result = run([], {
     env: {
       OPENSPEC_BUDDY_AUTO_STATE_DIR: goalLocalStateDir,
@@ -181,6 +188,7 @@ const env = {
   fs.mkdirSync(targetIssueCoreDir, { recursive: true });
   fs.mkdirSync(targetIssueBinDir, { recursive: true });
   makeExecutable(path.join(targetIssueCoreDir, 'claim-issue.sh'), `#!/usr/bin/env bash\necho "claim $*" >> ${JSON.stringify(targetIssueLogFile)}\n`);
+  makeExecutable(path.join(targetIssueCoreDir, 'find-issue-pr.sh'), `#!/usr/bin/env bash\necho "find-pr $*" >> ${JSON.stringify(targetIssueLogFile)}\nprintf '%s\\n' '{"issue":693,"pr":null,"reason":"no exact PR"}'\n`);
   makeExecutable(path.join(targetIssueBinDir, 'gh'), `#!/usr/bin/env bash\necho "$*" >> ${JSON.stringify(targetIssueGhLogFile)}\nif [[ "$*" == "pr view --json number --jq .number" ]]; then echo 448; exit 0; fi\nexit 1\n`);
   const result = run([], {
     env: {
@@ -193,10 +201,12 @@ const env = {
     },
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /^DONE/m);
-  assert.match(result.stdout, /stage: claim-issue/);
-  assert.match(result.stdout, /next_stage: implement-or-open-pr/);
-  assert.equal(fs.readFileSync(targetIssueLogFile, 'utf8').trim(), 'claim 693');
+  assert.match(result.stdout, /^HANDOFF/m);
+  assert.match(result.stdout, /stage: implement-or-open-pr/);
+  assert.equal(fs.readFileSync(targetIssueLogFile, 'utf8').trim(), [
+    'claim 693',
+    'find-pr 693',
+  ].join('\n'));
   assert.equal(fs.existsSync(targetIssueGhLogFile), false);
 
   const second = run([], {
@@ -212,7 +222,135 @@ const env = {
   assert.equal(second.status, 0, second.stderr);
   assert.match(second.stdout, /^HANDOFF/m);
   assert.match(second.stdout, /stage: implement-or-open-pr/);
-  assert.equal(fs.readFileSync(targetIssueLogFile, 'utf8').trim(), 'claim 693');
+  assert.equal(fs.readFileSync(targetIssueLogFile, 'utf8').trim(), [
+    'claim 693',
+    'find-pr 693',
+    'find-pr 693',
+  ].join('\n'));
+}
+
+{
+  const targetIssuePrStateDir = path.join(tmp, 'state-target-issue-pr');
+  const targetIssuePrCoreDir = path.join(tmp, 'core-target-issue-pr');
+  const targetIssuePrLogFile = path.join(tmp, 'commands-target-issue-pr.log');
+  fs.mkdirSync(targetIssuePrCoreDir, { recursive: true });
+  makeExecutable(path.join(targetIssuePrCoreDir, 'claim-issue.sh'), `#!/usr/bin/env bash\necho "claim $*" >> ${JSON.stringify(targetIssuePrLogFile)}\n`);
+  makeExecutable(path.join(targetIssuePrCoreDir, 'find-issue-pr.sh'), `#!/usr/bin/env bash\necho "find-pr $*" >> ${JSON.stringify(targetIssuePrLogFile)}\nprintf '%s\\n' '{"issue":675,"pr":707,"head":"exact-head","state":"OPEN","headRefName":"audit-remediation-arena-publication-context"}'\n`);
+  makeExecutable(path.join(targetIssuePrCoreDir, 'mark-review.sh'), `#!/usr/bin/env bash\necho "mark-review $*" >> ${JSON.stringify(targetIssuePrLogFile)}\n`);
+  makeExecutable(path.join(targetIssuePrCoreDir, 'wait-for-review-clear.sh'), `#!/usr/bin/env bash\necho "wait-review $*" >> ${JSON.stringify(targetIssuePrLogFile)}\n`);
+  makeExecutable(path.join(targetIssuePrCoreDir, 'verify-review-clear.sh'), `#!/usr/bin/env bash\necho "verify-review $*" >> ${JSON.stringify(targetIssuePrLogFile)}\n`);
+  makeExecutable(path.join(targetIssuePrCoreDir, 'verify-achieved-truth.mjs'), `#!/usr/bin/env node\nconsole.log(JSON.stringify({achieved:false,next:'merge-pr',reason:'PR is not merged'}));\n`);
+  const result = run([], {
+    env: {
+      OPENSPEC_BUDDY_AUTO_STATE_DIR: targetIssuePrStateDir,
+      OPENSPEC_BUDDY_CORE_SCRIPT_DIR: targetIssuePrCoreDir,
+      OPENSPEC_BUDDY_AUTO_TARGET_ISSUE: '675',
+    },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^HANDOFF/m);
+  assert.match(result.stdout, /stage: merge-pr/);
+  assert.equal(fs.readFileSync(targetIssuePrLogFile, 'utf8').trim(), [
+    'claim 675',
+    'find-pr 675',
+    'mark-review 675 707',
+    'wait-review 707',
+    'verify-review 707',
+  ].join('\n'));
+  const state = JSON.parse(fs.readFileSync(path.join(targetIssuePrStateDir, 'pr-707.json'), 'utf8'));
+  assert.ok(state.stages.issue_pr_bound);
+  assert.ok(state.stages.merge_gates_passed);
+}
+
+{
+  const mergedBridgeStateDir = path.join(tmp, 'state-merged-bridge');
+  const mergedBridgeCoreDir = path.join(tmp, 'core-merged-bridge');
+  const mergedBridgeLogFile = path.join(tmp, 'commands-merged-bridge.log');
+  fs.mkdirSync(mergedBridgeCoreDir, { recursive: true });
+  makeExecutable(path.join(mergedBridgeCoreDir, 'claim-issue.sh'), `#!/usr/bin/env bash\necho "claim $*" >> ${JSON.stringify(mergedBridgeLogFile)}\n`);
+  makeExecutable(path.join(mergedBridgeCoreDir, 'find-issue-pr.sh'), `#!/usr/bin/env bash\necho "find-pr $*" >> ${JSON.stringify(mergedBridgeLogFile)}\nprintf '%s\\n' '{"issue":675,"pr":707,"head":"merged-head","state":"CLOSED","merged":true,"headRefName":"audit-remediation-arena-publication-context"}'\n`);
+  makeExecutable(path.join(mergedBridgeCoreDir, 'mark-review.sh'), `#!/usr/bin/env bash\necho "mark-review $*" >> ${JSON.stringify(mergedBridgeLogFile)}\n`);
+  makeExecutable(path.join(mergedBridgeCoreDir, 'wait-for-review-clear.sh'), `#!/usr/bin/env bash\necho "wait-review $*" >> ${JSON.stringify(mergedBridgeLogFile)}\n`);
+  makeExecutable(path.join(mergedBridgeCoreDir, 'verify-review-clear.sh'), `#!/usr/bin/env bash\necho "verify-review $*" >> ${JSON.stringify(mergedBridgeLogFile)}\n`);
+  makeExecutable(path.join(mergedBridgeCoreDir, 'verify-achieved-truth.mjs'), `#!/usr/bin/env node\nimport fs from 'node:fs';\nfs.appendFileSync(${JSON.stringify(mergedBridgeLogFile)}, \`achieved-truth \${process.argv.slice(2).join(' ')}\\n\`);\nconsole.log(JSON.stringify({achieved:true,reason:'merged PR already terminal'}));\n`);
+  const result = run([], {
+    env: {
+      OPENSPEC_BUDDY_AUTO_STATE_DIR: mergedBridgeStateDir,
+      OPENSPEC_BUDDY_CORE_SCRIPT_DIR: mergedBridgeCoreDir,
+      OPENSPEC_BUDDY_AUTO_TARGET_ISSUE: '675',
+    },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^DONE/m);
+  assert.match(result.stdout, /stage: achieved/);
+  assert.equal(fs.readFileSync(mergedBridgeLogFile, 'utf8').trim(), [
+    'claim 675',
+    'find-pr 675',
+    'mark-review 675 707',
+    'wait-review 707',
+    'verify-review 707',
+    'achieved-truth 675 707',
+  ].join('\n'));
+}
+
+{
+  const achievedStateDir = path.join(tmp, 'state-achieved-truth');
+  const achievedCoreDir = path.join(tmp, 'core-achieved-truth');
+  const achievedLogFile = path.join(tmp, 'commands-achieved-truth.log');
+  fs.mkdirSync(achievedCoreDir, { recursive: true });
+  makeExecutable(path.join(achievedCoreDir, 'mark-review.sh'), `#!/usr/bin/env bash\necho "mark-review $*" >> ${JSON.stringify(achievedLogFile)}\n`);
+  makeExecutable(path.join(achievedCoreDir, 'wait-for-review-clear.sh'), `#!/usr/bin/env bash\necho "wait-review $*" >> ${JSON.stringify(achievedLogFile)}\n`);
+  makeExecutable(path.join(achievedCoreDir, 'verify-review-clear.sh'), `#!/usr/bin/env bash\necho "verify-review $*" >> ${JSON.stringify(achievedLogFile)}\n`);
+  makeExecutable(path.join(achievedCoreDir, 'verify-achieved-truth.mjs'), `#!/usr/bin/env node\nimport fs from 'node:fs';\nfs.appendFileSync(${JSON.stringify(achievedLogFile)}, \`achieved-truth \${process.argv.slice(2).join(' ')}\\n\`);\nconsole.log(JSON.stringify({achieved:true,reason:'terminal'}));\n`);
+  const result = run(['--issue', '675', '--pr', '707', '--head', 'head-1'], {
+    env: {
+      OPENSPEC_BUDDY_AUTO_STATE_DIR: achievedStateDir,
+      OPENSPEC_BUDDY_CORE_SCRIPT_DIR: achievedCoreDir,
+    },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^DONE/m);
+  assert.match(result.stdout, /stage: achieved/);
+  assert.equal(fs.readFileSync(achievedLogFile, 'utf8').trim(), [
+    'mark-review 675 707',
+    'wait-review 707',
+    'verify-review 707',
+    'achieved-truth 675 707',
+  ].join('\n'));
+  const state = JSON.parse(fs.readFileSync(path.join(achievedStateDir, 'pr-707.json'), 'utf8'));
+  assert.ok(state.stages.achieved);
+}
+
+{
+  const postMergeStateDir = path.join(tmp, 'state-post-merge-achieve');
+  const postMergeCoreDir = path.join(tmp, 'core-post-merge-achieve');
+  const postMergeLogFile = path.join(tmp, 'commands-post-merge-achieve.log');
+  fs.mkdirSync(postMergeCoreDir, { recursive: true });
+  makeExecutable(path.join(postMergeCoreDir, 'mark-review.sh'), `#!/usr/bin/env bash\necho "mark-review $*" >> ${JSON.stringify(postMergeLogFile)}\n`);
+  makeExecutable(path.join(postMergeCoreDir, 'wait-for-review-clear.sh'), `#!/usr/bin/env bash\necho "wait-review $*" >> ${JSON.stringify(postMergeLogFile)}\n`);
+  makeExecutable(path.join(postMergeCoreDir, 'verify-review-clear.sh'), `#!/usr/bin/env bash\necho "verify-review $*" >> ${JSON.stringify(postMergeLogFile)}\n`);
+  makeExecutable(path.join(postMergeCoreDir, 'verify-achieved-truth.mjs'), `#!/usr/bin/env node\nimport fs from 'node:fs';\nconst countFile = ${JSON.stringify(path.join(tmp, 'post-merge-truth.count'))};\nconst count = fs.existsSync(countFile) ? Number(fs.readFileSync(countFile, 'utf8')) + 1 : 1;\nfs.writeFileSync(countFile, String(count));\nfs.appendFileSync(${JSON.stringify(postMergeLogFile)}, \`achieved-truth \${process.argv.slice(2).join(' ')}\\n\`);\nif (count === 1) console.log(JSON.stringify({achieved:false,next:'mark-achieved-post-merge',archivePath:'openspec/changes/archive/2026-06-26-demo',reason:'issue not archived'}));\nelse console.log(JSON.stringify({achieved:true,reason:'terminal after post-merge sync'}));\n`);
+  makeExecutable(path.join(postMergeCoreDir, 'mark-achieved-post-merge.sh'), `#!/usr/bin/env bash\necho "post-merge-achieve $*" >> ${JSON.stringify(postMergeLogFile)}\n`);
+  const result = run(['--issue', '675', '--pr', '707', '--head', 'head-1'], {
+    env: {
+      OPENSPEC_BUDDY_AUTO_STATE_DIR: postMergeStateDir,
+      OPENSPEC_BUDDY_CORE_SCRIPT_DIR: postMergeCoreDir,
+    },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^DONE/m);
+  assert.match(result.stdout, /stage: mark-achieved-post-merge/);
+  assert.equal(fs.readFileSync(postMergeLogFile, 'utf8').trim(), [
+    'mark-review 675 707',
+    'wait-review 707',
+    'verify-review 707',
+    'achieved-truth 675 707',
+    'post-merge-achieve 675 openspec/changes/archive/2026-06-26-demo 707',
+    'achieved-truth 675 707',
+  ].join('\n'));
+  const state = JSON.parse(fs.readFileSync(path.join(postMergeStateDir, 'pr-707.json'), 'utf8'));
+  assert.ok(state.stages.post_merge_achieved);
+  assert.ok(state.stages.achieved);
 }
 
 {
@@ -226,6 +364,7 @@ const env = {
   makeExecutable(path.join(targetPrCoreDir, 'mark-review.sh'), `#!/usr/bin/env bash\necho "mark-review $*" >> ${JSON.stringify(targetPrLogFile)}\n`);
   makeExecutable(path.join(targetPrCoreDir, 'wait-for-review-clear.sh'), `#!/usr/bin/env bash\necho "wait-review $*" >> ${JSON.stringify(targetPrLogFile)}\n`);
   makeExecutable(path.join(targetPrCoreDir, 'verify-review-clear.sh'), `#!/usr/bin/env bash\necho "verify-review $*" >> ${JSON.stringify(targetPrLogFile)}\n`);
+  makeExecutable(path.join(targetPrCoreDir, 'verify-achieved-truth.mjs'), `#!/usr/bin/env node\nimport fs from 'node:fs';\nfs.appendFileSync(${JSON.stringify(targetPrLogFile)}, \`achieved-truth \${process.argv.slice(2).join(' ')}\\n\`);\nconsole.log(JSON.stringify({achieved:false,next:'merge-pr',reason:'PR is not merged'}));\n`);
   makeExecutable(path.join(targetPrBinDir, 'gh'), `#!/usr/bin/env bash\necho "$*" >> ${JSON.stringify(targetPrGhLogFile)}\nif [[ "$*" == "pr view 694 --json body --jq .body" ]]; then echo "origin issue: #693"; exit 0; fi\nif [[ "$*" == "pr view 694 --json headRefOid --jq .headRefOid" ]]; then echo target-head; exit 0; fi\nif [[ "$*" == "pr view --json number --jq .number" ]]; then echo 448; exit 0; fi\nexit 1\n`);
   const result = run([], {
     env: {
@@ -238,11 +377,13 @@ const env = {
     },
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /^DONE/m);
-  assert.match(result.stdout, /stage: wait-review/);
+  assert.match(result.stdout, /^HANDOFF/m);
+  assert.match(result.stdout, /stage: merge-pr/);
   assert.equal(fs.readFileSync(targetPrLogFile, 'utf8').trim(), [
     'mark-review 693 694',
     'wait-review 694',
+    'verify-review 694',
+    'achieved-truth 693 694',
   ].join('\n'));
   const ghLog = fs.readFileSync(targetPrGhLogFile, 'utf8');
   assert.match(ghLog, /pr view 694 --json body --jq \.body/);
@@ -260,6 +401,7 @@ const env = {
   makeExecutable(path.join(bothTargetCoreDir, 'mark-review.sh'), `#!/usr/bin/env bash\necho "mark-review $*" >> ${JSON.stringify(bothTargetLogFile)}\n`);
   makeExecutable(path.join(bothTargetCoreDir, 'wait-for-review-clear.sh'), `#!/usr/bin/env bash\necho "wait-review $*" >> ${JSON.stringify(bothTargetLogFile)}\n`);
   makeExecutable(path.join(bothTargetCoreDir, 'verify-review-clear.sh'), '#!/usr/bin/env bash\nexit 0\n');
+  makeExecutable(path.join(bothTargetCoreDir, 'verify-achieved-truth.mjs'), `#!/usr/bin/env node\nimport fs from 'node:fs';\nfs.appendFileSync(${JSON.stringify(bothTargetLogFile)}, \`achieved-truth \${process.argv.slice(2).join(' ')}\\n\`);\nconsole.log(JSON.stringify({achieved:false,next:'merge-pr',reason:'PR is not merged'}));\n`);
   makeExecutable(path.join(bothTargetBinDir, 'gh'), `#!/usr/bin/env bash\nif [[ "$*" == "pr view 694 --json body --jq .body" ]]; then echo "origin issue: #693"; exit 0; fi\nif [[ "$*" == "pr view 694 --json headRefOid --jq .headRefOid" ]]; then echo target-head; exit 0; fi\nexit 1\n`);
   const result = run([], {
     env: {
@@ -271,9 +413,12 @@ const env = {
     },
   });
   assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^HANDOFF/m);
+  assert.match(result.stdout, /stage: merge-pr/);
   assert.equal(fs.readFileSync(bothTargetLogFile, 'utf8').trim(), [
     'mark-review 693 694',
     'wait-review 694',
+    'achieved-truth 693 694',
   ].join('\n'));
 }
 
@@ -285,6 +430,7 @@ const env = {
   fs.mkdirSync(cliTargetCoreDir, { recursive: true });
   fs.mkdirSync(cliTargetBinDir, { recursive: true });
   makeExecutable(path.join(cliTargetCoreDir, 'claim-issue.sh'), `#!/usr/bin/env bash\necho "claim $*" >> ${JSON.stringify(cliTargetLogFile)}\n`);
+  makeExecutable(path.join(cliTargetCoreDir, 'find-issue-pr.sh'), `#!/usr/bin/env bash\necho "find-pr $*" >> ${JSON.stringify(cliTargetLogFile)}\nprintf '%s\\n' '{"issue":701,"pr":null}'\n`);
   makeExecutable(path.join(cliTargetBinDir, 'gh'), '#!/usr/bin/env bash\nexit 1\n');
   const result = run(['--target-issue', '701'], {
     env: {
@@ -296,8 +442,11 @@ const env = {
     },
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /stage: claim-issue/);
-  assert.equal(fs.readFileSync(cliTargetLogFile, 'utf8').trim(), 'claim 701');
+  assert.match(result.stdout, /stage: implement-or-open-pr/);
+  assert.equal(fs.readFileSync(cliTargetLogFile, 'utf8').trim(), [
+    'claim 701',
+    'find-pr 701',
+  ].join('\n'));
 }
 
 {
@@ -310,6 +459,7 @@ const env = {
   makeExecutable(path.join(cliTargetPrCoreDir, 'mark-review.sh'), `#!/usr/bin/env bash\necho "mark-review $*" >> ${JSON.stringify(cliTargetPrLogFile)}\n`);
   makeExecutable(path.join(cliTargetPrCoreDir, 'wait-for-review-clear.sh'), `#!/usr/bin/env bash\necho "wait-review $*" >> ${JSON.stringify(cliTargetPrLogFile)}\n`);
   makeExecutable(path.join(cliTargetPrCoreDir, 'verify-review-clear.sh'), '#!/usr/bin/env bash\nexit 0\n');
+  makeExecutable(path.join(cliTargetPrCoreDir, 'verify-achieved-truth.mjs'), `#!/usr/bin/env node\nimport fs from 'node:fs';\nfs.appendFileSync(${JSON.stringify(cliTargetPrLogFile)}, \`achieved-truth \${process.argv.slice(2).join(' ')}\\n\`);\nconsole.log(JSON.stringify({achieved:false,next:'merge-pr',reason:'PR is not merged'}));\n`);
   makeExecutable(path.join(cliTargetPrBinDir, 'gh'), `#!/usr/bin/env bash\nif [[ "$*" == "pr view 694 --json body --jq .body" ]]; then echo "origin issue: #693"; exit 0; fi\nif [[ "$*" == "pr view 694 --json headRefOid --jq .headRefOid" ]]; then echo target-head; exit 0; fi\nexit 1\n`);
   const result = run(['--target-pr', '694', '--issue', '999', '--pr', '448', '--head', 'stale-head'], {
     env: {
@@ -319,9 +469,12 @@ const env = {
     },
   });
   assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^HANDOFF/m);
+  assert.match(result.stdout, /stage: merge-pr/);
   assert.equal(fs.readFileSync(cliTargetPrLogFile, 'utf8').trim(), [
     'mark-review 693 694',
     'wait-review 694',
+    'achieved-truth 693 694',
   ].join('\n'));
 }
 
@@ -333,29 +486,63 @@ const env = {
 }
 
 {
-  const result = run(['--issue', '12', '--pr', '34'], { env });
+  const reviewFixStateDir = path.join(tmp, 'state-review-fix');
+  const reviewFixCoreDir = path.join(tmp, 'core-review-fix');
+  const reviewFixLogFile = path.join(tmp, 'commands-review-fix.log');
+  fs.mkdirSync(reviewFixCoreDir, { recursive: true });
+  makeExecutable(path.join(reviewFixCoreDir, 'mark-review.sh'), `#!/usr/bin/env bash\necho "mark-review $*" >> ${JSON.stringify(reviewFixLogFile)}\n`);
+  makeExecutable(path.join(reviewFixCoreDir, 'review-response-gate.sh'), `#!/usr/bin/env bash\necho "review-response-gate $*" >> ${JSON.stringify(reviewFixLogFile)}\n`);
+  makeExecutable(path.join(reviewFixCoreDir, 'wait-for-review-clear.sh'), `#!/usr/bin/env bash\necho "wait-review $*" >> ${JSON.stringify(reviewFixLogFile)}\n`);
+  makeExecutable(path.join(reviewFixCoreDir, 'verify-review-clear.sh'), `#!/usr/bin/env bash\necho "verify-review $*" >> ${JSON.stringify(reviewFixLogFile)}\n`);
+  makeExecutable(path.join(reviewFixCoreDir, 'verify-achieved-truth.mjs'), `#!/usr/bin/env node\nimport fs from 'node:fs';\nfs.appendFileSync(${JSON.stringify(reviewFixLogFile)}, \`achieved-truth \${process.argv.slice(2).join(' ')}\\n\`);\nconsole.log(JSON.stringify({achieved:false,next:'merge-pr',reason:'PR is not merged'}));\n`);
+  const result = run(['--issue', '12', '--pr', '34', '--head', 'fix-head'], {
+    env: {
+      OPENSPEC_BUDDY_AUTO_STATE_DIR: reviewFixStateDir,
+      OPENSPEC_BUDDY_CORE_SCRIPT_DIR: reviewFixCoreDir,
+      OPENSPEC_BUDDY_REVIEW_FIX_CONTEXT: '1',
+    },
+  });
   assert.equal(result.status, 0, result.stderr);
-  const log = fs.readFileSync(logFile, 'utf8');
-  assert.match(log, /mark-review 12 34/);
-  assert.match(log, /wait-review 34/);
-  assert.match(result.stdout, /^DONE/m);
-  assert.match(result.stdout, /stage: wait-review/);
-  assert.doesNotMatch(result.stdout, /helper stdout should stay quiet/);
-  const state = JSON.parse(fs.readFileSync(path.join(stateDir, 'pr-34.json'), 'utf8'));
-  assert.ok(state.stages.mark_review_passed);
-  assert.ok(state.stages.review_requested);
-  assert.ok(state.stages.review_clear);
+  assert.equal(fs.readFileSync(reviewFixLogFile, 'utf8').trim(), [
+    'mark-review 12 34',
+    'review-response-gate 34 --head fix-head',
+    'wait-review 34',
+    'verify-review 34',
+    'achieved-truth 12 34',
+  ].join('\n'));
+  const state = JSON.parse(fs.readFileSync(path.join(reviewFixStateDir, 'pr-34.json'), 'utf8'));
+  assert.ok(state.stages.review_response_gate_passed);
 }
 
 {
   const result = run(['--issue', '12', '--pr', '34'], { env });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(fs.readFileSync(logFile, 'utf8'), /verify-review 34/);
+  const log = fs.readFileSync(logFile, 'utf8');
+  assert.match(log, /mark-review 12 34/);
+  assert.match(log, /wait-review 34/);
+  assert.match(log, /verify-review 34/);
+  assert.match(log, /achieved-truth 12 34/);
+  assert.match(result.stdout, /^HANDOFF/m);
+  assert.match(result.stdout, /stage: merge-pr/);
+  assert.doesNotMatch(result.stdout, /helper stdout should stay quiet/);
+  const state = JSON.parse(fs.readFileSync(path.join(stateDir, 'pr-34.json'), 'utf8'));
+  assert.ok(state.stages.mark_review_passed);
+  assert.ok(state.stages.review_requested);
+  assert.ok(state.stages.review_clear);
+  assert.ok(state.stages.merge_gates_passed);
+}
+
+{
+  const before = fs.readFileSync(logFile, 'utf8');
+  const result = run(['--issue', '12', '--pr', '34'], { env });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(fs.readFileSync(logFile, 'utf8'), /achieved-truth 12 34/);
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, 'pr-34.json'), 'utf8'));
   assert.equal(state.stages.review_clear.head, 'abc123');
   assert.ok(state.stages.merge_gates_passed);
-  assert.match(result.stdout, /stage: merge-gates/);
-  assert.match(result.stdout, /next_stage: merge-or-achieve/);
+  assert.match(result.stdout, /^HANDOFF/m);
+  assert.match(result.stdout, /stage: merge-pr/);
+  assert.ok(fs.readFileSync(logFile, 'utf8').length > before.length);
 }
 
 {
@@ -363,8 +550,8 @@ const env = {
   const result = run(['--issue', '12', '--pr', '34'], { env });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /^HANDOFF/m);
-  assert.match(result.stdout, /stage: merge-or-achieve/);
-  assert.equal(fs.readFileSync(logFile, 'utf8'), before);
+  assert.match(result.stdout, /stage: merge-pr/);
+  assert.ok(fs.readFileSync(logFile, 'utf8').length > before.length);
 }
 
 {
@@ -436,6 +623,7 @@ const env = {
   makeExecutable(path.join(noArgCoreDir, 'mark-review.sh'), `#!/usr/bin/env bash\necho "mark-review $*" >> ${JSON.stringify(noArgLogFile)}\n`);
   makeExecutable(path.join(noArgCoreDir, 'wait-for-review-clear.sh'), `#!/usr/bin/env bash\necho "wait-review $*" >> ${JSON.stringify(noArgLogFile)}\n`);
   makeExecutable(path.join(noArgCoreDir, 'verify-review-clear.sh'), `#!/usr/bin/env bash\necho "verify-review $*" >> ${JSON.stringify(noArgLogFile)}\n`);
+  makeExecutable(path.join(noArgCoreDir, 'verify-achieved-truth.mjs'), `#!/usr/bin/env node\nimport fs from 'node:fs';\nfs.appendFileSync(${JSON.stringify(noArgLogFile)}, \`achieved-truth \${process.argv.slice(2).join(' ')}\\n\`);\nconsole.log(JSON.stringify({achieved:false,next:'merge-pr',reason:'PR is not merged'}));\n`);
   makeExecutable(path.join(noArgBinDir, 'gh'), `#!/usr/bin/env bash\necho "$*" >> ${JSON.stringify(noArgGhLogFile)}\nif [[ "$*" == "pr view 56 --json headRefOid --jq .headRefOid" ]]; then echo inferred-head; exit 0; fi\nexit 1\n`);
   const result = run([], {
     env: {
@@ -447,10 +635,13 @@ const env = {
     },
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /^DONE/m);
+  assert.match(result.stdout, /^HANDOFF/m);
+  assert.match(result.stdout, /stage: merge-pr/);
   assert.equal(fs.readFileSync(noArgLogFile, 'utf8').trim(), [
     'mark-review 55 56',
     'wait-review 56',
+    'verify-review 56',
+    'achieved-truth 55 56',
   ].join('\n'));
   assert.match(fs.readFileSync(noArgGhLogFile, 'utf8'), /pr view 56 --json headRefOid --jq \.headRefOid/);
 }
@@ -464,6 +655,7 @@ const env = {
   makeExecutable(path.join(staleCoreDir, 'mark-review.sh'), '#!/usr/bin/env bash\nexit 0\n');
   makeExecutable(path.join(staleCoreDir, 'wait-for-review-clear.sh'), '#!/usr/bin/env bash\nexit 0\n');
   makeExecutable(path.join(staleCoreDir, 'verify-review-clear.sh'), '#!/usr/bin/env bash\nexit 0\n');
+  makeExecutable(path.join(staleCoreDir, 'verify-achieved-truth.mjs'), '#!/usr/bin/env node\nconsole.log(JSON.stringify({achieved:false,next:"merge-pr",reason:"PR is not merged"}));\n');
   makeExecutable(path.join(staleBinDir, 'gh'), '#!/usr/bin/env bash\nexit 1\n');
   const seedEnv = {
     OPENSPEC_BUDDY_AUTO_STATE_DIR: staleStateDir,

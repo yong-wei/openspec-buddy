@@ -177,8 +177,15 @@ if grep -F 'verify-review-clear' "$GH_LOG_FILE" >/dev/null; then
   echo "request-pr-review.sh should not invoke verify-review-clear helper" >&2
   exit 1
 fi
+if grep -F 'api graphql' "$GH_LOG_FILE" >/dev/null; then
+  echo "request-pr-review.sh should not run reviewThreads GraphQL for a default first request check" >&2
+  exit 1
+fi
+
+: > "$GH_LOG_FILE"
+bash "$helper" 123 --require-threads-resolved
 if ! grep -F 'api graphql' "$GH_LOG_FILE" >/dev/null; then
-  echo "request-pr-review.sh should run the review thread gate before deciding on review requests" >&2
+  echo "request-pr-review.sh --require-threads-resolved should run the review thread gate" >&2
   exit 1
 fi
 
@@ -356,7 +363,7 @@ JSON
 export GH_THREADS_FILE="$tmp_dir/threads-unresolved.json"
 export GH_COMMENT_LOG_FILE="$tmp_dir/comment-unresolved.log"
 set +e
-bash "$helper" 123 > "$tmp_dir/unresolved.out" 2> "$tmp_dir/unresolved.err"
+bash "$helper" 123 --require-threads-resolved > "$tmp_dir/unresolved.out" 2> "$tmp_dir/unresolved.err"
 unresolved_status="$?"
 set -e
 if [[ "$unresolved_status" -eq 0 ]]; then

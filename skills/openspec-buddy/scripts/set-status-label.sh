@@ -3,6 +3,10 @@ set -euo pipefail
 
 issue_number="${1:-}"
 target_status="${2:-}"
+if [[ "$issue_number" == "-h" || "$issue_number" == "--help" ]]; then
+  echo "Usage: set-status-label.sh <issue-number> <status:label>"
+  exit 0
+fi
 if [[ -z "$issue_number" || -z "$target_status" ]]; then
   echo "Usage: set-status-label.sh <issue-number> <status:label>" >&2
   exit 2

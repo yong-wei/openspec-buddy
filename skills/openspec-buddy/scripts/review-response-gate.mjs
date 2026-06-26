@@ -2,10 +2,10 @@
 
 import fs from 'node:fs';
 
-const [mode, threadsFile, reviewerArg, actorArg, headArg = ''] = process.argv.slice(2);
+const [mode, threadsFile, reviewerArg, actorArg, headArg = '', replyPlanFile = ''] = process.argv.slice(2);
 
 if (!mode || !threadsFile || !reviewerArg) {
-  process.stderr.write('Usage: review-response-gate.mjs <check|plan|verify> <review-threads-json> <reviewer-login> [actor-login] [head-sha]\n');
+  process.stderr.write('Usage: review-response-gate.mjs <check|plan|verify|validate-reply-plan|reply-plan-lines> <review-threads-json> <reviewer-login> [actor-login] [head-sha] [reply-plan-json]\n');
   process.exit(2);
 }
 
@@ -51,6 +51,45 @@ function reviewThreadsConnection(value) {
 function normalizeComments(thread) {
   if (Array.isArray(thread?.comments)) return thread.comments;
   return thread?.comments?.nodes || [];
+}
+
+function loadReplyPlan() {
+  if (!replyPlanFile) {
+    process.stderr.write('Reply plan file is required.\n');
+    process.exit(2);
+  }
+  const plan = JSON.parse(fs.readFileSync(replyPlanFile, 'utf8'));
+  const threads = Array.isArray(plan.threads) ? plan.threads : [];
+  if (threads.length === 0) {
+    process.stderr.write('Reply plan must contain at least one thread.\n');
+    process.exit(2);
+  }
+  return threads;
+}
+
+function validateReplyPlanEntries() {
+  if (!head) {
+    process.stderr.write('Reply plan validation requires --head.\n');
+    process.exit(2);
+  }
+  const known = new Set(normalizeThreads(input).map((thread) => thread.id).filter(Boolean));
+  const plan = loadReplyPlan();
+  const errors = [];
+  for (const entry of plan) {
+    if (!entry?.id) errors.push('reply plan entry is missing id');
+    if (!entry?.bodyFile) errors.push(`reply plan entry ${entry?.id || '<unknown>'} is missing bodyFile`);
+    if (String(entry?.head || '').trim().toLowerCase() !== head) {
+      errors.push(`reply plan entry ${entry?.id || '<unknown>'} targets head ${entry?.head || '<empty>'}, expected ${head}`);
+    }
+    if (entry?.id && !known.has(entry.id)) {
+      errors.push(`reply plan thread ${entry.id} does not belong to the current PR`);
+    }
+  }
+  if (errors.length > 0) {
+    for (const error of errors) process.stderr.write(`${error}\n`);
+    process.exit(1);
+  }
+  return plan;
 }
 
 function paginationErrors(value) {
@@ -151,6 +190,20 @@ if (mode === 'verify') {
     process.exit(1);
   }
   process.stdout.write('All actionable Codex review threads are resolved.\n');
+  process.exit(0);
+}
+
+if (mode === 'validate-reply-plan') {
+  validateReplyPlanEntries();
+  process.stdout.write('Reply plan matches current PR review threads and head.\n');
+  process.exit(0);
+}
+
+if (mode === 'reply-plan-lines') {
+  const plan = validateReplyPlanEntries();
+  for (const entry of plan) {
+    process.stdout.write(`${entry.id}\t${entry.bodyFile}\n`);
+  }
   process.exit(0);
 }
 

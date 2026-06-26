@@ -2,10 +2,33 @@
 set -euo pipefail
 
 pr_ref="${1:-}"
+if [[ "$pr_ref" == "-h" || "$pr_ref" == "--help" ]]; then
+  echo "Usage: verify-review-clear.sh <pr-number-or-url> [--pr-file <file>] [--reviews-file <file>] [--commits-file <file>] [--issue-comments-file <file>] [--review-comments-file <file>] [--threads-file <file>]"
+  exit 0
+fi
 if [[ -z "$pr_ref" ]]; then
-  echo "Usage: verify-review-clear.sh <pr-number-or-url>" >&2
+  echo "Usage: verify-review-clear.sh <pr-number-or-url> [--pr-file <file>] [--reviews-file <file>] [--commits-file <file>] [--issue-comments-file <file>] [--review-comments-file <file>] [--threads-file <file>]" >&2
   exit 2
 fi
+shift
+
+provided_pr_file=""
+provided_reviews_file=""
+provided_commits_file=""
+provided_issue_comments_file=""
+provided_review_comments_file=""
+provided_threads_file=""
+while [[ "$#" -gt 0 ]]; do
+  case "$1" in
+    --pr-file) provided_pr_file="${2:-}"; shift 2 ;;
+    --reviews-file) provided_reviews_file="${2:-}"; shift 2 ;;
+    --commits-file) provided_commits_file="${2:-}"; shift 2 ;;
+    --issue-comments-file) provided_issue_comments_file="${2:-}"; shift 2 ;;
+    --review-comments-file) provided_review_comments_file="${2:-}"; shift 2 ;;
+    --threads-file) provided_threads_file="${2:-}"; shift 2 ;;
+    *) echo "Unknown option: $1" >&2; exit 2 ;;
+  esac
+done
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/load-config.sh"
@@ -45,15 +68,29 @@ repo="${repo_nwo#*/}"
 cache_dir="$(buddy_cache_dir "$tmp_dir/gh-cache")"
 "$script_dir/verify-claim-worktree.sh" --pr "$pr_number" >/dev/null
 
-if [[ "${OPENSPEC_BUDDY_REUSE_PR_REST_CACHE:-}" != "1" ]]; then
-  buddy_invalidate_pr_rest_bundle_cache "$cache_dir" "$pr_number"
+if [[ -n "$provided_pr_file" || -n "$provided_reviews_file" || -n "$provided_commits_file" || -n "$provided_issue_comments_file" || -n "$provided_review_comments_file" ]]; then
+  for required_file in "$provided_pr_file" "$provided_reviews_file" "$provided_commits_file" "$provided_issue_comments_file" "$provided_review_comments_file"; do
+    if [[ -z "$required_file" || ! -f "$required_file" ]]; then
+      echo "All REST prefetch files must be supplied and readable." >&2
+      exit 2
+    fi
+  done
+  cp "$provided_pr_file" "$pr_rest_file"
+  cp "$provided_reviews_file" "$reviews_file"
+  cp "$provided_commits_file" "$commits_file"
+  cp "$provided_issue_comments_file" "$issue_comments_file"
+  cp "$provided_review_comments_file" "$review_comments_file"
+else
+  if [[ "${OPENSPEC_BUDDY_REUSE_PR_REST_CACHE:-}" != "1" ]]; then
+    buddy_invalidate_pr_rest_bundle_cache "$cache_dir" "$pr_number"
+  fi
+  buddy_pr_rest_bundle "$repo_nwo" "$pr_number" "$cache_dir"
+  cp "$BUDDY_PR_REST_FILE" "$pr_rest_file"
+  cp "$BUDDY_REVIEWS_FILE" "$reviews_file"
+  cp "$BUDDY_COMMITS_FILE" "$commits_file"
+  cp "$BUDDY_ISSUE_COMMENTS_FILE" "$issue_comments_file"
+  cp "$BUDDY_REVIEW_COMMENTS_FILE" "$review_comments_file"
 fi
-buddy_pr_rest_bundle "$repo_nwo" "$pr_number" "$cache_dir"
-cp "$BUDDY_PR_REST_FILE" "$pr_rest_file"
-cp "$BUDDY_REVIEWS_FILE" "$reviews_file"
-cp "$BUDDY_COMMITS_FILE" "$commits_file"
-cp "$BUDDY_ISSUE_COMMENTS_FILE" "$issue_comments_file"
-cp "$BUDDY_REVIEW_COMMENTS_FILE" "$review_comments_file"
 
 node -e '
 const fs = require("node:fs");
@@ -103,7 +140,11 @@ const output = {
 fs.writeFileSync(prFile, `${JSON.stringify(output)}\n`);
 ' "$pr_rest_file" "$reviews_file" "$commits_file" "$issue_comments_file" "$pr_file"
 
-buddy_review_threads_graphql "$owner" "$repo" "$pr_number" "$cache_dir" >/dev/null
-cp "$BUDDY_REVIEW_THREADS_FILE" "$review_threads_file"
+if [[ -n "$provided_threads_file" ]]; then
+  cp "$provided_threads_file" "$review_threads_file"
+else
+  buddy_review_threads_graphql "$owner" "$repo" "$pr_number" "$cache_dir" >/dev/null
+  cp "$BUDDY_REVIEW_THREADS_FILE" "$review_threads_file"
+fi
 
 node "$script_dir/verify-review-clear.mjs" "$pr_file" "$review_comments_file" "$review_threads_file" "$reviewer"

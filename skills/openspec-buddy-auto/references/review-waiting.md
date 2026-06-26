@@ -41,10 +41,11 @@ clean review, stop the auto loop and mark the issue for human attention.
 Before sleeping, the helper checks two preconditions. First, the current PR
 head must have a fresh `OPENSPEC_BUDDY_PR_REVIEW_REQUEST` comment; otherwise it
 fails immediately and tells the agent to run `request-pr-review.sh`. Second, it
-checks GraphQL `reviewThreads`. If any unresolved actionable Codex `P0`, `P1`,
-or `P2` thread exists, it fails immediately and prints the thread id, path,
-line, and URL. Do not retry the wait helper until `review-response-gate.sh` has
-passed and `request-pr-review.sh` has requested review for the current head.
+uses a lightweight GraphQL thread status query for `id` and `isResolved`. It
+runs the full thread body gate only when unresolved threads exist or the call is
+inside a review-fix context. Do not retry the wait helper until
+`review-response-gate.sh` has passed and `request-pr-review.sh` has requested
+review for the current head.
 
 Forbidden during this phase:
 
@@ -201,6 +202,16 @@ thread with the fix commit or evidence. Resolve the thread only after the reply
 exists. For non-actionable feedback, reply with the rationale and evidence
 before resolving. Silent thread resolution is not allowed.
 
+Use the reply helper instead of hand-written GraphQL:
+
+```bash
+<openspec-buddy-skill-dir>/scripts/reply-review-thread.sh <pr> <thread-id> --head <head-sha> --body-file <reply.md>
+```
+
+The helper verifies that `<head-sha>` is the current PR head, the thread belongs
+to the current PR, and the reply includes either the current head or a
+non-actionable rationale plus verification evidence.
+
 After any review-handling commit is pushed, run the review response gate before
 requesting another review or entering another wait:
 
@@ -212,6 +223,9 @@ The gate reads GraphQL `reviewThreads.nodes[]`, finds unresolved actionable
 Codex threads, requires an agent reply in each same thread with a fix commit or
 non-actionable rationale plus verification evidence, resolves only those
 addressed threads, and re-reads GraphQL to confirm `isResolved=true`.
+If the final re-read fails after resolve due to transient GitHub errors, the
+gate reports `final_verify: transient-failed` and `safe_to_rerun: true`; rerun
+the gate instead of requesting review or merging.
 
 A successful reply comment is not equivalent to thread resolution. The loop may
 continue only after the gate confirms every addressed actionable Codex review

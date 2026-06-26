@@ -2,6 +2,10 @@
 set -euo pipefail
 
 issue_number="${1:-}"
+if [[ "$issue_number" == "-h" || "$issue_number" == "--help" ]]; then
+  echo "Usage: claim-issue.sh [issue-number]"
+  exit 0
+fi
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/load-config.sh"

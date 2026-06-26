@@ -5,6 +5,11 @@ issue_number="${1:-}"
 pr_ref="${2:-}"
 mode="${3:-}"
 
+if [[ "$issue_number" == "-h" || "$issue_number" == "--help" ]]; then
+  echo "Usage: configure-pr-metadata.sh <issue-number> <pr-number-or-url> [--dry-run]"
+  exit 0
+fi
+
 if [[ -z "$issue_number" || -z "$pr_ref" ]]; then
   echo "Usage: configure-pr-metadata.sh <issue-number> <pr-number-or-url> [--dry-run]" >&2
   exit 2

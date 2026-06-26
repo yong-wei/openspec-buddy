@@ -193,6 +193,12 @@ printf '%s\n' \
   '  echo "- No review found from chatgpt-codex-connector." >&2' \
   '  exit 1' \
   'fi' \
+  'if [[ "${VERIFY_MODE:-clean}" == "mixed-stale-unresolved" ]]; then' \
+  '  echo "Review clearance verification failed:" >&2' \
+  '  echo "- Latest review targets old-head, not current head head-1." >&2' \
+  '  echo "- unresolved review thread THREAD_1 contains P1." >&2' \
+  '  exit 1' \
+  'fi' \
   'echo "Review clearance verified for PR #$1 using reviewer chatgpt-codex-connector."' \
   'echo "Clearance source: top-level PR comment after a current-head review request."' \
   > "$tmp_dir/verify-review-clear.sh"
@@ -217,14 +223,42 @@ export OPENSPEC_BUDDY_REVIEW_INITIAL_WAIT_SECONDS=5
 export OPENSPEC_BUDDY_REVIEW_POLL_SECONDS=1
 export OPENSPEC_BUDDY_REVIEW_MAX_WAIT_SECONDS=5
 export VERIFY_LOG_FILE="$tmp_dir/verify-immediate.log"
-if ! timeout 2s "$helper" 123 > "$tmp_dir/immediate-output.txt"; then
-  echo "wait-for-review-clear.sh slept before the first verifier check despite an already-clear review" >&2
+set +e
+timeout 2s "$helper" 123 > "$tmp_dir/immediate-output.txt" 2> "$tmp_dir/immediate-err.txt"
+immediate_status="$?"
+set -e
+if [[ "$immediate_status" -ne 124 ]]; then
+  echo "wait-for-review-clear.sh should stay silent during the initial lightweight wait window" >&2
+  cat "$tmp_dir/immediate-output.txt" >&2
+  cat "$tmp_dir/immediate-err.txt" >&2
   exit 1
 fi
-if ! grep -F 'Review clearance verified for PR #123' "$tmp_dir/immediate-output.txt" >/dev/null; then
-  echo "wait-for-review-clear.sh did not return the immediate verifier clearance output" >&2
+if [[ -e "$VERIFY_LOG_FILE" ]]; then
+  echo "wait-for-review-clear.sh should not call the heavy verifier during the initial lightweight wait window" >&2
+  cat "$VERIFY_LOG_FILE" >&2
   exit 1
 fi
+
+cat > "$tmp_dir/threads-truncated.json" <<JSON
+{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":true},"nodes":[]}}}}}
+JSON
+export GH_THREADS_FILE="$tmp_dir/threads-truncated.json"
+set +e
+timeout 2s "$helper" 123 > "$tmp_dir/truncated-output.txt" 2> "$tmp_dir/truncated-err.txt"
+truncated_status="$?"
+set -e
+if [[ "$truncated_status" -eq 0 || "$truncated_status" -eq 124 ]]; then
+  echo "wait-for-review-clear.sh should fail closed when startup reviewThreads status is truncated" >&2
+  cat "$tmp_dir/truncated-output.txt" >&2
+  cat "$tmp_dir/truncated-err.txt" >&2
+  exit 1
+fi
+if ! grep -F 'GraphQL pagination was truncated' "$tmp_dir/truncated-err.txt" >/dev/null; then
+  echo "wait-for-review-clear.sh did not escalate truncated startup threads to the full gate" >&2
+  cat "$tmp_dir/truncated-err.txt" >&2
+  exit 1
+fi
+export GH_THREADS_FILE="$tmp_dir/threads.json"
 
 export VERIFY_MODE=waitable
 export VERIFY_LOG_FILE="$tmp_dir/verify-waitable.log"
@@ -244,6 +278,24 @@ if [[ "$wait_elapsed" -lt 2 ]]; then
   exit 1
 fi
 
+export VERIFY_MODE=mixed-stale-unresolved
+export VERIFY_LOG_FILE="$tmp_dir/verify-mixed.log"
+export OPENSPEC_BUDDY_REVIEW_INITIAL_WAIT_SECONDS=0
+export OPENSPEC_BUDDY_REVIEW_POLL_SECONDS=1
+export OPENSPEC_BUDDY_REVIEW_MAX_WAIT_SECONDS=1
+set +e
+"$helper" 123 > "$tmp_dir/mixed-output.txt" 2> "$tmp_dir/mixed-err.txt"
+mixed_status="$?"
+set -e
+unset VERIFY_MODE
+if [[ "$mixed_status" -eq 0 || "$mixed_status" -eq 124 ]]; then
+  echo "wait-for-review-clear.sh should fail closed when stale-head diagnostics also contain unresolved actionable threads" >&2
+  cat "$tmp_dir/mixed-output.txt" >&2
+  cat "$tmp_dir/mixed-err.txt" >&2
+  exit 1
+fi
+grep -F 'unresolved review thread THREAD_1' "$tmp_dir/mixed-err.txt" >/dev/null
+
 printf '%s\n' \
   '#!/bin/bash' \
   'set -euo pipefail' \
@@ -252,6 +304,9 @@ printf '%s\n' \
 chmod +x "$tmp_dir/verify-timeout.sh"
 export OPENSPEC_BUDDY_VERIFY_REVIEW_CLEAR_HELPER="$tmp_dir/verify-timeout.sh"
 export OPENSPEC_BUDDY_REVIEW_COMMAND_TIMEOUT_SECONDS=1
+export OPENSPEC_BUDDY_REVIEW_INITIAL_WAIT_SECONDS=0
+export OPENSPEC_BUDDY_REVIEW_POLL_SECONDS=1
+export OPENSPEC_BUDDY_REVIEW_MAX_WAIT_SECONDS=1
 set +e
 timeout 4s "$helper" 123 > "$tmp_dir/timeout-output.txt" 2> "$tmp_dir/timeout-err.txt"
 timeout_status="$?"
@@ -447,11 +502,6 @@ printf '%s\n' \
   'count="$((count + 1))"' \
   'printf "%s" "$count" > "$count_file"' \
   'printf "%s\n" "${OPENSPEC_BUDDY_REUSE_PR_REST_CACHE:-}" >> "${VERIFY_REUSE_LOG_FILE:?}"' \
-  'if [[ "$count" -eq 1 ]]; then' \
-  '  echo "Review clearance verification failed:" >&2' \
-  '  echo "- No review found from chatgpt-codex-connector." >&2' \
-  '  exit 1' \
-  'fi' \
   'cache_dir="${OPENSPEC_BUDDY_GH_CACHE_DIR:?}"' \
   'head_sha="$(node -e '\''const fs=require("node:fs"); const pr=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(pr.head.sha);'\'' "$cache_dir/pr-rest-$1.json")"' \
   'commit_sha="$(node -e '\''const fs=require("node:fs"); const commits=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write((commits[0] && commits[0].sha) || "");'\'' "$cache_dir/commits-$1.json")"' \
@@ -474,7 +524,7 @@ export GH_PR_SEQUENCE_STATIC_COUNT=4
 rm -f "$GH_PR_SEQUENCE_COUNT_FILE"
 
 if ! timeout 10s "$helper" 123 > "$tmp_dir/cache-refresh-output.txt" 2> "$tmp_dir/cache-refresh-err.txt"; then
-  echo "wait-for-review-clear.sh did not refresh commit cache before the second verifier run" >&2
+  echo "wait-for-review-clear.sh did not refresh commit cache before the verifier run" >&2
   cat "$tmp_dir/cache-refresh-output.txt" >&2
   cat "$tmp_dir/cache-refresh-err.txt" >&2
   exit 1
@@ -484,8 +534,8 @@ if ! grep -F 'cached head and commit state agree' "$tmp_dir/cache-refresh-output
   cat "$tmp_dir/cache-refresh-output.txt" >&2
   exit 1
 fi
-if [[ "$(tr '\n' ' ' < "$VERIFY_REUSE_LOG_FILE" | sed 's/ *$//')" != "0 1" ]]; then
-  echo "wait-for-review-clear.sh should only reuse REST cache after the light REST refresh" >&2
+if [[ "$(tr '\n' ' ' < "$VERIFY_REUSE_LOG_FILE" | sed 's/ *$//')" != "1" ]]; then
+  echo "wait-for-review-clear.sh should reuse REST cache after the light REST refresh" >&2
   cat "$VERIFY_REUSE_LOG_FILE" >&2
   exit 1
 fi
@@ -532,16 +582,46 @@ export OPENSPEC_BUDDY_REVIEW_MAX_WAIT_SECONDS=1
 export GH_PR_FILE="$tmp_dir/pr-head-2.json"
 export GH_COMMITS_FILE="$tmp_dir/commits-head-2.json"
 export GH_COMMENT_LOG_FILE="$tmp_dir/comment-retry-timeout.log"
+printf '%s\n' \
+  '#!/bin/bash' \
+  'set -euo pipefail' \
+  'context_file=""' \
+  'while [[ "$#" -gt 0 ]]; do' \
+  '  case "$1" in' \
+  '    --context-file)' \
+  '      context_file="${2:-}"' \
+  '      shift 2' \
+  '      ;;' \
+  '    *)' \
+  '      printf "%s " "$1" >> "${GH_COMMENT_LOG_FILE:?}"' \
+  '      shift' \
+  '      ;;' \
+  '  esac' \
+  'done' \
+  'printf "\n" >> "${GH_COMMENT_LOG_FILE:?}"' \
+  'printf "%s\n" "${OPENSPEC_BUDDY_PR_REVIEW_REQUEST:?}" >> "${GH_COMMENT_LOG_FILE:?}"' \
+  'if [[ -n "$context_file" ]]; then cat "$context_file" >> "${GH_COMMENT_LOG_FILE:?}"; fi' \
+  'node -e '\''const fs=require("node:fs"); const [file, body]=process.argv.slice(1); fs.writeFileSync(file, `${JSON.stringify([{id:99,body,created_at:"2026-01-01T00:05:00Z",user:{login:"yong-wei"},html_url:"https://github.com/opt-de/major/pull/123#issuecomment-99"}])}\n`);'\'' "${GH_ISSUE_COMMENTS_FILE:?}" "${OPENSPEC_BUDDY_PR_REVIEW_REQUEST:?}"' \
+  > "$tmp_dir/request-pr-review-retry.sh"
+chmod +x "$tmp_dir/request-pr-review-retry.sh"
+export OPENSPEC_BUDDY_REQUEST_PR_REVIEW_HELPER="$tmp_dir/request-pr-review-retry.sh"
 rm -f "$GH_COMMENT_LOG_FILE"
 set +e
 timeout 8s "$helper" 123 > "$tmp_dir/retry-timeout-output.txt" 2> "$tmp_dir/retry-timeout-err.txt"
 retry_timeout_status="$?"
 set -e
 unset VERIFY_MODE
+unset OPENSPEC_BUDDY_REQUEST_PR_REVIEW_HELPER
 if [[ "$retry_timeout_status" -ne 124 ]]; then
-  echo "wait-for-review-clear.sh should return 124 after the second wait window times out" >&2
+  echo "wait-for-review-clear.sh should return 124 after the second wait window times out (status=$retry_timeout_status)" >&2
   cat "$tmp_dir/retry-timeout-output.txt" >&2
   cat "$tmp_dir/retry-timeout-err.txt" >&2
+  if [[ -e "$GH_COMMENT_LOG_FILE" ]]; then
+    cat "$GH_COMMENT_LOG_FILE" >&2
+  fi
+  if [[ -e "$GH_LOG_FILE" ]]; then
+    tail -80 "$GH_LOG_FILE" >&2
+  fi
   exit 1
 fi
 if ! grep -F -- "$OPENSPEC_BUDDY_PR_REVIEW_REQUEST" "$GH_COMMENT_LOG_FILE" >/dev/null; then

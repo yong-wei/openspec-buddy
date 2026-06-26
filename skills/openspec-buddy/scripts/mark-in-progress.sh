@@ -2,6 +2,10 @@
 set -euo pipefail
 
 issue_number="${1:-}"
+if [[ "$issue_number" == "-h" || "$issue_number" == "--help" ]]; then
+  echo "Usage: mark-in-progress.sh <issue-number>"
+  exit 0
+fi
 if [[ -z "$issue_number" ]]; then
   echo "Usage: mark-in-progress.sh <issue-number>" >&2
   exit 2

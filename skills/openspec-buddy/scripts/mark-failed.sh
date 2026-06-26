@@ -3,6 +3,10 @@ set -euo pipefail
 
 issue_number="${1:-}"
 reason="${2:-}"
+if [[ "$issue_number" == "-h" || "$issue_number" == "--help" ]]; then
+  echo "Usage: mark-failed.sh <issue-number> <reason>"
+  exit 0
+fi
 if [[ -z "$issue_number" || -z "$reason" ]]; then
   echo "Usage: mark-failed.sh <issue-number> <reason>" >&2
   exit 2

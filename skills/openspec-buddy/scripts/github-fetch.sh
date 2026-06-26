@@ -1020,6 +1020,54 @@ buddy_pr_rest_bundle() {
   [[ -f "$BUDDY_REVIEW_COMMENTS_FILE" && "${OPENSPEC_BUDDY_CACHE_REFRESH:-}" != "1" ]] || buddy_gh_api_paginated_array "repos/$repo_nwo/pulls/$pr_number/comments?per_page=100" > "$BUDDY_REVIEW_COMMENTS_FILE"
 }
 
+buddy_pr_signature_rest() {
+  local repo_nwo="$1"
+  local pr_number="$2"
+  local cache_dir="$3"
+  mkdir -p "$cache_dir"
+  export BUDDY_PR_SIGNATURE_FILE="$cache_dir/pr-signature-${pr_number}.json"
+
+  gh api "repos/$repo_nwo/pulls/$pr_number" | node -e '
+const fs = require("node:fs");
+const pr = JSON.parse(fs.readFileSync(0, "utf8"));
+const signature = {
+  number: pr.number,
+  state: pr.state || "",
+  merged: Boolean(pr.merged || pr.merged_at),
+  head: pr.head?.sha || "",
+  headRefName: pr.head?.ref || "",
+  updatedAt: pr.updated_at || "",
+  comments: pr.comments ?? 0,
+  reviewComments: pr.review_comments ?? 0,
+  commits: pr.commits ?? 0,
+};
+process.stdout.write(`${JSON.stringify(signature)}\n`);
+' > "$BUDDY_PR_SIGNATURE_FILE"
+  printf '%s\n' "$BUDDY_PR_SIGNATURE_FILE"
+}
+
+buddy_issue_status_rest() {
+  local repo_nwo="$1"
+  local issue_number="$2"
+  local cache_dir="$3"
+  mkdir -p "$cache_dir"
+  export BUDDY_ISSUE_STATUS_FILE="$cache_dir/issue-status-${issue_number}.json"
+
+  gh api "repos/$repo_nwo/issues/$issue_number" | node -e '
+const fs = require("node:fs");
+const issue = JSON.parse(fs.readFileSync(0, "utf8"));
+const labels = (issue.labels || []).map((label) => label.name || label).filter(Boolean);
+const status = {
+  number: issue.number,
+  state: String(issue.state || "").toUpperCase(),
+  labels,
+  updatedAt: issue.updated_at || "",
+};
+process.stdout.write(`${JSON.stringify(status)}\n`);
+' > "$BUDDY_ISSUE_STATUS_FILE"
+  printf '%s\n' "$BUDDY_ISSUE_STATUS_FILE"
+}
+
 buddy_review_threads_graphql() {
   local owner="$1"
   local repo="$2"
@@ -1028,7 +1076,7 @@ buddy_review_threads_graphql() {
   mkdir -p "$cache_dir"
   export BUDDY_REVIEW_THREADS_FILE="$cache_dir/review-threads-${pr_number}.json"
 
-  buddy_graphql_api \
+  if ! buddy_graphql_api \
     -f query='
 query($owner: String!, $repo: String!, $number: Int!) {
   repository(owner: $owner, name: $repo) {
@@ -1062,7 +1110,41 @@ query($owner: String!, $repo: String!, $number: Int!) {
 }' \
     -f owner="$owner" \
     -f repo="$repo" \
-    -F number="$pr_number" > "$BUDDY_REVIEW_THREADS_FILE"
+    -F number="$pr_number" > "$BUDDY_REVIEW_THREADS_FILE"; then
+    return 1
+  fi
 
   printf '%s\n' "$BUDDY_REVIEW_THREADS_FILE"
+}
+
+buddy_review_threads_status_graphql() {
+  local owner="$1"
+  local repo="$2"
+  local pr_number="$3"
+  local cache_dir="$4"
+  mkdir -p "$cache_dir"
+  export BUDDY_REVIEW_THREADS_STATUS_FILE="$cache_dir/review-threads-status-${pr_number}.json"
+
+  if ! buddy_graphql_api \
+    -f query='
+query($owner: String!, $repo: String!, $number: Int!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 100) {
+        pageInfo { hasNextPage }
+        nodes {
+          id
+          isResolved
+        }
+      }
+    }
+  }
+}' \
+    -f owner="$owner" \
+    -f repo="$repo" \
+    -F number="$pr_number" > "$BUDDY_REVIEW_THREADS_STATUS_FILE"; then
+    return 1
+  fi
+
+  printf '%s\n' "$BUDDY_REVIEW_THREADS_STATUS_FILE"
 }

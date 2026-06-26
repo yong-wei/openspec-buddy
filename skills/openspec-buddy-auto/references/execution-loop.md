@@ -200,6 +200,15 @@ mapping, current diff, and evidence. The review must explicitly return
 those AC ids. This does not block normal OpenSpec `tasks.md` completion, which
 still must reach `remaining: 0` before archive.
 
+After a PR is merged, archive closeout runs from the bound coordination branch,
+not the claim branch. The driver reads the configured bound base as
+`buddy.boundBase` when present, otherwise
+`origin/$OPENSPEC_BUDDY_BASE_BRANCH`. It then uses
+`verify-achieved-truth.mjs` to decide whether the issue is already terminal,
+whether `mark-achieved-post-merge.sh` can safely synchronize issue and Project
+state, or whether the agent must merge/archive manually first. Do not switch
+back to the claim branch merely to mark a merged PR achieved.
+
 If the user invoked `openspec-buddy-auto --no-pr`, stop before any `gh pr`
 operation. Run local review and verification only, fix findings in the same
 branch, and merge locally onto `$OPENSPEC_BUDDY_BASE_BRANCH` without opening a

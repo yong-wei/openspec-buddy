@@ -81,6 +81,16 @@ if [[ "$1" == "api" && "$2" == "graphql" ]]; then
   fi
   count="$((count + 1))"
   printf '%s' "$count" > "$GRAPHQL_COUNT_FILE"
+  if [[ "${FINAL_FETCH_FAIL_ALWAYS:-0}" == "1" && "$count" -gt 1 ]]; then
+    cat "${THREADS_AFTER_FILE:?}"
+    echo "502 transient" >&2
+    exit 1
+  fi
+  if [[ "${FINAL_FETCH_FAIL_ONCE:-0}" == "1" && "$count" -eq 2 ]]; then
+    cat "${THREADS_AFTER_FILE:?}"
+    echo "502 transient" >&2
+    exit 1
+  fi
   if [[ "$count" -eq 1 ]]; then
     cat "${THREADS_BEFORE_FILE:?}"
   else
@@ -101,6 +111,34 @@ printf '%s\n' "$1" >> "${RESOLVE_LOG_FILE:?}"
 printf 'Review thread %s resolved and verified.\n' "$1"
 EOF
 chmod +x "$tmp_dir/resolve-helper"
+
+cat > "$tmp_dir/reply-helper" <<'EOF'
+#!/bin/bash
+set -euo pipefail
+pr_number="$1"
+thread_id="$2"
+shift 2
+head_sha=""
+body_file=""
+while [[ "$#" -gt 0 ]]; do
+  case "$1" in
+    --head)
+      head_sha="${2:-}"
+      shift 2
+      ;;
+    --body-file)
+      body_file="${2:-}"
+      shift 2
+      ;;
+    *)
+      echo "unexpected reply-helper option: $1" >&2
+      exit 2
+      ;;
+  esac
+done
+printf '%s\t%s\t%s\t%s\n' "$pr_number" "$thread_id" "$head_sha" "$body_file" >> "${REPLY_LOG_FILE:?}"
+EOF
+chmod +x "$tmp_dir/reply-helper"
 
 thread_payload() {
   local output_file="$1"
@@ -163,6 +201,8 @@ run_gate() {
   OPENSPEC_BUDDY_PROJECT_TITLE="OpenSpec Buddy" \
   OPENSPEC_BUDDY_GRAPHQL_MIN_REMAINING=0 \
   OPENSPEC_BUDDY_RESOLVE_REVIEW_THREAD_HELPER="$tmp_dir/resolve-helper" \
+  OPENSPEC_BUDDY_REPLY_REVIEW_THREAD_HELPER="$tmp_dir/reply-helper" \
+  REPLY_LOG_FILE="${REPLY_LOG_FILE:-$tmp_dir/reply-$name.log}" \
     "$helper" "$@"
 }
 
@@ -273,10 +313,85 @@ if ! grep -F 'Review response gate verified for PR #123' "$tmp_dir/reply.out" >/
   cat "$tmp_dir/reply.out" >&2
   exit 1
 fi
+grep -F 'resolved_count: 1' "$tmp_dir/reply.out" >/dev/null
+grep -F 'final_verify: passed' "$tmp_dir/reply.out" >/dev/null
 if [[ "$(cat "$tmp_dir/resolve-with-reply.log")" != "THREAD_1" ]]; then
   echo "review-response-gate did not call resolver for the addressed thread" >&2
   exit 1
 fi
+
+printf '%s\n' 'Fixed in commit abc1234. Verification: npm test passed.' > "$tmp_dir/thread-reply.md"
+node -e '
+const fs = require("node:fs");
+const [file, bodyFile] = process.argv.slice(1);
+fs.writeFileSync(file, `${JSON.stringify({ threads: [{ id: "THREAD_1", head: "wrong-head", bodyFile }] })}\n`);
+' "$tmp_dir/reply-plan-wrong-head.json" "$tmp_dir/thread-reply.md"
+thread_payload "$tmp_dir/reply-plan-wrong-before.json" no no
+thread_payload "$tmp_dir/reply-plan-wrong-after.json" yes yes
+export THREADS_BEFORE_FILE="$tmp_dir/reply-plan-wrong-before.json"
+export THREADS_AFTER_FILE="$tmp_dir/reply-plan-wrong-after.json"
+set +e
+REPLY_LOG_FILE="$tmp_dir/reply-plan-wrong.log" run_gate reply-plan-wrong-head 123 --head head-1 --reply-plan "$tmp_dir/reply-plan-wrong-head.json" >"$tmp_dir/reply-plan-wrong.out" 2>"$tmp_dir/reply-plan-wrong.err"
+reply_plan_wrong_status="$?"
+set -e
+if [[ "$reply_plan_wrong_status" -eq 0 ]]; then
+  echo "review-response-gate should reject a reply plan targeting a different head" >&2
+  exit 1
+fi
+grep -F 'targets head wrong-head, expected head-1' "$tmp_dir/reply-plan-wrong.err" >/dev/null
+if [[ -e "$tmp_dir/reply-plan-wrong.log" ]]; then
+  echo "review-response-gate must not call reply helper for an invalid reply plan" >&2
+  exit 1
+fi
+
+node -e '
+const fs = require("node:fs");
+const [file, bodyFile] = process.argv.slice(1);
+fs.writeFileSync(file, `${JSON.stringify({ threads: [{ id: "THREAD_1", head: "head-1", bodyFile }] })}\n`);
+' "$tmp_dir/reply-plan.json" "$tmp_dir/thread-reply.md"
+thread_payload "$tmp_dir/reply-plan-before.json" no no
+thread_payload "$tmp_dir/reply-plan-after.json" yes yes
+export THREADS_BEFORE_FILE="$tmp_dir/reply-plan-before.json"
+export THREADS_AFTER_FILE="$tmp_dir/reply-plan-after.json"
+REPLY_LOG_FILE="$tmp_dir/reply-plan.log" run_gate reply-plan 123 --head head-1 --reply-plan "$tmp_dir/reply-plan.json" >"$tmp_dir/reply-plan.out"
+if ! grep -F 'no unresolved actionable Codex review threads' "$tmp_dir/reply-plan.out" >/dev/null; then
+  echo "review-response-gate did not complete after reply-plan helper resolved the thread state" >&2
+  cat "$tmp_dir/reply-plan.out" >&2
+  exit 1
+fi
+if [[ "$(cut -f1-3 "$tmp_dir/reply-plan.log")" != $'123\tTHREAD_1\thead-1' ]]; then
+  echo "review-response-gate did not call reply helper with PR, thread, and head" >&2
+  cat "$tmp_dir/reply-plan.log" >&2
+  exit 1
+fi
+
+thread_payload "$tmp_dir/transient-before.json" yes no
+thread_payload "$tmp_dir/transient-after.json" yes yes
+export THREADS_BEFORE_FILE="$tmp_dir/transient-before.json"
+export THREADS_AFTER_FILE="$tmp_dir/transient-after.json"
+export FINAL_FETCH_FAIL_ONCE=1
+run_gate transient-final 123 --head abc123456789 >"$tmp_dir/transient.out"
+unset FINAL_FETCH_FAIL_ONCE
+grep -F 'resolved_count: 1' "$tmp_dir/transient.out" >/dev/null
+grep -F 'final_verify: passed' "$tmp_dir/transient.out" >/dev/null
+
+thread_payload "$tmp_dir/transient-fail-before.json" yes no
+thread_payload "$tmp_dir/transient-fail-after.json" yes yes
+export THREADS_BEFORE_FILE="$tmp_dir/transient-fail-before.json"
+export THREADS_AFTER_FILE="$tmp_dir/transient-fail-after.json"
+set +e
+export FINAL_FETCH_FAIL_ALWAYS=1
+run_gate transient-final-fail 123 --head abc123456789 >"$tmp_dir/transient-fail.out" 2>"$tmp_dir/transient-fail.err"
+transient_fail_status="$?"
+unset FINAL_FETCH_FAIL_ALWAYS
+set -e
+if [[ "$transient_fail_status" -eq 0 ]]; then
+  echo "review-response-gate should fail when final verification fails twice" >&2
+  exit 1
+fi
+grep -F 'resolved_count: 1' "$tmp_dir/transient-fail.out" >/dev/null
+grep -F 'final_verify: transient-failed' "$tmp_dir/transient-fail.out" >/dev/null
+grep -F 'safe_to_rerun: true' "$tmp_dir/transient-fail.out" >/dev/null
 
 thread_payload "$tmp_dir/still-open-before.json" yes no
 thread_payload "$tmp_dir/still-open-after.json" yes no

@@ -43,14 +43,28 @@ Project, and merge state.
 Known receipt stages:
 
 - `claimed`
+- `issue_pr_bound`
 - `in_progress`
 - `pr_opened`
 - `mark_review_passed`
 - `review_requested`
 - `review_clear`
 - `merge_gates_passed`
+- `post_merge_achieved`
 - `merged`
 - `achieved`
+
+The driver is an executor, not a stage hint printer. A successful deterministic
+helper must immediately advance to the next deterministic helper until the
+state reaches `HANDOFF`, `BLOCKED`, or terminal `DONE`. The normal graph is:
+
+```text
+goal-select -> claim-issue -> issue-pr-bridge -> implement-handoff
+issue-pr-bridge -> mark-review -> wait-review -> merge-gates -> achieved-truth
+achieved-truth -> merge-pr-handoff
+achieved-truth -> post-merge-achieve -> achieved
+achieved-truth -> achieved
+```
 
 ## Review Progression
 
@@ -69,7 +83,13 @@ For a GitHub-backed PR:
    <openspec-buddy-skill-dir>/scripts/verify-review-clear.sh <pr>
    ```
 4. `merge_gates_passed` exists:
-   merge the PR, archive the local change, then call `mark-achieved.sh`.
+   ```bash
+   <openspec-buddy-skill-dir>/scripts/verify-achieved-truth.mjs <issue> <pr>
+   ```
+   If the PR is not merged, the driver returns `HANDOFF merge-pr`. If the PR
+   is merged and the archive exists on the configured bound base, the driver
+   runs `mark-achieved-post-merge.sh`. If all terminal issue, Project, archive,
+   review, and parent invariants are already satisfied, it records `achieved`.
 
 Do not manually use `sleep`, `gh pr view`, `gh api`, or text inspection to move
 between these states. If a manual observation contradicts the driver, rerun the
@@ -115,8 +135,12 @@ For a target issue without a PR:
    <openspec-buddy-skill-dir>/scripts/claim-issue.sh <issue>
    ```
 2. `claimed` exists:
-   continue implementation, independent acceptance review, commit, push, and
-   open a ready PR through the Buddy workflow.
+   ```bash
+   <openspec-buddy-skill-dir>/scripts/find-issue-pr.sh <issue>
+   ```
+   If an exact issue-bound PR is found from claim branch and PR body evidence,
+   switch to the PR state machine. If no exact PR exists, hand off
+   implementation and PR opening. Ambient current PRs are ignored.
 
 The driver may hand off implementation after claim; it must not infer an
 unrelated current PR from the worktree while a target issue is active.

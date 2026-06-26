@@ -3,6 +3,10 @@ set -euo pipefail
 
 issue_ref="${1:-}"
 target_status="${2:-}"
+if [[ "$issue_ref" == "-h" || "$issue_ref" == "--help" ]]; then
+  echo "Usage: set-project-status.sh <issue-number-or-url> <status:label>"
+  exit 0
+fi
 if [[ -z "$issue_ref" || -z "$target_status" ]]; then
   echo "Usage: set-project-status.sh <issue-number-or-url> <status:label>" >&2
   exit 2

@@ -2,6 +2,10 @@
 set -euo pipefail
 
 thread_id="${1:-}"
+if [[ "$thread_id" == "-h" || "$thread_id" == "--help" ]]; then
+  echo "Usage: resolve-review-thread.sh <review-thread-node-id>"
+  exit 0
+fi
 if [[ -z "$thread_id" ]]; then
   echo "Usage: resolve-review-thread.sh <review-thread-node-id>" >&2
   exit 2

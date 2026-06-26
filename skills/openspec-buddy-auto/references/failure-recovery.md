@@ -28,6 +28,21 @@ Current Buddy PRs must include `openspec/changes/archive/YYYY-MM-DD-<change_id>/
 and synced main specs before review. If a merged PR lacks that archive path,
 do not mark the issue `status:archived` from metadata alone.
 
+If the merged PR contains the archive path on the configured bound base but the
+issue or Project terminal state drifted, do not switch to the claim branch.
+Run the driver again. It will use:
+
+```bash
+<openspec-buddy-skill-dir>/scripts/verify-achieved-truth.mjs <issue> <pr>
+<openspec-buddy-skill-dir>/scripts/mark-achieved-post-merge.sh <issue> <archive-path> <pr>
+```
+
+This post-merge helper runs from the bound coordination branch, verifies the PR
+is merged, verifies the archive `tasks.md` exists and is complete on
+`buddy.boundBase` or `origin/$OPENSPEC_BUDDY_BASE_BRANCH`, verifies review
+threads are resolved, then synchronizes `status:archived`, Project `Done`,
+Project `End`, issue closeout, and parent reconciliation.
+
 Use this as legacy recovery only:
 
 1. Verify the merged PR, issue number, and `change_id` match.

@@ -2,6 +2,10 @@
 set -euo pipefail
 
 pr_ref="${1:-}"
+if [[ "$pr_ref" == "-h" || "$pr_ref" == "--help" ]]; then
+  echo "Usage: wait-for-review-clear.sh <pr-number-or-url>"
+  exit 0
+fi
 if [[ -z "$pr_ref" ]]; then
   echo "Usage: wait-for-review-clear.sh <pr-number-or-url>" >&2
   exit 2
@@ -18,6 +22,7 @@ poll_wait="${OPENSPEC_BUDDY_REVIEW_POLL_SECONDS:-60}"
 max_wait="${OPENSPEC_BUDDY_REVIEW_MAX_WAIT_SECONDS:-900}"
 reviewer="${OPENSPEC_BUDDY_PR_REVIEW_AUTHOR:-chatgpt-codex-connector}"
 verify_helper="${OPENSPEC_BUDDY_VERIFY_REVIEW_CLEAR_HELPER:-$script_dir/verify-review-clear.sh}"
+request_helper="${OPENSPEC_BUDDY_REQUEST_PR_REVIEW_HELPER:-$script_dir/request-pr-review.sh}"
 command_timeout="${OPENSPEC_BUDDY_REVIEW_COMMAND_TIMEOUT_SECONDS:-60}"
 max_rounds=2
 
@@ -52,32 +57,22 @@ trap 'rm -rf "$tmp_dir"' EXIT
 
 pr_number="$(resolve_pr_number "$pr_ref")"
 repo_nwo="$(buddy_repo_nwo)"
+owner="${repo_nwo%%/*}"
+repo="${repo_nwo#*/}"
 cache_dir="$(buddy_cache_dir "$tmp_dir/gh-cache")"
 "$script_dir/verify-claim-worktree.sh" --pr "$pr_number" >/dev/null
-"$script_dir/verify-review-threads-resolved.sh" "$pr_number"
 last_signature=""
 last_head_sha=""
 started_at="$SECONDS"
 
 probe_state_signature() {
-  local pr_file="$tmp_dir/pull.json"
-
-  run_with_timeout gh api "repos/$repo_nwo/pulls/$pr_number" > "$pr_file"
-  cp "$pr_file" "$cache_dir/pr-rest-$pr_number.json"
-
+  local signature_file
+  signature_file="$(buddy_pr_signature_rest "$repo_nwo" "$pr_number" "$cache_dir")"
   node -e '
 const fs = require("node:fs");
 const pr = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-const signature = {
-  head: pr.head?.sha || "",
-  updatedAt: pr.updated_at || "",
-  comments: pr.comments ?? "",
-  reviewComments: pr.review_comments ?? "",
-  commits: pr.commits ?? "",
-  state: pr.state || "",
-};
-process.stdout.write(JSON.stringify(signature));
-' "$pr_file"
+process.stdout.write(JSON.stringify(pr));
+' "$signature_file"
 }
 
 probe_head_sha() {
@@ -95,9 +90,6 @@ refresh_full_rest_bundle() {
 
 is_waitable_review_failure() {
   local output="$1"
-  if grep -E 'targets .*,? not current head' <<<"$output" >/dev/null; then
-    return 0
-  fi
   if grep -E 'unresolved review thread|contains P[0-2]|requested changes|Latest COMMENTED review .*not an explicit' <<<"$output" >/dev/null; then
     return 1
   fi
@@ -140,6 +132,50 @@ verify_current_head_request_gate() {
     "$script_dir/verify-current-head-review-request.sh" "$pr_number" >/dev/null
 }
 
+verify_current_head_request_light_gate() {
+  local signature_file pr_file commits_file comments_file request_state
+  signature_file="$(buddy_pr_signature_rest "$repo_nwo" "$pr_number" "$cache_dir")"
+  pr_file="$tmp_dir/current-head-pr.json"
+  commits_file="$tmp_dir/current-head-commits.json"
+  comments_file="$tmp_dir/current-head-comments.json"
+  node -e '
+const fs = require("node:fs");
+const signature = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+process.stdout.write(`${JSON.stringify({ head: { sha: signature.head || "" } })}\n`);
+' "$signature_file" > "$pr_file"
+  buddy_gh_api_paginated_array "repos/$repo_nwo/pulls/$pr_number/commits?per_page=100" > "$commits_file"
+  buddy_gh_api_paginated_array "repos/$repo_nwo/issues/$pr_number/comments?per_page=100" > "$comments_file"
+  request_state="$(node "$script_dir/review-request-state.mjs" "$OPENSPEC_BUDDY_PR_REVIEW_REQUEST" "$pr_file" "$commits_file" "$comments_file")"
+  if [[ "$request_state" == "present-current-head" ]]; then
+    return 0
+  fi
+  {
+    echo "Current head has no fresh PR review request for $pr_number ($request_state)."
+    echo "Run request-pr-review.sh $pr_number before wait-for-review-clear.sh."
+  } >&2
+  return 1
+}
+
+verify_startup_threads_gate() {
+  if [[ "${OPENSPEC_BUDDY_REVIEW_FIX_CONTEXT:-0}" == "1" ]]; then
+    "$script_dir/verify-review-threads-resolved.sh" "$pr_number"
+    return
+  fi
+  local status_file
+  status_file="$(buddy_review_threads_status_graphql "$owner" "$repo" "$pr_number" "$cache_dir")"
+  if node -e '
+const fs = require("node:fs");
+const data = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+const connection = data?.data?.repository?.pullRequest?.reviewThreads || {};
+const nodes = connection?.nodes || data?.reviewThreads || [];
+if (connection?.pageInfo?.hasNextPage === true) process.exit(2);
+process.exit(nodes.some((thread) => thread.isResolved === false) ? 1 : 0);
+' "$status_file"; then
+    return 0
+  fi
+  "$script_dir/verify-review-threads-resolved.sh" "$pr_number"
+}
+
 sleep_if_needed() {
   local seconds="$1"
   if [[ "$seconds" -gt 0 ]]; then
@@ -150,12 +186,12 @@ sleep_if_needed() {
 run_full_check_after_change() {
   refresh_full_rest_bundle
   if ! verify_current_head_request_gate 1; then
+    echo "Current-head review request gate failed during review wait full check." >&2
     return 2
   fi
   set +e
   run_clear_gate 1
   gate_status="$?"
-  set -e
   return "$gate_status"
 }
 
@@ -181,22 +217,11 @@ request_retry_review() {
   local context_file="$tmp_dir/review-wait-retry-${round}.md"
   write_retry_context "$round" "$context_file"
   OPENSPEC_BUDDY_GH_CACHE_DIR="$cache_dir" \
-    run_with_timeout "$script_dir/request-pr-review.sh" "$pr_number" --force --context-file "$context_file" >/dev/null
+    run_with_timeout "$request_helper" "$pr_number" --force --context-file "$context_file" >/dev/null
 }
 
-verify_current_head_request_gate 0
-
-set +e
-run_clear_gate 0
-gate_status="$?"
-set -e
-
-if [[ "$gate_status" -eq 0 ]]; then
-  exit 0
-fi
-if [[ "$gate_status" -eq 2 ]]; then
-  exit 1
-fi
+verify_current_head_request_light_gate
+verify_startup_threads_gate
 
 round=1
 while [[ "$round" -le "$max_rounds" ]]; do
@@ -257,6 +282,24 @@ while [[ "$round" -le "$max_rounds" ]]; do
       exit 1
     fi
     last_signature="$signature"
+  fi
+
+  boundary_signature="$(probe_state_signature)"
+  last_head_sha="$(probe_head_sha "$boundary_signature")"
+  if [[ "$boundary_signature" != "$last_signature" ]]; then
+    last_signature="$boundary_signature"
+  fi
+
+  set +e
+  run_full_check_after_change
+  gate_status="$?"
+  set -e
+
+  if [[ "$gate_status" -eq 0 ]]; then
+    exit 0
+  fi
+  if [[ "$gate_status" -eq 2 ]]; then
+    exit 1
   fi
 
   if [[ "$round" -lt "$max_rounds" ]]; then

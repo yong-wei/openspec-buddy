@@ -5,6 +5,11 @@ issue_ref="${1:-}"
 field_name="${2:-}"
 date_value="${3:-}"
 
+if [[ "$issue_ref" == "-h" || "$issue_ref" == "--help" ]]; then
+  echo "Usage: set-project-date.sh <issue-number-or-url> <Start|End> <YYYY-MM-DD>"
+  exit 0
+fi
+
 if [[ -z "$issue_ref" || -z "$field_name" || -z "$date_value" ]]; then
   echo "Usage: set-project-date.sh <issue-number-or-url> <Start|End> <YYYY-MM-DD>" >&2
   exit 2

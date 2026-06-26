@@ -7,6 +7,10 @@ allow_detached=0
 
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
+    -h|--help)
+      echo "Usage: verify-bound-worktree.sh --phase <base-sync|pre-claim|goal-loop-start|post-merge|active-claim|readonly> [--branch <name>] [--allow-detached]"
+      exit 0
+      ;;
     --phase)
       phase="${2:-}"
       shift 2

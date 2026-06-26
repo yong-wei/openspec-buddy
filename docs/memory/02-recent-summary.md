@@ -34,6 +34,7 @@
 - `v0.15.0` 发布线将两个 driver 改为默认无参执行：确定性 helper 成功时静默推进并只返回 `DONE`，失败返回 `BLOCKED`，需要代理接管时返回 `HANDOFF`；技能入口明确要求 driver 运行期间不得执行命令、查询 GitHub、检查时间或输出进度，必须静默等待 driver 反馈。
 - `v0.16.0` 发布线为 Buddy Auto driver 增加用户指定目标绑定：`OPENSPEC_BUDDY_AUTO_TARGET_ISSUE` 不会被当前工作树历史 PR 覆盖，`OPENSPEC_BUDDY_AUTO_TARGET_PR` 只从目标 PR 读取 origin issue 和 head；issue-only 目标由 driver 执行 `claim-issue.sh` 并记录 `claimed` receipt 后再 handoff 实现。
 - `v0.17.0` 发布线修复 Buddy Auto goal-loop 空上下文入口：只有 `OPENSPEC_BUDDY_AUTO_GOAL=1` 或 `--goal` 明确授权时，driver 才会在无 issue/PR 上下文时运行 selector，并把选中的 issue-backed 候选转入 `claim-issue.sh`；普通空上下文仍停止，且 goal 模式不再被协调分支上的历史 PR 推断覆盖。
+- `v0.18.0` 发布线将 Buddy Auto driver 推进为确定性状态机执行器：claim 后自动精确发现 issue-bound PR，review 阶段连续执行 mark-review/wait/merge gates，合并后通过 achievement truth 与 post-merge helper 在绑定协调分支同步 issue/Project 终态；同时新增 same-thread review reply helper、review-response-gate 可重跑输出、轻量 PR/thread 查询和高频 helper `--help`。
 
 ## 当前警惕点
 
