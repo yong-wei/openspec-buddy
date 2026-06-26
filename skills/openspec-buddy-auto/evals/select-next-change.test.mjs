@@ -126,6 +126,30 @@ const baseInput = {
 
 {
   const result = runSelector({
+    activeChanges: ["older-ready", "next-ready"],
+    excludeIssues: [22],
+    issues: [
+      issue({
+        number: 22,
+        changeId: "older-ready",
+        series: "alpha",
+        risk: "low",
+      }),
+      issue({
+        number: 23,
+        changeId: "next-ready",
+        series: "alpha",
+        risk: "low",
+      }),
+    ],
+  });
+  assert.equal(result.selected.change_id, "next-ready");
+  assert.equal(result.selected.number, 23);
+  assert.equal(result.rejected.find((entry) => entry.number === 22).reason, "excluded by active lane");
+}
+
+{
+  const result = runSelector({
     activeChanges: ["claimed-work", "ready-work"],
     issues: [
       issue({

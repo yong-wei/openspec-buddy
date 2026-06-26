@@ -43,6 +43,13 @@ claim comment whose `worktree_alias` or `worktree_path_hash` belongs to another
 worker. Treat `foreign-claim-detected` as a hard stop unless the user explicitly
 requests a takeover workflow.
 
+In explicit multi-lane mode, the worktree remains single-writer. A lane may be
+parked only after the PR is committed, pushed, coordinated by `mark-review.sh`,
+has a current-head review request, and the worktree is clean. Do not park or
+switch lanes during implementation, local subagent review, uncommitted
+review-fix work, same-thread review replies, review-response gate, merge,
+archive, or achievement.
+
 ## Claim
 
 For GitHub-coordinated changes, use `openspec-buddy claim [issue-number]`. If
@@ -217,6 +224,11 @@ PR. In this mode, skip `mark-review.sh`, `wait-for-review-clear.sh`,
 issue state exists. This exception applies only to a selected local-only change
 created through `openspec-buddy propose --no-issue`; issue-backed changes keep
 the standard PR and issue synchronization flow.
+
+In multi-lane mode, a successful `mark-review.sh` plus current-head review
+request is the first point where the scheduler may park the lane. Before
+switching away, it must verify the PR head, current branch, remote branch,
+current-head review request, and claim worktree guard.
 
 ## Review Fix Loop
 

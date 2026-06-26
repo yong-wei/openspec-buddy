@@ -7,6 +7,12 @@ is running. Do not use Codex automations, heartbeat automations, reminders, or
 background monitors: they run in parallel and can break the one-change-at-a-time
 workflow.
 
+In explicit multi-lane mode, the same silence rule applies to
+`buddy-auto-lane-driver.mjs`. The lane driver may park a clean lane that is
+already committed, pushed, and waiting for a current-head Codex review, then
+move the single foreground worktree to another lane. This is pooled waiting, not
+parallel implementation.
+
 The wait should block the current execution flow with exactly one command:
 
 ```bash
@@ -32,11 +38,27 @@ commit count, and state. Only when that lightweight state changes does the
 helper refresh PR reviews, commits, issue comments, and review comments, then
 run `verify-review-clear.sh`.
 
+The reusable non-blocking helpers are:
+
+```bash
+<openspec-buddy-skill-dir>/scripts/probe-review-state.sh <pr-number-or-url>
+<openspec-buddy-skill-dir>/scripts/check-review-clear-once.sh <pr-number-or-url>
+```
+
+`probe-review-state.sh` is REST-light and must not call GraphQL or the full
+review verifier. `check-review-clear-once.sh` performs one full review truth
+check and must not also run a separate thread gate in the same normal check,
+because `verify-review-clear.sh` already reads reviewThreads.
+
 If the first 900 second window ends without a current-head clean review, the
 helper immediately calls `request-pr-review.sh --force --context-file
 <generated-context>` so the fixed review request is followed by retry context,
 then waits one more 900 second window. If the second window also ends without a
 clean review, stop the auto loop and mark the issue for human attention.
+
+In multi-lane mode, retry requests are deduplicated with a stable comment
+marker containing lane id, head sha, and retry round. Do not rely only on local
+lane state before sending a forced retry request.
 
 Before sleeping, the helper checks two preconditions. First, the current PR
 head must have a fresh `OPENSPEC_BUDDY_PR_REVIEW_REQUEST` comment; otherwise it

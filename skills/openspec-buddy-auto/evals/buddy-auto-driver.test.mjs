@@ -263,6 +263,38 @@ const env = {
 }
 
 {
+  const yieldStateDir = path.join(tmp, 'state-review-yield');
+  const yieldCoreDir = path.join(tmp, 'core-review-yield');
+  const yieldLogFile = path.join(tmp, 'commands-review-yield.log');
+  fs.mkdirSync(yieldCoreDir, { recursive: true });
+  makeExecutable(path.join(yieldCoreDir, 'claim-issue.sh'), `#!/usr/bin/env bash\necho "claim $*" >> ${JSON.stringify(yieldLogFile)}\n`);
+  makeExecutable(path.join(yieldCoreDir, 'find-issue-pr.sh'), `#!/usr/bin/env bash\necho "find-pr $*" >> ${JSON.stringify(yieldLogFile)}\nprintf '%s\\n' '{"issue":675,"pr":707,"head":"exact-head","state":"OPEN","headRefName":"audit-remediation-arena-publication-context"}'\n`);
+  makeExecutable(path.join(yieldCoreDir, 'mark-review.sh'), `#!/usr/bin/env bash\necho "mark-review $*" >> ${JSON.stringify(yieldLogFile)}\n`);
+  makeExecutable(path.join(yieldCoreDir, 'wait-for-review-clear.sh'), `#!/usr/bin/env bash\necho "wait-review $*" >> ${JSON.stringify(yieldLogFile)}\n`);
+  makeExecutable(path.join(yieldCoreDir, 'verify-review-clear.sh'), `#!/usr/bin/env bash\necho "verify-review $*" >> ${JSON.stringify(yieldLogFile)}\n`);
+  const result = run([], {
+    env: {
+      OPENSPEC_BUDDY_AUTO_STATE_DIR: yieldStateDir,
+      OPENSPEC_BUDDY_CORE_SCRIPT_DIR: yieldCoreDir,
+      OPENSPEC_BUDDY_AUTO_TARGET_ISSUE: '675',
+      OPENSPEC_BUDDY_AUTO_REVIEW_WAIT_MODE: 'yield',
+    },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^DONE/m);
+  assert.match(result.stdout, /stage: review-yield/);
+  assert.equal(fs.readFileSync(yieldLogFile, 'utf8').trim(), [
+    'claim 675',
+    'find-pr 675',
+    'mark-review 675 707',
+  ].join('\n'));
+  const state = JSON.parse(fs.readFileSync(path.join(yieldStateDir, 'pr-707.json'), 'utf8'));
+  assert.ok(state.stages.mark_review_passed);
+  assert.ok(state.stages.review_requested);
+  assert.equal(state.stages.review_clear, undefined);
+}
+
+{
   const mergedBridgeStateDir = path.join(tmp, 'state-merged-bridge');
   const mergedBridgeCoreDir = path.join(tmp, 'core-merged-bridge');
   const mergedBridgeLogFile = path.join(tmp, 'commands-merged-bridge.log');

@@ -68,10 +68,28 @@ const active = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
 const relationships = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
 const currentSeries = process.argv[3] || "";
 const activeChanges = active.changes || active;
+const excludeIssues = new Set();
+for (const value of String(process.env.OPENSPEC_BUDDY_EXCLUDE_ISSUES || "").split(",")) {
+  const number = Number(value.trim());
+  if (Number.isFinite(number) && number > 0) excludeIssues.add(number);
+}
+const excludeFile = process.env.OPENSPEC_BUDDY_EXCLUDE_ISSUES_FILE || "";
+if (excludeFile) {
+  const raw = fs.readFileSync(excludeFile, "utf8").trim();
+  if (raw) {
+    const parsed = JSON.parse(raw);
+    const values = Array.isArray(parsed) ? parsed : parsed.issues || parsed.excludeIssues || [];
+    for (const value of values) {
+      const number = Number(value);
+      if (Number.isFinite(number) && number > 0) excludeIssues.add(number);
+    }
+  }
+}
 process.stdout.write(JSON.stringify({
   activeChanges,
   issues: relationships.issues || relationships,
   currentSeries,
+  excludeIssues: [...excludeIssues],
 }, null, 2));
 ' "$tmp_dir/openspec.json" "$tmp_dir/issues.json" "$current_series" \
   | node "$script_dir/select-next-change.mjs"

@@ -59,21 +59,34 @@ OPENSPEC_BUDDY_AUTO_GOAL=1 <openspec-buddy-auto-skill-dir>/scripts/buddy-auto-dr
 Goal authorization is the only empty-context path that may run the selector and
 claim the next issue. Without it, an empty worktree context must stop.
 
+## Multi-Lane Opt-In
+
+Use multi-lane mode only when the user explicitly asks to work on another issue
+while submitted PRs wait for online Codex review:
+
+```bash
+OPENSPEC_BUDDY_AUTO_GOAL=1 OPENSPEC_BUDDY_AUTO_LANES=2 <openspec-buddy-auto-skill-dir>/scripts/buddy-auto-lane-driver.mjs
+```
+
+After starting the lane driver, obey the same silence rule. Multi-lane is
+single-writer scheduling, not parallel implementation; do not mix it with a
+concurrently running single-lane driver in the same worktree. Details live in
+`references/driver-states.md` and `references/review-waiting.md`.
+
 If it reports `BLOCKED`, fix only that blocker. If it reports `HANDOFF`, do
 only the requested agent work. After agent-owned work or external state changes,
 run the driver again.
 
 The driver writes local receipts under `openspec/.buddy-cache/auto-state/`.
-Receipts do not replace GitHub truth; they only prevent the agent from skipping
-the required Buddy helper sequence.
+Receipts do not replace GitHub truth; they only prevent skipped helper sequence.
 
 ## Required References
 
-- `references/driver-states.md`: state receipts and next-command rules
+- `references/driver-states.md`: receipts, lane states, and next-command rules
 - `references/selection-rules.md`: executable issue selection
-- `references/execution-loop.md`: detailed one-change lifecycle
-- `references/review-waiting.md`: foreground review wait and review-fix loop
-- `references/failure-recovery.md`: stale claim, unsafe recovery, and stop conditions
+- `references/execution-loop.md`: one-change lifecycle
+- `references/review-waiting.md`: review wait and review-fix loop
+- `references/failure-recovery.md`: stale claim and stop conditions
 
 ## GitHub-Backed Path
 
