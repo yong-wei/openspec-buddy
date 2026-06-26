@@ -102,7 +102,6 @@ mutation($threadId: ID!, $body: String!) {
     comment {
       id
       url
-      pullRequestReviewThread { id }
     }
   }
 }' \
@@ -114,7 +113,7 @@ const fs = require("node:fs");
 const [file, expectedThread] = process.argv.slice(1);
 const data = JSON.parse(fs.readFileSync(file, "utf8"));
 const comment = data?.data?.addPullRequestReviewThreadReply?.comment;
-if (!comment?.id || comment?.pullRequestReviewThread?.id !== expectedThread) {
+if (!comment?.id) {
   process.stderr.write("Could not verify review thread reply mutation result.\n");
   process.exit(1);
 }

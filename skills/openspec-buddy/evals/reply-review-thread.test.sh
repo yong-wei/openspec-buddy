@@ -45,7 +45,11 @@ if [[ "$1" == "api" && "$2" == "rate_limit" ]]; then
 fi
 if [[ "$1" == "api" && "$2" == "graphql" ]]; then
   if grep -F 'addPullRequestReviewThreadReply' <<<"$*" >/dev/null; then
-    printf '{"data":{"addPullRequestReviewThreadReply":{"comment":{"id":"COMMENT_1","url":"https://example.test/comment","pullRequestReviewThread":{"id":"THREAD_1"}}}}}\n'
+    if grep -F 'pullRequestReviewThread {' <<<"$*" >/dev/null; then
+      echo "unsupported field pullRequestReviewThread" >&2
+      exit 1
+    fi
+    printf '{"data":{"addPullRequestReviewThreadReply":{"comment":{"id":"COMMENT_1","url":"https://example.test/comment"}}}}\n'
   else
     cat "${THREADS_FILE:?}"
   fi

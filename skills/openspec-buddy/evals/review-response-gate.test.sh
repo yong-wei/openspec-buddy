@@ -29,6 +29,17 @@ case "${1:-}" in
       exit 0
     fi
     ;;
+  config)
+    if [[ "${ENABLE_BOUND_CONFIG:-0}" == "1" && "${2:-}" == "--worktree" && "${3:-}" == "--get" && "${4:-}" == "buddy.boundBranch" ]]; then
+      printf 'buddy-test-branch\n'
+      exit 0
+    fi
+    if [[ "${ENABLE_BOUND_CONFIG:-0}" == "1" && "${2:-}" == "--worktree" && "${3:-}" == "--get" && "${4:-}" == "buddy.boundBase" ]]; then
+      printf 'origin/integration\n'
+      exit 0
+    fi
+    exit 1
+    ;;
   worktree)
     if [[ "${2:-}" == "list" && "${3:-}" == "--porcelain" ]]; then
       printf 'worktree %s\nHEAD abc123\nbranch refs/heads/buddy-test-branch\n' "${OPENSPEC_BUDDY_REPO_ROOT:?}"
@@ -317,6 +328,16 @@ grep -F 'resolved_count: 1' "$tmp_dir/reply.out" >/dev/null
 grep -F 'final_verify: passed' "$tmp_dir/reply.out" >/dev/null
 if [[ "$(cat "$tmp_dir/resolve-with-reply.log")" != "THREAD_1" ]]; then
   echo "review-response-gate did not call resolver for the addressed thread" >&2
+  exit 1
+fi
+
+thread_payload "$tmp_dir/post-merge-check.json" yes yes
+export THREADS_BEFORE_FILE="$tmp_dir/post-merge-check.json"
+export THREADS_AFTER_FILE="$tmp_dir/post-merge-check.json"
+ENABLE_BOUND_CONFIG=1 run_gate post-merge-check 123 --check-only --post-merge >"$tmp_dir/post-merge-check.out"
+if ! grep -F 'No unresolved actionable Codex review threads found.' "$tmp_dir/post-merge-check.out" >/dev/null; then
+  echo "review-response-gate --post-merge --check-only did not verify resolved threads" >&2
+  cat "$tmp_dir/post-merge-check.out" >&2
   exit 1
 fi
 

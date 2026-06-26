@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
-  echo "Usage: review-response-gate.sh <pr-number-or-url> [--head <sha>] [--check-only] [--reply-plan <json-file>]"
+  echo "Usage: review-response-gate.sh <pr-number-or-url> [--head <sha>] [--check-only] [--post-merge] [--reply-plan <json-file>]"
   exit 0
 fi
 
@@ -10,12 +10,13 @@ pr_ref="${1:-}"
 shift || true
 
 if [[ -z "$pr_ref" ]]; then
-  echo "Usage: review-response-gate.sh <pr-number-or-url> [--head <sha>] [--check-only] [--reply-plan <json-file>]" >&2
+  echo "Usage: review-response-gate.sh <pr-number-or-url> [--head <sha>] [--check-only] [--post-merge] [--reply-plan <json-file>]" >&2
   exit 2
 fi
 
 head_sha=""
 check_only=0
+post_merge=0
 reply_plan=""
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
@@ -29,6 +30,10 @@ while [[ "$#" -gt 0 ]]; do
       ;;
     --check-only)
       check_only=1
+      shift
+      ;;
+    --post-merge)
+      post_merge=1
       shift
       ;;
     --reply-plan)
@@ -73,7 +78,11 @@ repo_nwo="$(buddy_repo_nwo)"
 owner="${repo_nwo%%/*}"
 repo="${repo_nwo#*/}"
 cache_dir="$(buddy_cache_dir "$tmp_dir/gh-cache")"
-"$script_dir/verify-claim-worktree.sh" --pr "$pr_number" >/dev/null
+if [[ "$post_merge" == "1" ]]; then
+  "$script_dir/verify-bound-worktree.sh" --phase post-merge >/dev/null
+else
+  "$script_dir/verify-claim-worktree.sh" --pr "$pr_number" >/dev/null
+fi
 reviewer="${OPENSPEC_BUDDY_PR_REVIEW_AUTHOR:-chatgpt-codex-connector}"
 actor="${OPENSPEC_BUDDY_REVIEW_RESPONSE_AUTHOR:-}"
 resolver="${OPENSPEC_BUDDY_RESOLVE_REVIEW_THREAD_HELPER:-$script_dir/resolve-review-thread.sh}"

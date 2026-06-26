@@ -94,7 +94,7 @@ chmod +x "$tmp_dir/verify-threads"
 cat > "$tmp_dir/mark-achieved" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-printf '%s\n' "$*" >> "${MARK_LOG_FILE:?}"
+printf 'post_merge=%s args=%s\n' "${OPENSPEC_BUDDY_POST_MERGE:-0}" "$*" >> "${MARK_LOG_FILE:?}"
 EOF
 chmod +x "$tmp_dir/mark-achieved"
 
@@ -124,8 +124,12 @@ fs.writeFileSync(file, `${JSON.stringify({
 write_pr "$tmp_dir/merged.json" "2026-06-26T00:00:00Z" $'Origin issue: #42\n<!-- openspec-buddy-origin-issue:42 -->'
 export PR_JSON_FILE="$tmp_dir/merged.json"
 "$helper" 42 openspec/changes/archive/2026-06-26-demo 123
-if [[ "$(cat "$MARK_LOG_FILE")" != "42 openspec/changes/archive/2026-06-26-demo 123" ]]; then
-  echo "mark-achieved-post-merge should delegate to mark-achieved after all gates pass" >&2
+if [[ "$(cat "$MARK_LOG_FILE")" != "post_merge=1 args=42 openspec/changes/archive/2026-06-26-demo 123" ]]; then
+  echo "mark-achieved-post-merge should delegate to mark-achieved with internal post-merge mode after all gates pass" >&2
+  exit 1
+fi
+if [[ "$(cat "$THREAD_LOG_FILE")" != "123 --post-merge" ]]; then
+  echo "mark-achieved-post-merge should verify review threads in post-merge mode" >&2
   exit 1
 fi
 
@@ -174,5 +178,31 @@ if [[ "$wrong_origin_status" -eq 0 ]]; then
   exit 1
 fi
 grep -F 'does not match issue #42' "$tmp_dir/wrong-origin.err" >/dev/null
+
+set +e
+OPENSPEC_BUDDY_POST_MERGE=1 \
+  "$repo_root/skills/openspec-buddy/scripts/mark-achieved.sh" 42 openspec/changes/archive/2026-06-26-demo >"$tmp_dir/direct-post-merge-no-pr.out" 2>"$tmp_dir/direct-post-merge-no-pr.err"
+direct_post_merge_no_pr_status="$?"
+set -e
+if [[ "$direct_post_merge_no_pr_status" -eq 0 ]]; then
+  echo "mark-achieved.sh must reject OPENSPEC_BUDDY_POST_MERGE=1 without a PR" >&2
+  exit 1
+fi
+grep -F 'Post-merge achievement requires a PR' "$tmp_dir/direct-post-merge-no-pr.err" >/dev/null
+
+set +e
+OPENSPEC_BUDDY_POST_MERGE=1 \
+  "$repo_root/skills/openspec-buddy/scripts/mark-achieved.sh" 42 openspec/changes/archive/2026-06-26-demo 123 >"$tmp_dir/direct-post-merge.out" 2>"$tmp_dir/direct-post-merge.err"
+direct_post_merge_status="$?"
+set -e
+if [[ "$direct_post_merge_status" -eq 0 ]]; then
+  echo "mark-achieved.sh must not allow OPENSPEC_BUDDY_POST_MERGE=1 to bypass post-merge input validation" >&2
+  exit 1
+fi
+if ! grep -F 'does not match issue #42' "$tmp_dir/direct-post-merge.err" >/dev/null; then
+  echo "mark-achieved.sh did not enforce post-merge PR/issue validation" >&2
+  cat "$tmp_dir/direct-post-merge.err" >&2
+  exit 1
+fi
 
 echo "mark-achieved-post-merge tests passed"

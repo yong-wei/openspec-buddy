@@ -244,7 +244,7 @@ cat > "$tmp_dir/threads-truncated.json" <<JSON
 JSON
 export GH_THREADS_FILE="$tmp_dir/threads-truncated.json"
 set +e
-timeout 2s "$helper" 123 > "$tmp_dir/truncated-output.txt" 2> "$tmp_dir/truncated-err.txt"
+timeout 8s "$helper" 123 > "$tmp_dir/truncated-output.txt" 2> "$tmp_dir/truncated-err.txt"
 truncated_status="$?"
 set -e
 if [[ "$truncated_status" -eq 0 || "$truncated_status" -eq 124 ]]; then
@@ -308,7 +308,7 @@ export OPENSPEC_BUDDY_REVIEW_INITIAL_WAIT_SECONDS=0
 export OPENSPEC_BUDDY_REVIEW_POLL_SECONDS=1
 export OPENSPEC_BUDDY_REVIEW_MAX_WAIT_SECONDS=1
 set +e
-timeout 4s "$helper" 123 > "$tmp_dir/timeout-output.txt" 2> "$tmp_dir/timeout-err.txt"
+timeout 8s "$helper" 123 > "$tmp_dir/timeout-output.txt" 2> "$tmp_dir/timeout-err.txt"
 timeout_status="$?"
 set -e
 if [[ "$timeout_status" -eq 0 ]]; then

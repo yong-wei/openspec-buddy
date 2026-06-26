@@ -149,6 +149,10 @@ function compactOutput(result) {
   return text.split('\n').map((line) => line.trim()).filter(Boolean).slice(-20).join('\n');
 }
 
+function safeToRerun(result) {
+  return /\bsafe_to_rerun:\s*true\b/i.test([result.stdout || '', result.stderr || ''].join('\n'));
+}
+
 function emitDone({ stage, command = [], state, next, output = '' }) {
   outputBlock('DONE', [
     ['stage', stage],
@@ -513,7 +517,10 @@ function runPostMergeAchievement(opts, truth, command) {
     process.exit(1);
   }
   const achieveCommand = [path.join(coreScriptDir, 'mark-achieved-post-merge.sh'), opts.issue, archivePath, opts.pr];
-  const result = runProcess(achieveCommand);
+  let result = runProcess(achieveCommand);
+  if (result.status !== 0 && safeToRerun(result)) {
+    result = runProcess(achieveCommand);
+  }
   if (result.status !== 0) {
     emitBlocked({
       stage: 'post-merge-achieve',

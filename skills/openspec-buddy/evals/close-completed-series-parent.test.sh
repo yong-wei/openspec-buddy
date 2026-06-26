@@ -160,17 +160,33 @@ set +e
 SERIES_SCENARIO=drift "$repo_root/skills/openspec-buddy/scripts/close-completed-series-parent.sh" 101 >"$tmp_dir/drift.out" 2>"$tmp_dir/drift.err"
 drift_status="$?"
 set -e
-if [[ "$drift_status" -eq 0 ]]; then
-  echo "close-completed-series-parent.sh should fail on repairable child terminal drift" >&2
+if [[ "$drift_status" -ne 0 ]]; then
+  echo "close-completed-series-parent.sh should not fail child closeout because a sibling has terminal drift" >&2
+  cat "$tmp_dir/drift.out" "$tmp_dir/drift.err" >&2
   exit 1
 fi
-if ! grep -F 'repairable terminal drift' "$tmp_dir/drift.err" >/dev/null; then
-  echo "expected repairable drift diagnostic" >&2
+if ! grep -F 'sibling terminal drift outside current issue: #102' "$tmp_dir/drift.out" >/dev/null; then
+  echo "expected sibling drift skip diagnostic" >&2
   cat "$tmp_dir/drift.out" "$tmp_dir/drift.err" >&2
   exit 1
 fi
 if grep -F 'issue close' "$GH_LOG_FILE" >/dev/null; then
   echo "series parent should not be closed while child drift remains" >&2
+  exit 1
+fi
+
+: > "$GH_LOG_FILE"
+set +e
+SERIES_SCENARIO=drift "$repo_root/skills/openspec-buddy/scripts/close-completed-series-parent.sh" 100 >"$tmp_dir/parent-drift.out" 2>"$tmp_dir/parent-drift.err"
+parent_drift_status="$?"
+set -e
+if [[ "$parent_drift_status" -eq 0 ]]; then
+  echo "close-completed-series-parent.sh should fail parent reconciliation on repairable child terminal drift" >&2
+  exit 1
+fi
+if ! grep -F 'repairable terminal drift' "$tmp_dir/parent-drift.err" >/dev/null; then
+  echo "expected parent reconciliation drift diagnostic" >&2
+  cat "$tmp_dir/parent-drift.out" "$tmp_dir/parent-drift.err" >&2
   exit 1
 fi
 

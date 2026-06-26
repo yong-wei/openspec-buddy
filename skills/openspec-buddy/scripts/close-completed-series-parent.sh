@@ -136,11 +136,14 @@ query($id: ID!, $statusField: String!, $endField: String!) {
 summary="$(node -e '
 const fs = require("fs");
 const parent = JSON.parse(fs.readFileSync(process.argv[1], "utf8")).data.node;
-const projectTitle = process.argv[2];
-const doneOptionName = process.argv[3];
-const projectId = process.argv[4];
+const current = JSON.parse(fs.readFileSync(process.argv[2], "utf8")).data.node;
+const projectTitle = process.argv[3];
+const doneOptionName = process.argv[4];
+const projectId = process.argv[5];
 const children = parent.subIssues?.nodes || [];
 const parentLabels = (parent.labels?.nodes || []).map((entry) => entry.name);
+const currentNumber = Number(current?.number || 0);
+const parentInvocation = currentNumber === Number(parent.number);
 function projectItem(issue) {
   return (issue.projectItems?.nodes || []).find((item) => item?.project?.id === projectId && item?.project?.title === projectTitle) || null;
 }
@@ -164,6 +167,14 @@ if (children.length === 0) {
 const childStates = children.map((child) => ({ child, terminal: terminalState(child) }));
 const repairableDrift = childStates.filter(({ terminal }) => terminal.closed && terminal.projectDone && terminal.hasEnd && !terminal.archived);
 if (repairableDrift.length > 0) {
+  const driftNumbers = repairableDrift.map(({ child }) => Number(child.number));
+  if (!parentInvocation && !driftNumbers.includes(currentNumber)) {
+    console.log(JSON.stringify({
+      action: "skip",
+      reason: `Series parent #${parent.number} still has sibling terminal drift outside current issue: ${repairableDrift.map(({ child }) => `#${child.number}`).join(", ")}.`,
+    }));
+    process.exit(0);
+  }
   console.log(JSON.stringify({
     action: "drift",
     reason: `Series parent #${parent.number} has repairable terminal drift in child issue(s): ${repairableDrift.map(({ child }) => `#${child.number}`).join(", ")}. These child issues are closed with Project Done and End set, but are missing status:archived.`,
@@ -174,6 +185,13 @@ const incomplete = childStates
   .filter(({ terminal }) => !terminal.closed || !terminal.archived || !terminal.projectDone || !terminal.hasEnd)
   .map(({ child }) => child);
 if (incomplete.length > 0) {
+  if (!parentInvocation && incomplete.some((child) => Number(child.number) === currentNumber)) {
+    console.log(JSON.stringify({
+      action: "drift",
+      reason: `Current issue #${currentNumber} is not terminal; cannot evaluate series parent #${parent.number}.`,
+    }));
+    process.exit(0);
+  }
   console.log(JSON.stringify({
     action: "skip",
     reason: `Series parent #${parent.number} still has unfinished child issues: ${incomplete.map((child) => `#${child.number}`).join(", ")}.`,
@@ -192,7 +210,7 @@ console.log(JSON.stringify({
   parentUrl: parent.url,
   body: `OpenSpec series completed. All child changes are closed with \`status:archived\`, Project \`Done\`, and Project \`End\` set.\n\nArchived child changes:\n${childLines.join("\n")}`,
 }));
-' "$parent_file" "$project_title" "$done_option_name" "$project_id")"
+' "$parent_file" "$issue_file" "$project_title" "$done_option_name" "$project_id")"
 
 action="$(node -e 'const data = JSON.parse(process.argv[1]); process.stdout.write(data.action);' "$summary")"
 

@@ -36,7 +36,7 @@ exit 99
 writeExecutable(path.join(tmp, 'gh'), `#!/usr/bin/env bash
 set -euo pipefail
 if [[ "\${1:-}" == "api" && "\${2:-}" == "repos/yong-wei/openspec-buddy/pulls/123" ]]; then
-  printf '%s\\n' '{"number":123,"merged":true,"merged_at":"2026-06-26T00:00:00Z"}'
+  cat "\${PR_JSON_FILE:?}"
   exit 0
 fi
 if [[ "\${1:-}" == "api" && "\${2:-}" == "--paginate" && "\${3:-}" == "repos/yong-wei/openspec-buddy/pulls/123/files?per_page=100" ]]; then
@@ -44,7 +44,7 @@ if [[ "\${1:-}" == "api" && "\${2:-}" == "--paginate" && "\${3:-}" == "repos/yon
   exit 0
 fi
 if [[ "\${1:-}" == "issue" && "\${2:-}" == "view" ]]; then
-  if [[ "$*" == *"--json state,labels,projectItems,url"* ]]; then
+  if [[ "$*" == *"--json id,state,labels,projectItems,url"* ]]; then
     cat "\${ISSUE_JSON_FILE:?}"
     exit 0
   fi
@@ -54,7 +54,12 @@ if [[ "\${1:-}" == "issue" && "\${2:-}" == "view" ]]; then
   fi
 fi
 if [[ "\${1:-}" == "api" && "\${2:-}" == "graphql" ]]; then
-  cat "\${PARENT_JSON_FILE:?}"
+  printf 'graphql\\n' >> "\${GRAPHQL_LOG_FILE:?}"
+  if [[ "$*" == *"parent {"* ]]; then
+    cat "\${PARENT_JSON_FILE:?}"
+  else
+    cat "\${PROJECT_JSON_FILE:?}"
+  fi
   exit 0
 fi
 echo "unexpected gh invocation: $*" >&2
@@ -63,6 +68,7 @@ exit 99
 
 writeExecutable(path.join(tmp, 'threads-ok'), `#!/usr/bin/env bash
 set -euo pipefail
+printf 'threads\\n' >> "\${THREAD_LOG_FILE:?}"
 printf 'Review threads resolved.\\n'
 `);
 writeExecutable(path.join(tmp, 'threads-fail'), `#!/usr/bin/env bash
@@ -72,9 +78,14 @@ exit 1
 `);
 
 const issueFile = path.join(tmp, 'issue.json');
+const mergedPrFile = path.join(tmp, 'merged-pr.json');
+const unmergedPrFile = path.join(tmp, 'unmerged-pr.json');
 const noParentFile = path.join(tmp, 'no-parent.json');
 const parentOpenFile = path.join(tmp, 'parent-open.json');
+fs.writeFileSync(mergedPrFile, `${JSON.stringify({ number: 123, merged: true, merged_at: '2026-06-26T00:00:00Z' })}\n`);
+fs.writeFileSync(unmergedPrFile, `${JSON.stringify({ number: 123, merged: false, merged_at: null })}\n`);
 fs.writeFileSync(issueFile, `${JSON.stringify({
+  id: 'ISSUE_NODE_ID',
   state: 'CLOSED',
   body: `<!-- openspec-buddy
 change_id: demo
@@ -92,6 +103,43 @@ area: tests
   projectItems: [
     { title: 'OpenSpec Buddy', status: { name: 'Done' }, end: { date: '2026-06-26' } },
   ],
+})}\n`);
+const issueRestProjectWithoutEndFile = path.join(tmp, 'issue-rest-project-without-end.json');
+const projectTerminalFile = path.join(tmp, 'project-terminal.json');
+fs.writeFileSync(issueRestProjectWithoutEndFile, `${JSON.stringify({
+  id: 'ISSUE_NODE_ID',
+  state: 'CLOSED',
+  body: `<!-- openspec-buddy
+change_id: demo
+claim_branch: demo
+series: none
+coupling_group: none
+execution_mode: isolated
+base_branch: integration
+depends_on: []
+openspec_path: openspec/changes/demo
+risk: low
+area: tests
+-->`,
+  labels: [{ name: 'status:archived' }],
+  projectItems: [
+    { title: 'OpenSpec Buddy', status: { name: 'Done' } },
+  ],
+})}\n`);
+fs.writeFileSync(projectTerminalFile, `${JSON.stringify({
+  data: {
+    node: {
+      projectItems: {
+        nodes: [
+          {
+            project: { title: 'OpenSpec Buddy' },
+            status: { name: 'Done' },
+            end: { date: '2026-06-26' },
+          },
+        ],
+      },
+    },
+  },
 })}\n`);
 fs.writeFileSync(noParentFile, `${JSON.stringify({ data: { node: { parent: null } } })}\n`);
 fs.writeFileSync(parentOpenFile, `${JSON.stringify({
@@ -118,6 +166,8 @@ fs.writeFileSync(parentOpenFile, `${JSON.stringify({
 })}\n`);
 
 function run(extraEnv = {}) {
+  const graphqlLogFile = extraEnv.GRAPHQL_LOG_FILE || path.join(tmp, `graphql-${Math.random().toString(36).slice(2)}.log`);
+  const threadLogFile = extraEnv.THREAD_LOG_FILE || path.join(tmp, `threads-${Math.random().toString(36).slice(2)}.log`);
   const result = spawnSync('node', [helper, '42', '123'], {
     cwd: tmp,
     env: {
@@ -130,8 +180,12 @@ function run(extraEnv = {}) {
       OPENSPEC_BUDDY_PROJECT_TITLE: 'OpenSpec Buddy',
       OPENSPEC_BUDDY_PROJECT_STATUS_DONE: 'Done',
       OPENSPEC_BUDDY_VERIFY_REVIEW_THREADS_RESOLVED_HELPER: path.join(tmp, 'threads-ok'),
+      PR_JSON_FILE: mergedPrFile,
       ISSUE_JSON_FILE: issueFile,
       PARENT_JSON_FILE: noParentFile,
+      PROJECT_JSON_FILE: projectTerminalFile,
+      GRAPHQL_LOG_FILE: graphqlLogFile,
+      THREAD_LOG_FILE: threadLogFile,
       ...extraEnv,
     },
     encoding: 'utf8',
@@ -141,6 +195,21 @@ function run(extraEnv = {}) {
 }
 
 assert.equal(run().achieved, true);
+
+const preMergeGraphqlLog = path.join(tmp, 'pre-merge-graphql.log');
+const preMergeThreadLog = path.join(tmp, 'pre-merge-threads.log');
+const preMerge = run({
+  PR_JSON_FILE: unmergedPrFile,
+  GRAPHQL_LOG_FILE: preMergeGraphqlLog,
+  THREAD_LOG_FILE: preMergeThreadLog,
+});
+assert.equal(preMerge.achieved, false);
+assert.equal(preMerge.next, 'merge-pr');
+assert.equal(fs.existsSync(preMergeGraphqlLog), false);
+assert.equal(fs.existsSync(preMergeThreadLog), false);
+
+const graphqlProjectEnd = run({ ISSUE_JSON_FILE: issueRestProjectWithoutEndFile });
+assert.equal(graphqlProjectEnd.achieved, true);
 
 const unresolved = run({ OPENSPEC_BUDDY_VERIFY_REVIEW_THREADS_RESOLVED_HELPER: path.join(tmp, 'threads-fail') });
 assert.equal(unresolved.achieved, false);
@@ -159,6 +228,7 @@ assert.match(parentUnknown.reason, /cannot verify parent terminal state/);
 
 const wrongIssueFile = path.join(tmp, 'wrong-issue.json');
 fs.writeFileSync(wrongIssueFile, `${JSON.stringify({
+  id: 'ISSUE_NODE_ID',
   state: 'CLOSED',
   body: `<!-- openspec-buddy
 change_id: other-change

@@ -15,6 +15,7 @@ helpers=(
   reply-review-thread.sh
   mark-achieved.sh
   mark-achieved-post-merge.sh
+  verify-post-merge-achievement-inputs.sh
   configure-pr-metadata.sh
   verify-claim-worktree.sh
   verify-bound-worktree.sh

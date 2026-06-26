@@ -63,7 +63,7 @@ function boundBase() {
 
 function issueStatus(issue) {
   const repo = repoNwo();
-  const args = ['issue', 'view', String(issue), '--json', 'state,labels,projectItems,url,body'];
+  const args = ['issue', 'view', String(issue), '--json', 'id,state,labels,projectItems,url,body'];
   if (repo) args.splice(2, 0, '-R', repo);
   return json('gh', args, { optional: true }) || {};
 }
@@ -160,6 +160,14 @@ function fieldValue(item, names) {
       if (fieldText) return fieldText;
       const lowerText = valueText(fields[name.toLowerCase()]);
       if (lowerText) return lowerText;
+      if (Array.isArray(fields.nodes)) {
+        const hit = fields.nodes.find((field) => {
+          const fieldName = valueText(field?.field?.name || field?.name);
+          return fieldName.toLowerCase() === name.toLowerCase();
+        });
+        const hitText = valueText(hit);
+        if (hitText) return hitText;
+      }
     }
     if (Array.isArray(fields)) {
       const hit = fields.find((field) => {
@@ -192,7 +200,6 @@ function projectItems(issue) {
 
 function projectTerminal(issue) {
   const items = projectItems(issue).filter(projectMatches);
-  if (items.length === 0) return false;
   const done = String(process.env.OPENSPEC_BUDDY_PROJECT_STATUS_DONE || 'Done').toLowerCase();
   const statusNames = [
     process.env.OPENSPEC_BUDDY_PROJECT_STATUS_FIELD || 'Status',
@@ -204,7 +211,46 @@ function projectTerminal(issue) {
     'end',
     'End',
   ];
-  return items.some((item) => fieldValue(item, statusNames).toLowerCase() === done && Boolean(fieldValue(item, endNames)));
+  if (items.some((item) => fieldValue(item, statusNames).toLowerCase() === done && Boolean(fieldValue(item, endNames)))) {
+    return true;
+  }
+  return Boolean(issue?.id && projectTerminalGraphQL(issue.id, statusNames[0], endNames[0], done));
+}
+
+function projectTerminalGraphQL(issueId, statusFieldName, endFieldName, doneOption) {
+  const data = json('gh', [
+    'api',
+    'graphql',
+    '-f',
+    `id=${issueId}`,
+    '-f',
+    `statusField=${statusFieldName}`,
+    '-f',
+    `endField=${endFieldName}`,
+    '-f',
+    `query=${`
+query($id: ID!, $statusField: String!, $endField: String!) {
+  node(id: $id) {
+    ... on Issue {
+      projectItems(first: 50) {
+        nodes {
+          project { id title }
+          status: fieldValueByName(name: $statusField) {
+            ... on ProjectV2ItemFieldSingleSelectValue { name }
+          }
+          end: fieldValueByName(name: $endField) {
+            ... on ProjectV2ItemFieldDateValue { date }
+          }
+        }
+      }
+    }
+  }
+}`}`,
+  ], { optional: true });
+  const items = data?.data?.node?.projectItems?.nodes || [];
+  return items.filter(projectMatches).some((item) => (
+    String(item?.status?.name || '').toLowerCase() === doneOption && Boolean(item?.end?.date)
+  ));
 }
 
 function labelNames(issue) {
@@ -219,11 +265,12 @@ function issueTerminal(issue) {
     && projectTerminal(issue);
 }
 
-function verifyReviewThreadsResolved(pr) {
+function verifyReviewThreadsResolved(pr, postMerge = false) {
   const scriptDir = path.dirname(fileURLToPath(import.meta.url));
   const helper = process.env.OPENSPEC_BUDDY_VERIFY_REVIEW_THREADS_RESOLVED_HELPER
     || path.join(scriptDir, 'verify-review-threads-resolved.sh');
-  const result = status(helper, [String(pr)]);
+  const args = postMerge ? [String(pr), '--post-merge'] : [String(pr)];
+  const result = status(helper, args);
   return {
     ok: result.status === 0,
     message: (result.stderr || result.stdout || '').trim(),
@@ -332,8 +379,6 @@ try {
   const issueArchived = String(issue.state || '').toUpperCase() === 'CLOSED'
     && statusLabels.length === 1
     && statusLabels[0].replace(/^status:\s*/, 'status:') === 'status:archived';
-  const projectDone = projectTerminal(issue);
-  const reviewThreads = verifyReviewThreadsResolved(pr);
 
   if (!prMerged) {
     console.log(JSON.stringify({ achieved: false, next: 'merge-pr', reason: 'PR is not merged', archivePath }));
@@ -357,6 +402,7 @@ try {
     console.log(JSON.stringify({ achieved: false, next: '', reason: 'archived tasks.md is not complete', archivePath }));
     process.exit(0);
   }
+  const reviewThreads = verifyReviewThreadsResolved(pr, true);
   if (!reviewThreads.ok) {
     console.log(JSON.stringify({ achieved: false, next: '', reason: reviewThreads.message || 'review threads are not resolved', archivePath }));
     process.exit(0);
@@ -372,6 +418,7 @@ try {
     }));
     process.exit(0);
   }
+  const projectDone = projectTerminal(issue);
   if (issueArchived && projectDone) {
     console.log(JSON.stringify({ achieved: true, reason: 'issue closed, status archived, Project Done, End set, PR merged, archive present', archivePath }));
     process.exit(0);

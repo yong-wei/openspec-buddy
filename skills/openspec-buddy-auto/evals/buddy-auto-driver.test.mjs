@@ -330,7 +330,7 @@ const env = {
   makeExecutable(path.join(postMergeCoreDir, 'wait-for-review-clear.sh'), `#!/usr/bin/env bash\necho "wait-review $*" >> ${JSON.stringify(postMergeLogFile)}\n`);
   makeExecutable(path.join(postMergeCoreDir, 'verify-review-clear.sh'), `#!/usr/bin/env bash\necho "verify-review $*" >> ${JSON.stringify(postMergeLogFile)}\n`);
   makeExecutable(path.join(postMergeCoreDir, 'verify-achieved-truth.mjs'), `#!/usr/bin/env node\nimport fs from 'node:fs';\nconst countFile = ${JSON.stringify(path.join(tmp, 'post-merge-truth.count'))};\nconst count = fs.existsSync(countFile) ? Number(fs.readFileSync(countFile, 'utf8')) + 1 : 1;\nfs.writeFileSync(countFile, String(count));\nfs.appendFileSync(${JSON.stringify(postMergeLogFile)}, \`achieved-truth \${process.argv.slice(2).join(' ')}\\n\`);\nif (count === 1) console.log(JSON.stringify({achieved:false,next:'mark-achieved-post-merge',archivePath:'openspec/changes/archive/2026-06-26-demo',reason:'issue not archived'}));\nelse console.log(JSON.stringify({achieved:true,reason:'terminal after post-merge sync'}));\n`);
-  makeExecutable(path.join(postMergeCoreDir, 'mark-achieved-post-merge.sh'), `#!/usr/bin/env bash\necho "post-merge-achieve $*" >> ${JSON.stringify(postMergeLogFile)}\n`);
+  makeExecutable(path.join(postMergeCoreDir, 'mark-achieved-post-merge.sh'), `#!/usr/bin/env bash\nset -euo pipefail\ncount_file=${JSON.stringify(path.join(tmp, 'post-merge-achieve.count'))}\nif [[ -f "$count_file" ]]; then count=$(( $(cat "$count_file") + 1 )); else count=1; fi\necho "$count" > "$count_file"\necho "post-merge-achieve $*" >> ${JSON.stringify(postMergeLogFile)}\nif [[ "$count" == "1" ]]; then\n  echo "safe_to_rerun: true" >&2\n  exit 1\nfi\n`);
   const result = run(['--issue', '675', '--pr', '707', '--head', 'head-1'], {
     env: {
       OPENSPEC_BUDDY_AUTO_STATE_DIR: postMergeStateDir,
@@ -345,6 +345,7 @@ const env = {
     'wait-review 707',
     'verify-review 707',
     'achieved-truth 675 707',
+    'post-merge-achieve 675 openspec/changes/archive/2026-06-26-demo 707',
     'post-merge-achieve 675 openspec/changes/archive/2026-06-26-demo 707',
     'achieved-truth 675 707',
   ].join('\n'));
