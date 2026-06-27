@@ -178,14 +178,18 @@ function runSingleDriverForIssue(issue) {
 }
 
 function runSingleDriverForLane(lane) {
+  const env = {
+    OPENSPEC_BUDDY_AUTO_TARGET_ISSUE: String(lane.issue || ''),
+    OPENSPEC_BUDDY_AUTO_TARGET_PR: String(lane.pr || ''),
+    OPENSPEC_BUDDY_AUTO_HEAD: String(lane.head || ''),
+    OPENSPEC_BUDDY_AUTO_REVIEW_WAIT_MODE: 'yield',
+  };
+  if (lane.stage === 'review_fix') {
+    env.OPENSPEC_BUDDY_REVIEW_FIX_CONTEXT = '1';
+  }
   return run(process.execPath, [singleDriver], {
     allowFailure: true,
-    env: {
-      OPENSPEC_BUDDY_AUTO_TARGET_ISSUE: String(lane.issue || ''),
-      OPENSPEC_BUDDY_AUTO_TARGET_PR: String(lane.pr || ''),
-      OPENSPEC_BUDDY_AUTO_HEAD: String(lane.head || ''),
-      OPENSPEC_BUDDY_AUTO_REVIEW_WAIT_MODE: 'yield',
-    },
+    env,
   });
 }
 
@@ -496,6 +500,95 @@ function verifyCurrentWaitingLaneIfOnBranch(state) {
   return true;
 }
 
+function advanceResumedLane(state, lane) {
+  const resume = resumeLane(lane);
+  if (resume.status !== 0) {
+    lane.stage = 'blocked';
+    lane.blockedReason = resume.stderr || resume.stdout || 'lane resume failed';
+    lane.updatedAt = new Date().toISOString();
+    writeLaneState(state);
+    emitBlocked([
+      ['stage', 'resume-lane'],
+      ['lane', lane.id],
+      ['reason', lane.blockedReason],
+    ]);
+    return true;
+  }
+  if (lane.stage === 'merge_ready') {
+    emitHandoff([
+      ['stage', lane.stage],
+      ['lane', lane.id],
+      ['issue', lane.issue],
+      ['pr', lane.pr],
+      ['required_action', 'Continue merge gates through buddy-auto-driver; do not claim or resume another lane until closeout is complete.'],
+    ]);
+    return true;
+  }
+  const driver = runSingleDriverForLane(lane);
+  if (driver.status !== 0) {
+    lane.stage = 'blocked';
+    lane.blockedReason = driver.stderr || driver.stdout || 'buddy-auto-driver failed while advancing resumed lane';
+    lane.updatedAt = new Date().toISOString();
+    writeLaneState(state);
+    emitBlocked([
+      ['stage', 'advance-lane'],
+      ['lane', lane.id],
+      ['issue', lane.issue],
+      ['pr', lane.pr],
+      ['reason', lane.blockedReason],
+    ]);
+    return true;
+  }
+  const parsed = parseDriverStage(driver.stdout);
+  const driverState = parseDriverState(driver.stdout);
+  const parkResult = parkLaneFromDriverReceipt(state, lane, parsed, driverState);
+  if (parkResult.status === 'blocked') {
+    emitBlocked([
+      ['stage', 'advance-lane'],
+      ['lane', lane.id],
+      ['issue', lane.issue],
+      ['pr', lane.pr],
+      ['reason', parkResult.reason],
+    ]);
+    return true;
+  }
+  if (parkResult.status === 'parked') {
+    emitHandoff([
+      ['stage', parsed.stage],
+      ['lane', lane.id],
+      ['issue', lane.issue],
+      ['pr', parkResult.lane.pr],
+      ['required_action', 'Lane is safely parked in waiting_review; rerun the lane driver to poll or schedule another lane.'],
+    ], driver.stdout);
+    return true;
+  }
+  if (parsed.stage === 'achieved') {
+    lane.stage = 'done';
+    lane.updatedAt = new Date().toISOString();
+    lane.lastResult = parsed.stage;
+    writeLaneState(state);
+    emitDone([
+      ['stage', 'lane-done'],
+      ['lane', lane.id],
+      ['issue', lane.issue],
+      ['pr', lane.pr],
+    ], driver.stdout);
+    return true;
+  }
+  lane.stage = parsed.stage === 'merge-pr' || parsed.stage === 'merge-gates' ? 'merge_ready' : lane.stage;
+  lane.updatedAt = new Date().toISOString();
+  lane.lastResult = parsed.stage || lane.lastResult || '';
+  writeLaneState(state);
+  emitHandoff([
+    ['stage', parsed.stage || lane.stage],
+    ['lane', lane.id],
+    ['issue', lane.issue],
+    ['pr', lane.pr],
+    ['required_action', lane.stage === 'merge_ready' ? 'Continue merge gates through buddy-auto-driver.' : 'Address review feedback before any other lane work.'],
+  ], driver.stdout);
+  return true;
+}
+
 function processWaitingLane(state, lane) {
   const probe = probeLane(lane);
   if (probe.status !== 0) {
@@ -626,15 +719,6 @@ function runScheduler(opts) {
 
     for (const lane of state.lanes) {
       if (lane.stage === 'review_returned') {
-        const resume = resumeLane(lane);
-        if (resume.status !== 0) {
-          emitBlocked([
-            ['stage', 'resume-lane'],
-            ['lane', lane.id],
-            ['reason', resume.stderr || resume.stdout],
-          ]);
-          return;
-        }
         const check = checkLaneReview(lane);
         if (check.status === 0) {
           lane.stage = 'merge_ready';
@@ -658,22 +742,7 @@ function runScheduler(opts) {
         }
       }
       if (lane.stage === 'merge_ready' || lane.stage === 'review_fix') {
-        const resume = resumeLane(lane);
-        if (resume.status !== 0) {
-          emitBlocked([
-            ['stage', 'resume-lane'],
-            ['lane', lane.id],
-            ['reason', resume.stderr || resume.stdout],
-          ]);
-          return;
-        }
-        emitHandoff([
-          ['stage', lane.stage],
-          ['lane', lane.id],
-          ['issue', lane.issue],
-          ['pr', lane.pr],
-          ['required_action', lane.stage === 'merge_ready' ? 'Continue merge gates through buddy-auto-driver.' : 'Address review feedback before any other lane work.'],
-        ]);
+        advanceResumedLane(state, lane);
         return;
       }
     }

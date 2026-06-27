@@ -106,7 +106,15 @@ if [[ "\${PROBE_RETRY_EXPIRED:-0}" == "1" ]]; then
 fi
 printf '%s\\n' '{"pr":"707","head":"head-1","signature":"sig","requestState":"present-current-head","state":"waiting","requestAgeSeconds":60,"retryDue":false}'
 `);
-  makeExecutable(path.join(coreDir, 'check-review-clear-once.sh'), `#!/bin/bash\necho "check $*" >> ${JSON.stringify(logFile)}\n`);
+  makeExecutable(path.join(coreDir, 'check-review-clear-once.sh'), `#!/bin/bash
+echo "check $*" >> ${JSON.stringify(logFile)}
+case "\${CHECK_REVIEW_STATUS:-0}" in
+  0) exit 0 ;;
+  1) exit 1 ;;
+  3) exit 3 ;;
+  *) exit "\${CHECK_REVIEW_STATUS}" ;;
+esac
+`);
   makeExecutable(path.join(coreDir, 'request-pr-review.sh'), `#!/bin/bash\necho "request $*" >> ${JSON.stringify(logFile)}\n`);
   return { root, binDir, coreDir, repoDir, stateDir, logFile };
 }
@@ -374,6 +382,84 @@ console.log('state_file: ${fakeState}');
   const log = fs.readFileSync(envInfo.logFile, 'utf8');
   assert.match(log, /probe 707 skip=1/);
   assert.doesNotMatch(log, /check 707/);
+}
+
+{
+  const envInfo = makeEnv('review-fix-reparks-after-single-driver');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 2,
+    lanes: [
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'review_fix', reviewRetryCount: 0 },
+    ],
+  }));
+  const fakeState = path.join(envInfo.root, 'review-fix-driver-state.json');
+  fs.writeFileSync(fakeState, JSON.stringify({
+    issue: '675',
+    pr: '707',
+    change: 'change-675',
+    head: 'head-1',
+    stages: {
+      issue_pr_bound: { issue: '675', pr: '707', head: 'head-1', headRefName: 'change-675' },
+      review_requested: { at: '2026-06-27T00:00:00.000Z', head: 'head-1' },
+    },
+  }));
+  const fakeDriver = path.join(envInfo.root, 'fake-review-fix-driver.mjs');
+  fs.writeFileSync(fakeDriver, `#!/usr/bin/env node
+import fs from 'node:fs';
+fs.appendFileSync(${JSON.stringify(envInfo.logFile)}, 'review-fix-context=' + (process.env.OPENSPEC_BUDDY_REVIEW_FIX_CONTEXT || '') + '\\n');
+console.log('DONE');
+console.log('stage: review-yield');
+console.log('state_file: ${fakeState}');
+`, { mode: 0o755 });
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '2',
+    CURRENT_BRANCH: 'change-675',
+    OPENSPEC_BUDDY_AUTO_SINGLE_DRIVER: fakeDriver,
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^HANDOFF/m);
+  assert.match(result.stdout, /^stage: review-yield$/m);
+  const log = fs.readFileSync(envInfo.logFile, 'utf8');
+  assert.match(log, /review-fix-context=1/);
+  assert.match(log, /verify-claim --issue 675 --pr 707/);
+  assert.match(log, /verify-request 707/);
+  const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  assert.equal(state.lanes[0].stage, 'waiting_review');
+}
+
+{
+  const envInfo = makeEnv('merge-ready-handoff-without-fake-done');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 2,
+    lanes: [
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'merge_ready', reviewRetryCount: 0 },
+    ],
+  }));
+  const fakeDriver = path.join(envInfo.root, 'fake-should-not-run-driver.mjs');
+  fs.writeFileSync(fakeDriver, `#!/usr/bin/env node
+throw new Error('merge_ready should hand off instead of running fake single driver');
+`, { mode: 0o755 });
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '2',
+    CURRENT_BRANCH: 'change-675',
+    OPENSPEC_BUDDY_AUTO_SINGLE_DRIVER: fakeDriver,
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^HANDOFF/m);
+  assert.match(result.stdout, /^stage: merge_ready$/m);
+  assert.match(result.stdout, /Continue merge gates through buddy-auto-driver/);
+  const log = fs.readFileSync(envInfo.logFile, 'utf8');
+  assert.match(log, /verify-claim --issue 675 --pr 707/);
+  const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  assert.equal(state.lanes[0].stage, 'merge_ready');
 }
 
 {
