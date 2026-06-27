@@ -34,6 +34,8 @@ const commands = [
   { label: 'node skills/openspec-buddy/evals/verify-issue-relationships.test.mjs', cmd: 'node', args: ['skills/openspec-buddy/evals/verify-issue-relationships.test.mjs'] },
   { label: 'bash skills/openspec-buddy/evals/verify-issue-relationships-wrapper.test.sh', cmd: 'bash', args: ['skills/openspec-buddy/evals/verify-issue-relationships-wrapper.test.sh'] },
   { label: 'node skills/openspec-buddy/evals/pre-archive-change-validation.test.mjs', cmd: 'node', args: ['skills/openspec-buddy/evals/pre-archive-change-validation.test.mjs'] },
+  { label: 'bash skills/openspec-buddy/evals/probe-review-state.test.sh', cmd: 'bash', args: ['skills/openspec-buddy/evals/probe-review-state.test.sh'] },
+  { label: 'bash skills/openspec-buddy/evals/check-review-clear-once.test.sh', cmd: 'bash', args: ['skills/openspec-buddy/evals/check-review-clear-once.test.sh'] },
   { label: 'bash skills/openspec-buddy/evals/request-pr-review.test.sh', cmd: 'bash', args: ['skills/openspec-buddy/evals/request-pr-review.test.sh'] },
   { label: 'bash skills/openspec-buddy/evals/reply-review-thread.test.sh', cmd: 'bash', args: ['skills/openspec-buddy/evals/reply-review-thread.test.sh'] },
   { label: 'node skills/openspec-buddy/evals/review-request-state.test.mjs', cmd: 'node', args: ['skills/openspec-buddy/evals/review-request-state.test.mjs'] },
@@ -45,6 +47,9 @@ const commands = [
   { label: 'bash skills/openspec-buddy/evals/verify-review-clear-cache.test.sh', cmd: 'bash', args: ['skills/openspec-buddy/evals/verify-review-clear-cache.test.sh'] },
   { label: 'node skills/openspec-buddy/evals/verify-pr-coordination.test.mjs', cmd: 'node', args: ['skills/openspec-buddy/evals/verify-pr-coordination.test.mjs'] },
   { label: 'node skills/openspec-buddy/evals/verify-review-clear.test.mjs', cmd: 'node', args: ['skills/openspec-buddy/evals/verify-review-clear.test.mjs'] },
+  { label: 'node skills/openspec-buddy-auto/evals/lane-state.test.mjs', cmd: 'node', args: ['skills/openspec-buddy-auto/evals/lane-state.test.mjs'] },
+  { label: 'node skills/openspec-buddy-auto/evals/lane-switch-gate.test.mjs', cmd: 'node', args: ['skills/openspec-buddy-auto/evals/lane-switch-gate.test.mjs'] },
+  { label: 'node skills/openspec-buddy-auto/evals/buddy-auto-lane-driver.test.mjs', cmd: 'node', args: ['skills/openspec-buddy-auto/evals/buddy-auto-lane-driver.test.mjs'] },
   { label: 'node skills/openspec-buddy-auto/evals/buddy-auto-driver.test.mjs', cmd: 'node', args: ['skills/openspec-buddy-auto/evals/buddy-auto-driver.test.mjs'] },
   { label: 'node skills/openspec-buddy-auto/evals/select-next-change.test.mjs', cmd: 'node', args: ['skills/openspec-buddy-auto/evals/select-next-change.test.mjs'] },
 ];

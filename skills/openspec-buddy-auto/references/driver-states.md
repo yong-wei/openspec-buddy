@@ -25,6 +25,45 @@ Target rules:
 Options such as `--dry-run`, `--issue`, `--pr`, `--change`, and `--no-pr` are
 diagnostic or recovery controls only.
 
+## Multi-Lane State
+
+Multi-lane scheduling is opt-in through:
+
+```bash
+OPENSPEC_BUDDY_AUTO_GOAL=1 OPENSPEC_BUDDY_AUTO_LANES=2 <openspec-buddy-auto-skill-dir>/scripts/buddy-auto-lane-driver.mjs
+```
+
+The lane driver stores scheduler state under:
+
+```text
+openspec/.buddy-cache/auto-lanes/
+```
+
+Lane state is local scheduling evidence, not GitHub truth. The lane driver must
+still use GitHub helpers for claim ownership, PR head, review request, review
+clearance, merge, Project, and achievement decisions.
+
+Allowed lane stages:
+
+```text
+implementing
+waiting_review
+review_fix
+merge_ready
+done
+blocked
+```
+
+The lane driver holds an exclusive per-worktree lock while it runs. A second
+lane driver in the same worktree must stop with
+`BLOCKED lane-driver-already-running`. Do not run the legacy single-lane driver
+manually in the same worktree while a lane driver is active; the lane lock does
+not protect against that manual bypass.
+
+Default lane concurrency is `2`; the hard maximum is `3`. A lane can be parked
+only after commit, push, current-head review request, clean worktree, matching
+PR head, and claim-worktree guard all pass.
+
 ## Receipts
 
 Receipts are stored under:

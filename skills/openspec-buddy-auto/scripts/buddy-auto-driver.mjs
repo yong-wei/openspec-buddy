@@ -450,6 +450,13 @@ function commandFor(opts, state) {
         records: ['review_response_gate_passed'],
       };
     }
+    if (process.env.OPENSPEC_BUDDY_AUTO_REVIEW_WAIT_MODE === 'yield') {
+      return {
+        stage: 'review-yield',
+        command: [],
+        reason: 'Current PR has passed mark-review and has a current-head review request. Multi-lane scheduler may park this lane instead of entering the blocking review wait.',
+      };
+    }
     return {
       stage: 'wait-review',
       command: [path.join(coreScriptDir, 'wait-for-review-clear.sh'), opts.pr],
@@ -586,6 +593,15 @@ function runDriver(opts) {
       return;
     }
     if (!next.command.length) {
+      if (next.stage === 'review-yield') {
+        emitDone({
+          stage: next.stage,
+          command: next.command,
+          state: opts,
+          next: { stage: 'waiting_review', reason: next.reason, command: [] },
+        });
+        return;
+      }
       emitHandoff({ stage: next.stage, reason: next.reason, command: next.command });
       return;
     }

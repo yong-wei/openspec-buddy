@@ -23,6 +23,7 @@ max_wait="${OPENSPEC_BUDDY_REVIEW_MAX_WAIT_SECONDS:-900}"
 reviewer="${OPENSPEC_BUDDY_PR_REVIEW_AUTHOR:-chatgpt-codex-connector}"
 verify_helper="${OPENSPEC_BUDDY_VERIFY_REVIEW_CLEAR_HELPER:-$script_dir/verify-review-clear.sh}"
 request_helper="${OPENSPEC_BUDDY_REQUEST_PR_REVIEW_HELPER:-$script_dir/request-pr-review.sh}"
+check_once_helper="${OPENSPEC_BUDDY_CHECK_REVIEW_CLEAR_ONCE_HELPER:-$script_dir/check-review-clear-once.sh}"
 command_timeout="${OPENSPEC_BUDDY_REVIEW_COMMAND_TIMEOUT_SECONDS:-60}"
 max_rounds=2
 
@@ -63,16 +64,20 @@ cache_dir="$(buddy_cache_dir "$tmp_dir/gh-cache")"
 "$script_dir/verify-claim-worktree.sh" --pr "$pr_number" >/dev/null
 last_signature=""
 last_head_sha=""
+last_request_state=""
 started_at="$SECONDS"
 
 probe_state_signature() {
-  local signature_file
-  signature_file="$(buddy_pr_signature_rest "$repo_nwo" "$pr_number" "$cache_dir")"
-  node -e '
-const fs = require("node:fs");
-const pr = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-process.stdout.write(JSON.stringify(pr));
-' "$signature_file"
+  local probe_output
+  probe_output="$(
+    OPENSPEC_BUDDY_GH_CACHE_DIR="$cache_dir" \
+      OPENSPEC_BUDDY_PROBE_SKIP_WORKTREE_GUARD=1 \
+      OPENSPEC_BUDDY_REVIEW_LAST_SIGNATURE="$last_signature" \
+      OPENSPEC_BUDDY_REVIEW_PREVIOUS_REQUEST_STATE="$last_request_state" \
+      "$script_dir/probe-review-state.sh" "$pr_number"
+  )"
+  last_request_state="$(node -e 'const data = JSON.parse(process.argv[1]); process.stdout.write(data.requestState || "");' "$probe_output")"
+  node -e 'const data = JSON.parse(process.argv[1]); process.stdout.write(data.signature || "{}");' "$probe_output"
 }
 
 probe_head_sha() {
@@ -146,6 +151,7 @@ process.stdout.write(`${JSON.stringify({ head: { sha: signature.head || "" } })}
   buddy_gh_api_paginated_array "repos/$repo_nwo/pulls/$pr_number/commits?per_page=100" > "$commits_file"
   buddy_gh_api_paginated_array "repos/$repo_nwo/issues/$pr_number/comments?per_page=100" > "$comments_file"
   request_state="$(node "$script_dir/review-request-state.mjs" "$OPENSPEC_BUDDY_PR_REVIEW_REQUEST" "$pr_file" "$commits_file" "$comments_file")"
+  last_request_state="$request_state"
   if [[ "$request_state" == "present-current-head" ]]; then
     return 0
   fi
@@ -185,13 +191,23 @@ sleep_if_needed() {
 
 run_full_check_after_change() {
   refresh_full_rest_bundle
-  if ! verify_current_head_request_gate 1; then
-    echo "Current-head review request gate failed during review wait full check." >&2
-    return 2
-  fi
+  local output_file="$tmp_dir/check-once-output.txt"
   set +e
-  run_clear_gate 1
+  OPENSPEC_BUDDY_GH_CACHE_DIR="$cache_dir" \
+    OPENSPEC_BUDDY_REUSE_PR_REST_CACHE=1 \
+    OPENSPEC_BUDDY_VERIFY_REVIEW_CLEAR_HELPER="$verify_helper" \
+    "$check_once_helper" "$pr_number" > "$output_file" 2>&1
   gate_status="$?"
+  if [[ "$gate_status" -eq 124 ]]; then
+    gate_status=2
+  elif [[ "$gate_status" -eq 3 ]]; then
+    gate_status=2
+  fi
+  if [[ "$gate_status" -eq 0 ]]; then
+    cat "$output_file"
+  elif [[ "$gate_status" -eq 2 ]]; then
+    cat "$output_file" >&2
+  fi
   return "$gate_status"
 }
 

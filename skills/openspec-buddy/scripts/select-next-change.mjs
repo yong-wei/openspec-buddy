@@ -139,6 +139,9 @@ function transitiveBlockingCount(candidate, issuesByNumber) {
 const activeState = normalizeActiveChanges(input.activeChanges);
 const activeChanges = activeState.ids;
 const issues = input.issues || [];
+const excludeIssues = new Set((input.excludeIssues || input.exclude_issues || [])
+  .map((value) => Number(value))
+  .filter((value) => Number.isFinite(value) && value > 0));
 const issuesByNumber = new Map(issues.map((issue) => [issue.number, issue]));
 const issuesByChange = new Map();
 const issueHintsByChange = new Map();
@@ -159,6 +162,11 @@ const staleClaimCandidates = [];
 for (const issue of issues) {
   const labels = normalizeLabels(issue.labels);
   const parsed = parseMetadata(issue);
+
+  if (excludeIssues.has(Number(issue.number))) {
+    rejected.push({ number: issue.number, reason: "excluded by active lane" });
+    continue;
+  }
 
   if (labels.includes("type:series-parent") || labels.includes("status:tracking")) {
     rejected.push({ number: issue.number, reason: "series parent issue" });

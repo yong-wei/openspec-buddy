@@ -8,6 +8,8 @@ helpers=(
   claim-change.sh
   mark-review.sh
   request-pr-review.sh
+  probe-review-state.sh
+  check-review-clear-once.sh
   wait-for-review-clear.sh
   verify-review-clear.sh
   review-response-gate.sh
