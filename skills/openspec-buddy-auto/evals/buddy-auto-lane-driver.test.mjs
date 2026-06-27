@@ -30,6 +30,7 @@ case "\${1:-}" in
   rev-parse)
     if [[ "\${2:-}" == "--show-toplevel" ]]; then printf '%s\\n' ${JSON.stringify(repoDir)}; exit 0; fi
     if [[ "\${2:-}" == "HEAD" ]]; then
+      if [[ -n "\${REVIEW_FIX_NEW_HEAD:-}" && "\${CURRENT_BRANCH:-dev1}" == "change-675" ]]; then printf '%s\\n' "\${REVIEW_FIX_NEW_HEAD}"; exit 0; fi
       if [[ "\${CURRENT_BRANCH:-dev1}" == "change-676" ]]; then printf 'head-2\\n'; else printf 'head-1\\n'; fi
       exit 0
     fi
@@ -70,9 +71,15 @@ exit 99
 set -euo pipefail
 if [[ "\${1:-}" == "api" && "\${2:-}" == */issues/*/comments* ]]; then printf '[]\\n'; exit 0; fi
 if [[ "\${1:-}" == "pr" && "\${2:-}" == "view" ]]; then
+  if [[ " $* " == *" --jq .headRefOid "* ]]; then
+    case "\${3:-}" in
+      708) printf 'head-2\\n'; exit 0 ;;
+      *) printf '%s\\n' "\${REVIEW_FIX_NEW_HEAD:-head-1}"; exit 0 ;;
+    esac
+  fi
   case "\${3:-}" in
     708) printf '%s\\n' '{"number":708,"state":"OPEN","headRefName":"change-676","headRefOid":"head-2"}'; exit 0 ;;
-    *) printf '%s\\n' '{"number":707,"state":"OPEN","headRefName":"change-675","headRefOid":"head-1"}'; exit 0 ;;
+    *) printf '{"number":707,"state":"OPEN","headRefName":"change-675","headRefOid":"%s"}\\n' "\${REVIEW_FIX_NEW_HEAD:-head-1}"; exit 0 ;;
   esac
 fi
 echo "unexpected gh invocation: $*" >&2
@@ -392,7 +399,7 @@ console.log('state_file: ${fakeState}');
     worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
     maxLanes: 2,
     lanes: [
-      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'review_fix', reviewRetryCount: 0 },
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'old-head', stage: 'review_fix', reviewRetryCount: 0 },
     ],
   }));
   const fakeState = path.join(envInfo.root, 'review-fix-driver-state.json');
@@ -400,10 +407,10 @@ console.log('state_file: ${fakeState}');
     issue: '675',
     pr: '707',
     change: 'change-675',
-    head: 'head-1',
+    head: 'head-new',
     stages: {
-      issue_pr_bound: { issue: '675', pr: '707', head: 'head-1', headRefName: 'change-675' },
-      review_requested: { at: '2026-06-27T00:00:00.000Z', head: 'head-1' },
+      issue_pr_bound: { issue: '675', pr: '707', head: 'head-new', headRefName: 'change-675' },
+      review_requested: { at: '2026-06-27T00:00:00.000Z', head: 'head-new' },
     },
   }));
   const fakeDriver = path.join(envInfo.root, 'fake-review-fix-driver.mjs');
@@ -419,6 +426,7 @@ console.log('state_file: ${fakeState}');
     OPENSPEC_BUDDY_AUTO_GOAL: '1',
     OPENSPEC_BUDDY_AUTO_LANES: '2',
     CURRENT_BRANCH: 'change-675',
+    REVIEW_FIX_NEW_HEAD: 'head-new',
     OPENSPEC_BUDDY_AUTO_SINGLE_DRIVER: fakeDriver,
   });
   assert.equal(result.status, 0, result.stderr);
@@ -426,11 +434,12 @@ console.log('state_file: ${fakeState}');
   assert.match(result.stdout, /^stage: review-yield$/m);
   const log = fs.readFileSync(envInfo.logFile, 'utf8');
   assert.match(log, /review-fix-context=1/);
-  assert.match(log, /driver-env issue=675 pr=707 head=head-1 targetIssue= targetPr=/);
+  assert.match(log, /driver-env issue=675 pr=707 head=head-new targetIssue= targetPr=/);
   assert.match(log, /verify-claim --issue 675 --pr 707/);
   assert.match(log, /verify-request 707/);
   const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
   assert.equal(state.lanes[0].stage, 'waiting_review');
+  assert.equal(state.lanes[0].head, 'head-new');
 }
 
 {

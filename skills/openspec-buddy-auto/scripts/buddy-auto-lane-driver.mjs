@@ -219,6 +219,12 @@ function resumeLane(lane) {
   return run(process.execPath, [laneSwitchGate, ...args], { allowFailure: true });
 }
 
+function prHead(pr) {
+  if (!pr) return '';
+  const result = run('gh', ['pr', 'view', String(pr), '--json', 'headRefOid', '--jq', '.headRefOid'], { allowFailure: true });
+  return result.status === 0 ? result.stdout.trim() : '';
+}
+
 function probeLane(lane) {
   return run(path.join(coreScriptDir, 'probe-review-state.sh'), [String(lane.pr)], {
     allowFailure: true,
@@ -501,6 +507,14 @@ function verifyCurrentWaitingLaneIfOnBranch(state) {
 }
 
 function advanceResumedLane(state, lane) {
+  if (lane.stage === 'review_fix') {
+    const head = prHead(lane.pr);
+    if (head && head !== lane.head) {
+      lane.head = head;
+      lane.updatedAt = new Date().toISOString();
+      writeLaneState(state);
+    }
+  }
   const resume = resumeLane(lane);
   if (resume.status !== 0) {
     lane.stage = 'blocked';
