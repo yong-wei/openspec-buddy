@@ -16,7 +16,7 @@ import {
 const autoScriptDir = path.dirname(fileURLToPath(import.meta.url));
 const defaultCoreScriptDir = path.resolve(autoScriptDir, '../../openspec-buddy/scripts');
 const coreScriptDir = process.env.OPENSPEC_BUDDY_CORE_SCRIPT_DIR || defaultCoreScriptDir;
-const singleDriver = path.join(autoScriptDir, 'buddy-auto-driver.mjs');
+const singleDriver = process.env.OPENSPEC_BUDDY_AUTO_SINGLE_DRIVER || path.join(autoScriptDir, 'buddy-auto-driver.mjs');
 const laneSwitchGate = path.join(autoScriptDir, 'lane-switch-gate.mjs');
 
 function truthy(value) {
@@ -114,6 +114,18 @@ function parseDriverStage(stdout) {
   const match = String(stdout || '').match(/^([A-Z]+)\n(?:[\s\S]*?\n)?stage:\s*(.+)$/m);
   if (!match) return { status: '', stage: '' };
   return { status: match[1], stage: match[2].trim() };
+}
+
+function parseDriverState(stdout) {
+  const match = String(stdout || '').match(/^state_file:\s*(.+)$/m);
+  if (!match) return {};
+  const stateFile = match[1].trim();
+  if (!stateFile || !fs.existsSync(stateFile)) return {};
+  try {
+    return JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+  } catch {
+    return {};
+  }
 }
 
 function parseSelection(stdout) {
@@ -320,12 +332,29 @@ function claimNextIssue(state, opts) {
     return true;
   }
   const parsed = parseDriverStage(driver.stdout);
+  const driverState = parseDriverState(driver.stdout);
+  const issuePrBound = driverState.stages?.issue_pr_bound || {};
+  const reviewRequested = driverState.stages?.review_requested || {};
+  const laneStage = parsed.stage === 'review-yield' ? 'waiting_review' : 'implementing';
+  const lanePr = String(driverState.pr || issuePrBound.pr || '');
+  const laneHead = String(driverState.head || reviewRequested.head || issuePrBound.head || '');
+  if (laneStage === 'waiting_review' && (!lanePr || !laneHead)) {
+    emitBlocked([
+      ['stage', 'claim-next-issue'],
+      ['issue', selected.number],
+      ['reason', 'buddy-auto-driver returned review-yield without PR/head receipt; refusing to park an unpollable lane.'],
+    ], driver.stdout);
+    return true;
+  }
   upsertLane(state, {
     id: `issue-${selected.number}`,
-    issue: String(selected.number),
-    change: selected.change_id || '',
-    branch: selected.claim_branch || selected.change_id || '',
-    stage: parsed.stage === 'review-yield' ? 'waiting_review' : 'implementing',
+    issue: String(driverState.issue || issuePrBound.issue || selected.number),
+    change: driverState.change || selected.change_id || '',
+    branch: issuePrBound.headRefName || selected.claim_branch || selected.change_id || '',
+    pr: lanePr,
+    head: laneHead,
+    stage: laneStage,
+    reviewRequestedAt: reviewRequested.at || '',
     lastResult: parsed.stage,
   });
   writeLaneState(state);
