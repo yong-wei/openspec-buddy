@@ -324,7 +324,22 @@ function claimNextIssue(state, opts) {
   }
   const selected = parseSelection(selectionResult.stdout);
   if (!selected) {
-    if (state.lanes.length === 0) {
+    const blockedLanes = state.lanes.filter((lane) => lane.stage === 'blocked');
+    const activeLanes = state.lanes.filter((lane) => !['done', 'blocked'].includes(lane.stage));
+    if (blockedLanes.length > 0 && activeLanes.length === 0) {
+      const lane = blockedLanes[0] || {};
+      emitBlocked([
+        ['stage', 'blocked-lanes'],
+        ['lane', lane.id],
+        ['issue', lane.issue],
+        ['pr', lane.pr],
+        ['reason', `${blockedLanes.length} lane(s) are blocked; resolve or clear blocked lane state before treating the goal loop as complete.`],
+        ['blocked_reason', lane.blockedReason],
+      ]);
+      return true;
+    }
+    const unfinishedLanes = state.lanes.filter((lane) => lane.stage !== 'done');
+    if (unfinishedLanes.length === 0) {
       emitDone([
         ['stage', 'no-available-changes'],
         ['reason', 'No executable OpenSpec Buddy issue.'],
