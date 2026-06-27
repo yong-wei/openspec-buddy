@@ -179,8 +179,8 @@ function runSingleDriverForIssue(issue) {
 
 function runSingleDriverForLane(lane) {
   const env = {
-    OPENSPEC_BUDDY_AUTO_TARGET_ISSUE: String(lane.issue || ''),
-    OPENSPEC_BUDDY_AUTO_TARGET_PR: String(lane.pr || ''),
+    OPENSPEC_BUDDY_AUTO_ISSUE: String(lane.issue || ''),
+    OPENSPEC_BUDDY_AUTO_PR: String(lane.pr || ''),
     OPENSPEC_BUDDY_AUTO_HEAD: String(lane.head || ''),
     OPENSPEC_BUDDY_AUTO_REVIEW_WAIT_MODE: 'yield',
   };

@@ -410,6 +410,7 @@ console.log('state_file: ${fakeState}');
   fs.writeFileSync(fakeDriver, `#!/usr/bin/env node
 import fs from 'node:fs';
 fs.appendFileSync(${JSON.stringify(envInfo.logFile)}, 'review-fix-context=' + (process.env.OPENSPEC_BUDDY_REVIEW_FIX_CONTEXT || '') + '\\n');
+fs.appendFileSync(${JSON.stringify(envInfo.logFile)}, 'driver-env issue=' + (process.env.OPENSPEC_BUDDY_AUTO_ISSUE || '') + ' pr=' + (process.env.OPENSPEC_BUDDY_AUTO_PR || '') + ' head=' + (process.env.OPENSPEC_BUDDY_AUTO_HEAD || '') + ' targetIssue=' + (process.env.OPENSPEC_BUDDY_AUTO_TARGET_ISSUE || '') + ' targetPr=' + (process.env.OPENSPEC_BUDDY_AUTO_TARGET_PR || '') + '\\n');
 console.log('DONE');
 console.log('stage: review-yield');
 console.log('state_file: ${fakeState}');
@@ -425,6 +426,7 @@ console.log('state_file: ${fakeState}');
   assert.match(result.stdout, /^stage: review-yield$/m);
   const log = fs.readFileSync(envInfo.logFile, 'utf8');
   assert.match(log, /review-fix-context=1/);
+  assert.match(log, /driver-env issue=675 pr=707 head=head-1 targetIssue= targetPr=/);
   assert.match(log, /verify-claim --issue 675 --pr 707/);
   assert.match(log, /verify-request 707/);
   const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
