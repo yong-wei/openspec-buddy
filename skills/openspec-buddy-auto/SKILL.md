@@ -61,17 +61,17 @@ claim the next issue. Without it, an empty worktree context must stop.
 
 ## Multi-Lane Opt-In
 
-Use multi-lane mode only when the user explicitly asks to work on another issue
-while submitted PRs wait for online Codex review:
+Use multi-lane only when the user explicitly asks to work on another issue
+while submitted PRs wait:
 
 ```bash
 OPENSPEC_BUDDY_AUTO_GOAL=1 OPENSPEC_BUDDY_AUTO_LANES=2 <openspec-buddy-auto-skill-dir>/scripts/buddy-auto-lane-driver.mjs
 ```
 
-After starting the lane driver, obey the same silence rule. Multi-lane is
-single-writer scheduling, not parallel implementation; do not mix it with a
-concurrently running single-lane driver in the same worktree. Details live in
+After starting it, obey the same silence rule. Multi-lane is single-writer
+scheduling; do not mix it with a concurrent single-lane driver. Details live in
 `references/driver-states.md` and `references/review-waiting.md`.
+Lane recovery is driver-owned: use `--reconcile` or `--release-lane`; do not edit lane cache files by hand.
 
 If it reports `BLOCKED`, fix only that blocker. If it reports `HANDOFF`, do
 only the requested agent work. After agent-owned work or external state changes,

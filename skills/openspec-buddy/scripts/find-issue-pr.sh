@@ -25,6 +25,27 @@ openspec_buddy_require_core_config
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
+is_retryable_github_error() {
+  grep -Eiq 'EOF|rate.?limit|secondary rate|abuse detection|timeout|timed out|ECONNRESET|ETIMEDOUT|502|503|504'
+}
+
+gh_api_once_with_retry() {
+  local output_file="$1"
+  shift
+  local err_file="$tmp_dir/gh-api-err.txt"
+  if gh api "$@" > "$output_file" 2> "$err_file"; then
+    return 0
+  fi
+  if is_retryable_github_error < "$err_file"; then
+    sleep 1
+    if gh api "$@" > "$output_file" 2> "$err_file"; then
+      return 0
+    fi
+  fi
+  cat "$err_file" >&2
+  return 1
+}
+
 cache_dir="$(buddy_cache_dir "$tmp_dir/gh-cache")"
 repo_nwo="$(buddy_repo_nwo)"
 owner="${repo_nwo%%/*}"
@@ -66,7 +87,7 @@ branch=""
 for branch in "${branches[@]}"; do
   branch_key="$(printf '%s' "$branch" | node -e 'const fs=require("node:fs"); process.stdout.write(Buffer.from(fs.readFileSync(0)).toString("hex"));')"
   branch_prs="$tmp_dir/prs-$branch_key.json"
-  gh api "repos/$repo_nwo/pulls?state=all&head=$owner:$branch&per_page=20" > "$branch_prs"
+  gh_api_once_with_retry "$branch_prs" "repos/$repo_nwo/pulls?state=all&head=$owner:$branch&per_page=20"
   node -e '
 const fs = require("node:fs");
 const [combinedFile, branchFile] = process.argv.slice(1);

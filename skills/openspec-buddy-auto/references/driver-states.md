@@ -52,6 +52,7 @@ review_fix
 merge_ready
 done
 blocked
+retryable_blocked
 ```
 
 The lane driver holds an exclusive per-worktree lock while it runs. A second
@@ -63,6 +64,24 @@ not protect against that manual bypass.
 Default lane concurrency is `2`; the hard maximum is `3`. A lane can be parked
 only after commit, push, current-head review request, clean worktree, matching
 PR head, and claim-worktree guard all pass.
+
+Blocked lanes that still own an issue, PR, branch, or claim id reserve capacity.
+They are not empty slots. A transient GitHub failure such as EOF, rate limit,
+timeout, or 5xx enters `retryable_blocked`; the next lane driver run must first
+reconcile that lane from GitHub truth before selecting another issue.
+
+Recovery controls:
+
+```bash
+<openspec-buddy-auto-skill-dir>/scripts/buddy-auto-lane-driver.mjs --reconcile
+<openspec-buddy-auto-skill-dir>/scripts/buddy-auto-lane-driver.mjs --release-lane <issue-number> --reason "<why>"
+```
+
+Use `--reconcile` when local lane state may lag GitHub truth. Use
+`--release-lane` only for a confirmed erroneous claim; it calls
+`release-claim.sh`, restores `status:ready`, and clears matching local lane
+state. Do not hand-edit `openspec/.buddy-cache/auto-lanes/*.json` during normal
+operation.
 
 ## Receipts
 

@@ -18,6 +18,7 @@ const commands = [
   { label: 'bash skills/openspec-buddy/evals/github-fetch-graphql-guard.test.sh', cmd: 'bash', args: ['skills/openspec-buddy/evals/github-fetch-graphql-guard.test.sh'] },
   { label: 'bash skills/openspec-buddy/evals/helper-help.test.sh', cmd: 'bash', args: ['skills/openspec-buddy/evals/helper-help.test.sh'] },
   { label: 'bash skills/openspec-buddy/evals/find-issue-pr.test.sh', cmd: 'bash', args: ['skills/openspec-buddy/evals/find-issue-pr.test.sh'] },
+  { label: 'bash skills/openspec-buddy/evals/release-claim.test.sh', cmd: 'bash', args: ['skills/openspec-buddy/evals/release-claim.test.sh'] },
   { label: 'bash skills/openspec-buddy/evals/link-issue-dependencies-budget.test.sh', cmd: 'bash', args: ['skills/openspec-buddy/evals/link-issue-dependencies-budget.test.sh'] },
   { label: 'bash skills/openspec-buddy/evals/list-ready-change-relationships.test.sh', cmd: 'bash', args: ['skills/openspec-buddy/evals/list-ready-change-relationships.test.sh'] },
   { label: 'bash skills/openspec-buddy/evals/mark-achieved-post-merge.test.sh', cmd: 'bash', args: ['skills/openspec-buddy/evals/mark-achieved-post-merge.test.sh'] },

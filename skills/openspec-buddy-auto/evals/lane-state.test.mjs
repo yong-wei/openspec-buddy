@@ -45,12 +45,27 @@ const state = {
   lanes: [
     { id: 'issue-1', issue: '1', stage: 'waiting_review', reviewRetryCount: 0 },
     { id: 'issue-2', issue: '2', stage: 'done', reviewRetryCount: 0 },
+    { id: 'issue-3', issue: '3', pr: '30', branch: 'change-3', stage: 'blocked', blockedReason: 'EOF', reviewRetryCount: 0 },
+    { id: 'issue-4', issue: '4', pr: '40', branch: 'change-4', stage: 'retryable_blocked', blockedReason: 'timeout', retryableSince: '2026-06-27T00:00:00.000Z', retryAttempts: 2, reviewRetryCount: 0 },
+    { id: 'cleared-blocked', stage: 'blocked', blockedReason: 'operator cleared', reviewRetryCount: 0 },
   ],
 };
 laneState.writeLaneState(state, { cwd: repoDir });
 const read = laneState.readLaneState({ cwd: repoDir, maxLanes: 2 });
-assert.deepEqual(laneState.activeLaneIssues(read), ['1']);
-assert.equal(laneState.pruneDoneLanes(read).lanes.length, 1);
+assert.deepEqual(laneState.activeLaneIssues(read), ['1', '3', '4']);
+assert.deepEqual(laneState.selectorExcludedIssues(read), ['1', '3', '4']);
+assert.equal(laneState.reservedLaneCount(read), 3);
+assert.equal(laneState.laneReservesCapacity(read.lanes.find((lane) => lane.id === 'issue-3')), true);
+assert.equal(laneState.laneReservesCapacity(read.lanes.find((lane) => lane.id === 'issue-4')), true);
+assert.equal(laneState.laneReservesCapacity(read.lanes.find((lane) => lane.id === 'cleared-blocked')), false);
+assert.equal(laneState.laneNeedsReconciliation(read.lanes.find((lane) => lane.id === 'issue-3')), true);
+assert.equal(laneState.laneNeedsReconciliation(read.lanes.find((lane) => lane.id === 'issue-4')), true);
+assert.equal(laneState.laneBlocksGoalCompletion(read.lanes.find((lane) => lane.id === 'issue-3')), true);
+assert.equal(laneState.laneBlocksGoalCompletion(read.lanes.find((lane) => lane.id === 'issue-4')), true);
+assert.equal(read.lanes.find((lane) => lane.id === 'issue-4').retryableSince, '2026-06-27T00:00:00.000Z');
+assert.equal(read.lanes.find((lane) => lane.id === 'issue-4').retryAttempts, 2);
+assert.equal(laneState.pruneDoneLanes(read).lanes.length, 4);
+assert.throws(() => laneState.normalizeLane({ id: 'bad', stage: 'retryable_blocked', retryAttempts: -1 }), /invalid retryAttempts/);
 
 const lock = laneState.acquireLaneLock({ cwd: repoDir, staleSeconds: '7200' });
 assert.throws(() => laneState.acquireLaneLock({ cwd: repoDir, staleSeconds: '7200' }), /lane-driver-already-running/);
