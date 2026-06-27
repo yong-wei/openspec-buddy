@@ -55,7 +55,7 @@ if [[ "$1" == "api" && "$2" == "user" ]]; then
   exit 0
 fi
 if [[ "$1" == "api" && "$2" == "repos/yong-wei/openspec-buddy/issues/42" ]]; then
-  printf '%s\n' '{"number":42,"state":"open","labels":[{"name":"status:claimed"}]}'
+  printf '%s\n' '{"number":42,"state":"open","labels":[{"name":"status:claimed"}],"assignees":[{"login":"YW"}]}'
   exit 0
 fi
 if [[ "$1" == "api" && "$2" == "--paginate" && "$3" == "--slurp" && "$4" == */issues/42/comments* ]]; then
@@ -133,7 +133,7 @@ JSON
 
 grep -F "OpenSpec Buddy Claim Release" "$COMMENT_LOG" >/dev/null
 grep -F "claim_id: claim-42" "$COMMENT_LOG" >/dev/null
-grep -F -- "--remove-label status:claimed --add-label status:ready" "$EDIT_LOG" >/dev/null
+grep -F -- "--remove-label status:claimed --add-label status:ready --remove-assignee YW" "$EDIT_LOG" >/dev/null
 node -e '
 const fs = require("node:fs");
 const data = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
@@ -166,8 +166,10 @@ cat > "$OPENSPEC_BUDDY_AUTO_LANE_STATE_DIR/dev1.json" <<'JSON'
 }
 JSON
 export ACTIVE_RELEASED=1
+: > "$EDIT_LOG"
 "$helper" 42 --reason "retry converge" --clear-lane > "$tmp_dir/retry-output.txt"
 grep -F "reconciled status:ready" "$tmp_dir/retry-output.txt" >/dev/null
+grep -F -- "--remove-label status:claimed --add-label status:ready --remove-assignee YW" "$EDIT_LOG" >/dev/null
 node -e '
 const fs = require("node:fs");
 const data = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));

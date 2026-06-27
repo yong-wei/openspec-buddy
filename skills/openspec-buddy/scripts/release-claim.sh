@@ -90,7 +90,23 @@ process.exit(names.includes("status:claimed") ? 0 : 1);
 ' "$issue_file"
 }
 
+issue_has_assignee() {
+  local login="$1"
+  if [[ -z "$login" ]]; then
+    return 1
+  fi
+  node -e '
+const fs=require("node:fs");
+const issue=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));
+const login=process.argv[2];
+const assignees=Array.isArray(issue.assignees) ? issue.assignees : [];
+const names=assignees.map((assignee)=>typeof assignee==="string" ? assignee : assignee?.login).filter(Boolean);
+process.exit(names.includes(login) ? 0 : 1);
+' "$issue_file" "$login"
+}
+
 restore_ready_status() {
+  local assignee_to_remove="${1:-}"
   existing_statuses="$(
     gh issue view "$issue_number" --json labels \
       --jq '[.labels[].name | select(test("^status:\\s*"))] | join(",")'
@@ -100,6 +116,9 @@ restore_ready_status() {
     label_args+=(--remove-label "$existing_statuses")
   fi
   label_args+=(--add-label "status:ready")
+  if issue_has_assignee "$assignee_to_remove"; then
+    label_args+=(--remove-assignee "$assignee_to_remove")
+  fi
   gh "${label_args[@]}"
 
   cache_dir="$(buddy_cache_dir)"
@@ -155,7 +174,7 @@ buddy_claim_active_comment_to_file "$comments_file" "$active_file"
 
 if ! node -e 'const fs=require("node:fs"); const data=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.exit(data && data.claim_id ? 0 : 1);' "$active_file"; then
   if issue_is_open && issue_has_status_claimed; then
-    restore_ready_status
+    restore_ready_status "$viewer"
     clear_current_lane ""
     printf 'Issue #%s has no active OpenSpec Buddy claim; reconciled status:ready.\n' "$issue_number"
     exit 0
@@ -172,6 +191,7 @@ lease_until="$(node -e 'const fs=require("node:fs"); const data=JSON.parse(fs.re
 base_sha="$(node -e 'const fs=require("node:fs"); const data=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(data.base_sha || "");' "$active_file")"
 claim_alias="$(node -e 'const fs=require("node:fs"); const data=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(data.worktree_alias || "");' "$active_file")"
 claim_path_hash="$(node -e 'const fs=require("node:fs"); const data=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(data.worktree_path_hash || "");' "$active_file")"
+claim_agent="$(node -e 'const fs=require("node:fs"); const data=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(String(data.agent || "").replace(/^@/, ""));' "$active_file")"
 
 if [[ "$force_release" != "1" ]]; then
   if [[ -z "$claim_alias" || -z "$claim_path_hash" ]]; then
@@ -199,7 +219,7 @@ fi
 
 buddy_release_claim_lock "$issue_number" "$change_id" "$claim_branch" "$viewer" "$claim_id" "$lease_until" "$reason"
 
-restore_ready_status
+restore_ready_status "${claim_agent:-$viewer}"
 clear_current_lane "$claim_branch"
 
 if [[ "$delete_branch" == "1" && -n "$claim_branch" && -n "$base_sha" ]]; then
