@@ -254,7 +254,7 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
   const result = run(envInfo, {
     OPENSPEC_BUDDY_AUTO_GOAL: '1',
     OPENSPEC_BUDDY_AUTO_LANES: '2',
-    CURRENT_BRANCH: 'change-675',
+    CURRENT_BRANCH: 'change-676',
     FIND_PR_FOR_676: '1',
   });
   assert.equal(result.status, 0, result.stderr);
@@ -267,6 +267,32 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
   assert.equal(lane.head, 'head-2');
   assert.equal(lane.branch, 'change-676');
   assert.match(lane.reviewRequestedAt, /^\d{4}-\d{2}-\d{2}T/);
+}
+
+{
+  const envInfo = makeEnv('claim-next-review-yield-dirty-blocks');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 2,
+    lanes: [
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0 },
+    ],
+  }));
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '2',
+    CURRENT_BRANCH: 'change-676',
+    FIND_PR_FOR_676: '1',
+    BUDDY_FAKE_DIRTY: '1',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^BLOCKED/m);
+  assert.match(result.stdout, /worktree is dirty/);
+  assert.doesNotMatch(result.stdout, /^HANDOFF/m);
+  const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  assert.equal(state.lanes.some((lane) => lane.issue === '676'), false);
 }
 
 {

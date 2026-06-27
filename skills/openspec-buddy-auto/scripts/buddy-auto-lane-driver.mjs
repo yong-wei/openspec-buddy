@@ -335,27 +335,35 @@ function claimNextIssue(state, opts) {
   const parsed = parseDriverStage(driver.stdout);
   const driverState = parseDriverState(driver.stdout);
   const issuePrBound = driverState.stages?.issue_pr_bound || {};
-  const reviewRequested = driverState.stages?.review_requested || {};
-  const laneStage = parsed.stage === 'review-yield' ? 'waiting_review' : 'implementing';
-  const lanePr = String(driverState.pr || issuePrBound.pr || '');
-  const laneHead = String(driverState.head || reviewRequested.head || issuePrBound.head || '');
-  if (laneStage === 'waiting_review' && (!lanePr || !laneHead)) {
-    emitBlocked([
-      ['stage', 'claim-next-issue'],
-      ['issue', selected.number],
-      ['reason', 'buddy-auto-driver returned review-yield without PR/head receipt; refusing to park an unpollable lane.'],
-    ], driver.stdout);
-    return true;
-  }
-  upsertLane(state, {
+  const lane = {
     id: `issue-${selected.number}`,
     issue: String(driverState.issue || issuePrBound.issue || selected.number),
     change: driverState.change || selected.change_id || '',
     branch: issuePrBound.headRefName || selected.claim_branch || selected.change_id || '',
-    pr: lanePr,
-    head: laneHead,
-    stage: laneStage,
-    reviewRequestedAt: reviewRequested.at || '',
+    pr: String(driverState.pr || issuePrBound.pr || ''),
+    head: String(driverState.head || issuePrBound.head || ''),
+  };
+  const parkResult = parkLaneFromDriverReceipt(state, lane, parsed, driverState);
+  if (parkResult.status === 'blocked') {
+    emitBlocked([
+      ['stage', 'claim-next-issue'],
+      ['issue', selected.number],
+      ['reason', parkResult.reason],
+    ], driver.stdout);
+    return true;
+  }
+  if (parkResult.status === 'parked') {
+    emitHandoff([
+      ['stage', parsed.stage],
+      ['issue', selected.number],
+      ['pr', parkResult.lane.pr],
+      ['required_action', 'Lane is now safely parked in waiting_review; rerun the lane driver to poll or schedule another lane.'],
+    ], driver.stdout);
+    return true;
+  }
+  upsertLane(state, {
+    ...lane,
+    stage: 'implementing',
     lastResult: parsed.stage,
   });
   writeLaneState(state);
