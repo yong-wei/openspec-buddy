@@ -89,6 +89,10 @@ exit 99
   makeExecutable(path.join(coreDir, 'select-next-change.sh'), `#!/bin/bash
 set -euo pipefail
 echo "select excludes=$(cat "\${OPENSPEC_BUDDY_EXCLUDE_ISSUES_FILE:?}")" >> ${JSON.stringify(logFile)}
+if [[ "\${SELECT_LOCAL_ONLY:-0}" == "1" ]]; then
+  printf '%s\\n' '{"selected":{"change_id":"local-change","local_only":true,"no_issue":true,"number":null}}'
+  exit 0
+fi
 printf '%s\\n' '{"selected":{"number":676,"title":"Next","change_id":"change-676","claim_branch":"change-676"}}'
 `);
   makeExecutable(path.join(coreDir, 'claim-issue.sh'), `#!/bin/bash\necho "claim $*" >> ${JSON.stringify(logFile)}\n`);
@@ -168,6 +172,31 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
   assert.match(log, /claim 676/);
   const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
   assert.ok(state.lanes.some((lane) => lane.issue === '676' && lane.stage === 'implementing'));
+}
+
+{
+  const envInfo = makeEnv('local-only-selection-handoff');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 2,
+    lanes: [],
+  }));
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '2',
+    SELECT_LOCAL_ONLY: '1',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^HANDOFF/m);
+  assert.match(result.stdout, /^stage: local-only$/m);
+  assert.match(result.stdout, /change: local-change/);
+  const log = fs.readFileSync(envInfo.logFile, 'utf8');
+  assert.match(log, /select excludes=\[\]/);
+  assert.doesNotMatch(log, /claim /);
+  const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  assert.equal(state.lanes.length, 0);
 }
 
 {

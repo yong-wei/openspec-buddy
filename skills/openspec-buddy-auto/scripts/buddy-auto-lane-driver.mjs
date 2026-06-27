@@ -333,6 +333,14 @@ function claimNextIssue(state, opts) {
     }
     return false;
   }
+  if (selected.local_only || selected.no_issue || !selected.number) {
+    emitHandoff([
+      ['stage', 'local-only'],
+      ['change', selected.change_id || selected.change || ''],
+      ['required_action', 'Selector returned a local-only/no-issue change. Use the single-lane local-only --no-pr workflow; do not claim an issue or add a multi-lane issue lane.'],
+    ], selectionResult.stdout);
+    return true;
+  }
   const driver = runSingleDriverForIssue(selected.number);
   if (driver.status !== 0) {
     emitBlocked([
