@@ -54,6 +54,17 @@ if [[ "$1" == "api" && "$2" == "--paginate" && "$3" == "--slurp" && "$4" == */is
   exit 0
 fi
 if [[ "$1" == "api" && "$2" == "repos/yong-wei/openspec-buddy/pulls?state=all&head=yong-wei:demo-change&per_page=20" ]]; then
+  if [[ "${GH_PULLS_FAIL_ONCE:-0}" == "1" ]]; then
+    count_file="${GH_PULLS_COUNT_FILE:?}"
+    count=0
+    if [[ -f "$count_file" ]]; then count="$(cat "$count_file")"; fi
+    count=$((count + 1))
+    printf '%s\n' "$count" > "$count_file"
+    if [[ "$count" -eq 1 ]]; then
+      echo "GitHub API EOF" >&2
+      exit 1
+    fi
+  fi
   cat "${PRS_FILE:?}"
   exit 0
 fi
@@ -78,6 +89,17 @@ JSON
 export PRS_FILE="$tmp_dir/open-prs.json"
 open_result="$("$helper" 42)"
 node -e 'const data=JSON.parse(process.argv[1]); if (data.pr !== 123 || data.state !== "OPEN") process.exit(1);' "$open_result"
+
+export GH_PULLS_FAIL_ONCE=1
+export GH_PULLS_COUNT_FILE="$tmp_dir/pulls-count.txt"
+rm -f "$GH_PULLS_COUNT_FILE"
+retry_result="$("$helper" 42)"
+node -e 'const data=JSON.parse(process.argv[1]); if (data.pr !== 123 || data.state !== "OPEN") process.exit(1);' "$retry_result"
+if [[ "$(cat "$GH_PULLS_COUNT_FILE")" != "2" ]]; then
+  echo "find-issue-pr should retry one transient pulls query failure" >&2
+  exit 1
+fi
+unset GH_PULLS_FAIL_ONCE GH_PULLS_COUNT_FILE
 
 cat > "$tmp_dir/closed-prs.json" <<'JSON'
 [

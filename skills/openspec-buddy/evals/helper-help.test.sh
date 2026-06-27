@@ -15,6 +15,7 @@ helpers=(
   review-response-gate.sh
   resolve-review-thread.sh
   reply-review-thread.sh
+  release-claim.sh
   mark-achieved.sh
   mark-achieved-post-merge.sh
   verify-post-merge-achievement-inputs.sh

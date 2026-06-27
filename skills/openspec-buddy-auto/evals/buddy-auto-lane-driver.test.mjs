@@ -14,6 +14,7 @@ function makeExecutable(file, body) {
 }
 
 function makeEnv(name) {
+  if (process.env.BUDDY_TEST_TRACE) console.error(`test:${name}`);
   const root = path.join(tmp, name);
   const binDir = path.join(root, 'bin');
   const coreDir = path.join(root, 'core');
@@ -100,6 +101,7 @@ fi
 printf '%s\\n' '{"selected":{"number":676,"title":"Next","change_id":"change-676","claim_branch":"change-676"}}'
 `);
   makeExecutable(path.join(coreDir, 'claim-issue.sh'), `#!/bin/bash\necho "claim $*" >> ${JSON.stringify(logFile)}\n`);
+  makeExecutable(path.join(coreDir, 'release-claim.sh'), `#!/bin/bash\necho "release $*" >> ${JSON.stringify(logFile)}\n`);
   makeExecutable(path.join(coreDir, 'find-issue-pr.sh'), `#!/bin/bash
 set -euo pipefail
 echo "find-pr $*" >> ${JSON.stringify(logFile)}
@@ -109,12 +111,17 @@ if [[ "\${FIND_PR_FOR_676:-0}" == "1" && "\${1:-}" == "676" ]]; then
 fi
 printf '{"issue":%s,"pr":null,"reason":"no PR"}\\n' "$1"
 `);
+  makeExecutable(path.join(coreDir, 'mark-in-progress.sh'), `#!/bin/bash\necho "mark-in-progress $*" >> ${JSON.stringify(logFile)}\n`);
   makeExecutable(path.join(coreDir, 'mark-review.sh'), `#!/bin/bash\necho "mark-review $*" >> ${JSON.stringify(logFile)}\n`);
   makeExecutable(path.join(coreDir, 'verify-claim-worktree.sh'), `#!/bin/bash\necho "verify-claim $*" >> ${JSON.stringify(logFile)}\n`);
   makeExecutable(path.join(coreDir, 'verify-current-head-review-request.sh'), `#!/bin/bash\necho "verify-request $*" >> ${JSON.stringify(logFile)}\n`);
   makeExecutable(path.join(coreDir, 'probe-review-state.sh'), `#!/bin/bash
 set -euo pipefail
 echo "probe $* skip=\${OPENSPEC_BUDDY_PROBE_SKIP_WORKTREE_GUARD:-0}" >> ${JSON.stringify(logFile)}
+if [[ "\${PROBE_EOF:-0}" == "1" ]]; then
+  echo "GitHub API EOF" >&2
+  exit 1
+fi
 if [[ "\${PROBE_RETRY_EXPIRED:-0}" == "1" ]]; then
   printf '%s\\n' '{"pr":"707","head":"head-1","signature":"sig","requestState":"present-current-head","state":"waiting","requestAgeSeconds":901,"retryDue":false,"retryExpired":true}'
   exit 0
@@ -131,17 +138,50 @@ case "\${CHECK_REVIEW_STATUS:-0}" in
 esac
 `);
   makeExecutable(path.join(coreDir, 'request-pr-review.sh'), `#!/bin/bash\necho "request $*" >> ${JSON.stringify(logFile)}\n`);
-  return { root, binDir, coreDir, repoDir, stateDir, logFile };
+  const singleDriver = path.join(root, 'fake-single-driver.mjs');
+  fs.writeFileSync(singleDriver, `#!/usr/bin/env node
+import fs from 'node:fs';
+import path from 'node:path';
+const issue = process.env.OPENSPEC_BUDDY_AUTO_TARGET_ISSUE || process.env.OPENSPEC_BUDDY_AUTO_ISSUE || '';
+const pr = process.env.OPENSPEC_BUDDY_AUTO_PR || '';
+if (process.env.OPENSPEC_BUDDY_AUTO_TARGET_ISSUE) {
+  fs.appendFileSync(${JSON.stringify(logFile)}, 'claim ' + process.env.OPENSPEC_BUDDY_AUTO_TARGET_ISSUE + '\\n');
+}
+if ((issue === '676' || pr === '708') && process.env.FIND_PR_FOR_676 === '1') {
+  fs.appendFileSync(${JSON.stringify(logFile)}, 'find-pr ' + (issue || '676') + '\\n');
+  fs.appendFileSync(${JSON.stringify(logFile)}, 'mark-review 676 708\\n');
+  const stateFile = path.join(${JSON.stringify(root)}, 'fake-driver-state-' + process.pid + '.json');
+  fs.writeFileSync(stateFile, JSON.stringify({
+    issue: '676',
+    pr: '708',
+    change: 'change-676',
+    head: 'head-2',
+    stages: {
+      issue_pr_bound: { issue: '676', pr: '708', head: 'head-2', headRefName: 'change-676' },
+      review_requested: { at: new Date().toISOString(), head: 'head-2' },
+    },
+  }));
+  console.log('DONE');
+  console.log('stage: review-yield');
+  console.log('state_file: ' + stateFile);
+} else {
+  console.log('HANDOFF');
+  console.log('stage: implement-or-open-pr');
+}
+`, { mode: 0o755 });
+  return { root, binDir, coreDir, repoDir, stateDir, logFile, singleDriver };
 }
 
 function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
   return spawnSync(process.execPath, [helper, ...args], {
     cwd: envInfo.repoDir,
+    timeout: 20000,
     env: {
       ...process.env,
       PATH: `${envInfo.binDir}:${process.env.PATH}`,
       OPENSPEC_BUDDY_CORE_SCRIPT_DIR: envInfo.coreDir,
       OPENSPEC_BUDDY_AUTO_LANE_STATE_DIR: envInfo.stateDir,
+      OPENSPEC_BUDDY_AUTO_SINGLE_DRIVER: envInfo.singleDriver,
       ...extraEnv,
     },
     encoding: 'utf8',
@@ -162,7 +202,7 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
   fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
     version: 1,
     worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
-    maxLanes: 2,
+    maxLanes: 1,
     lanes: [
       { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0 },
     ],
@@ -184,12 +224,12 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
   fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
     version: 1,
     worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
-    maxLanes: 2,
+    maxLanes: 1,
     lanes: [],
   }));
   const result = run(envInfo, {
     OPENSPEC_BUDDY_AUTO_GOAL: '1',
-    OPENSPEC_BUDDY_AUTO_LANES: '2',
+    OPENSPEC_BUDDY_AUTO_LANES: '1',
     SELECT_LOCAL_ONLY: '1',
   });
   assert.equal(result.status, 0, result.stderr);
@@ -216,7 +256,7 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
   }));
   const result = run(envInfo, {
     OPENSPEC_BUDDY_AUTO_GOAL: '1',
-    OPENSPEC_BUDDY_AUTO_LANES: '2',
+    OPENSPEC_BUDDY_AUTO_LANES: '1',
     SELECT_NONE: '1',
   });
   assert.equal(result.status, 0, result.stderr);
@@ -232,7 +272,7 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
     worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
     maxLanes: 2,
     lanes: [
-      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'blocked', blockedReason: 'needs human', reviewRetryCount: 0 },
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '', head: '', stage: 'blocked', blockedReason: 'needs human', reviewRetryCount: 0 },
     ],
   }));
   const result = run(envInfo, {
@@ -244,8 +284,31 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
   assert.match(result.stdout, /^BLOCKED/m);
   assert.match(result.stdout, /^stage: blocked-lanes$/m);
   assert.match(result.stdout, /issue: 675/);
-  assert.match(result.stdout, /blocked_reason: needs human/);
+  assert.match(result.stdout, /blocked_reason: no PR/);
   assert.doesNotMatch(result.stdout, /^DONE/m);
+}
+
+{
+  const envInfo = makeEnv('only-blocked-full-capacity');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 1,
+    lanes: [
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '', head: '', stage: 'blocked', blockedReason: 'needs human', reviewRetryCount: 0 },
+    ],
+  }));
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '1',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^BLOCKED/m);
+  assert.match(result.stdout, /^stage: blocked-lanes$/m);
+  const log = fs.existsSync(envInfo.logFile) ? fs.readFileSync(envInfo.logFile, 'utf8') : '';
+  assert.doesNotMatch(log, /select excludes=/);
+  assert.doesNotMatch(log, /claim /);
 }
 
 {
@@ -272,6 +335,112 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
   assert.doesNotMatch(result.stdout, /^stage: blocked-lanes$/m);
   const log = fs.readFileSync(envInfo.logFile, 'utf8');
   assert.match(log, /probe 707 skip=1/);
+}
+
+{
+  const envInfo = makeEnv('owned-blocked-lane-reserves-capacity');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 2,
+    lanes: [
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0, lastRequestState: 'present-current-head' },
+      { id: 'issue-676', issue: '676', change: 'change-676', branch: 'change-676', pr: '708', head: 'head-2', stage: 'blocked', blockedReason: 'GitHub API EOF', reviewRetryCount: 0 },
+    ],
+  }));
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '2',
+    CURRENT_BRANCH: 'dev1',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^DONE/m);
+  const log = fs.readFileSync(envInfo.logFile, 'utf8');
+  assert.match(log, /probe 707 skip=1/);
+  assert.doesNotMatch(log, /select excludes=/);
+  assert.doesNotMatch(log, /claim 676/);
+}
+
+{
+  const envInfo = makeEnv('probe-eof-becomes-retryable-blocked');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 1,
+    lanes: [
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0, lastRequestState: 'present-current-head' },
+    ],
+  }));
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '1',
+    CURRENT_BRANCH: 'dev1',
+    PROBE_EOF: '1',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^BLOCKED/m);
+  assert.match(result.stdout, /GitHub API EOF/);
+  const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  assert.equal(state.lanes[0].stage, 'retryable_blocked');
+  assert.match(state.lanes[0].retryableSince, /^\d{4}-\d{2}-\d{2}T/);
+  assert.equal(state.lanes[0].retryAttempts, 1);
+}
+
+{
+  const envInfo = makeEnv('release-lane-command');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 1,
+    lanes: [
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'blocked', blockedReason: 'misclaim', reviewRetryCount: 0 },
+    ],
+  }));
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '1',
+  }, ['--release-lane', '675', '--reason', 'misclaimed']);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^DONE/m);
+  assert.match(result.stdout, /^stage: release-lane$/m);
+  const log = fs.readFileSync(envInfo.logFile, 'utf8');
+  assert.match(log, /release 675 --clear-lane --reason misclaimed/);
+  assert.doesNotMatch(log, /select excludes=/);
+  assert.doesNotMatch(log, /claim /);
+}
+
+{
+  const envInfo = makeEnv('transient-blocked-bridges-existing-pr');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 1,
+    lanes: [
+      { id: 'issue-676', issue: '676', change: 'change-676', branch: 'change-676', pr: '', head: '', stage: 'blocked', blockedReason: 'GitHub GraphQL EOF', reviewRetryCount: 0 },
+    ],
+  }));
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '1',
+    CURRENT_BRANCH: 'dev1',
+    FIND_PR_FOR_676: '1',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^DONE/m);
+  const log = fs.readFileSync(envInfo.logFile, 'utf8');
+  assert.match(log, /find-pr 676/);
+  assert.match(log, /probe 708 skip=1/);
+  assert.doesNotMatch(log, /select excludes=/);
+  const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  const lane = state.lanes[0];
+  assert.equal(lane.stage, 'waiting_review');
+  assert.equal(lane.pr, '708');
+  assert.equal(lane.head, 'head-2');
+  assert.equal(lane.blockedReason, '');
 }
 
 {
@@ -469,8 +638,7 @@ console.log('state_file: ${fakeState}');
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /^HANDOFF/m);
   assert.match(result.stdout, /^stage: implement-or-open-pr$/m);
-  const log = fs.readFileSync(envInfo.logFile, 'utf8');
-  assert.match(log, /find-pr 675/);
+  const log = fs.existsSync(envInfo.logFile) ? fs.readFileSync(envInfo.logFile, 'utf8') : '';
   assert.doesNotMatch(log, /select excludes=/);
   assert.doesNotMatch(log, /claim 676/);
 }
@@ -539,11 +707,75 @@ console.log('state_file: ${fakeState}');
   const log = fs.readFileSync(envInfo.logFile, 'utf8');
   assert.match(log, /review-fix-context=1/);
   assert.match(log, /driver-env issue=675 pr=707 head=head-new targetIssue= targetPr=/);
+  assert.match(log, /mark-review 675 707/);
   assert.match(log, /verify-claim --issue 675 --pr 707/);
   assert.match(log, /verify-request 707/);
   const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
   assert.equal(state.lanes[0].stage, 'waiting_review');
   assert.equal(state.lanes[0].head, 'head-new');
+}
+
+{
+  const envInfo = makeEnv('review-fix-handoff-without-actionable-reparks');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 2,
+    lanes: [
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'old-head', stage: 'review_fix', reviewRetryCount: 0 },
+    ],
+  }));
+  const fakeDriver = path.join(envInfo.root, 'fake-review-fix-handoff-driver.mjs');
+  fs.writeFileSync(fakeDriver, `#!/usr/bin/env node
+import fs from 'node:fs';
+fs.appendFileSync(${JSON.stringify(envInfo.logFile)}, 'review-fix-context=' + (process.env.OPENSPEC_BUDDY_REVIEW_FIX_CONTEXT || '') + '\\n');
+console.log('HANDOFF');
+console.log('stage: review-fix');
+`, { mode: 0o755 });
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '2',
+    CURRENT_BRANCH: 'change-675',
+    REVIEW_FIX_NEW_HEAD: 'head-new',
+    OPENSPEC_BUDDY_AUTO_SINGLE_DRIVER: fakeDriver,
+    CHECK_REVIEW_STATUS: '1',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^HANDOFF/m);
+  assert.match(result.stdout, /^stage: review-yield$/m);
+  const log = fs.readFileSync(envInfo.logFile, 'utf8');
+  assert.match(log, /review-fix-context=1/);
+  assert.match(log, /check 707/);
+  assert.match(log, /mark-review 675 707/);
+  const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  assert.equal(state.lanes[0].stage, 'waiting_review');
+  assert.equal(state.lanes[0].head, 'head-new');
+}
+
+{
+  const envInfo = makeEnv('review-returned-marks-in-progress');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 1,
+    lanes: [
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'review_returned', reviewRetryCount: 0 },
+    ],
+  }));
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '1',
+    CURRENT_BRANCH: 'dev1',
+    CHECK_REVIEW_STATUS: '3',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^HANDOFF/m);
+  const log = fs.readFileSync(envInfo.logFile, 'utf8');
+  assert.match(log, /mark-in-progress 675/);
+  const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  assert.equal(state.lanes[0].stage, 'review_fix');
 }
 
 {

@@ -18,7 +18,10 @@ export const allowedLaneStages = new Set([
   'achieving',
   'done',
   'blocked',
+  'retryable_blocked',
 ]);
+
+export const blockedLikeStages = new Set(['blocked', 'retryable_blocked']);
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -220,6 +223,8 @@ export function normalizeLane(lane) {
     lastRequestState: String(lane.lastRequestState || ''),
     lastResult: String(lane.lastResult || ''),
     blockedReason: String(lane.blockedReason || ''),
+    retryableSince: String(lane.retryableSince || ''),
+    retryAttempts: Number(lane.retryAttempts || 0),
     updatedAt: String(lane.updatedAt || ''),
   };
   if (!normalized.id) throw new Error('Lane is missing id.');
@@ -228,6 +233,9 @@ export function normalizeLane(lane) {
   }
   if (!Number.isInteger(normalized.reviewRetryCount) || normalized.reviewRetryCount < 0) {
     throw new Error(`Lane ${normalized.id} has invalid reviewRetryCount.`);
+  }
+  if (!Number.isInteger(normalized.retryAttempts) || normalized.retryAttempts < 0) {
+    throw new Error(`Lane ${normalized.id} has invalid retryAttempts.`);
   }
   return normalized;
 }
@@ -256,10 +264,36 @@ export function writeLaneState(state, { cwd = process.cwd() } = {}) {
 }
 
 export function activeLaneIssues(state) {
+  return selectorExcludedIssues(state);
+}
+
+export function laneReservesCapacity(lane) {
+  if (!lane || lane.stage === 'done') return false;
+  if (blockedLikeStages.has(lane.stage)) {
+    return Boolean(lane.issue || lane.pr || lane.branch || lane.claimId);
+  }
+  return true;
+}
+
+export function reservedLaneCount(state) {
+  return state.lanes.filter(laneReservesCapacity).length;
+}
+
+export function selectorExcludedIssues(state) {
   return state.lanes
-    .filter((lane) => !['done', 'blocked'].includes(lane.stage))
-    .map((lane) => lane.issue)
+    .filter((lane) => lane.stage !== 'done')
+    .map((lane) => String(lane.issue || ''))
     .filter(Boolean);
+}
+
+export function laneNeedsReconciliation(lane) {
+  if (!lane || lane.stage === 'done') return false;
+  return lane.stage === 'retryable_blocked'
+    || (lane.stage === 'blocked' && Boolean(lane.issue || lane.pr || lane.branch || lane.claimId));
+}
+
+export function laneBlocksGoalCompletion(lane) {
+  return laneReservesCapacity(lane) && blockedLikeStages.has(lane.stage);
 }
 
 export function pruneDoneLanes(state) {
