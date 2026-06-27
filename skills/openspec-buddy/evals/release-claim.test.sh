@@ -17,6 +17,7 @@ export OPENSPEC_BUDDY_WORKTREE_ALIAS=dev1
 mkdir -p "$OPENSPEC_BUDDY_REPO_ROOT" "$OPENSPEC_BUDDY_AUTO_LANE_STATE_DIR"
 export ACTIVE_PATH_HASH
 ACTIVE_PATH_HASH="$(node -e 'const crypto=require("node:crypto"); process.stdout.write(crypto.createHash("sha256").update(process.argv[1]).digest("hex"));' "$OPENSPEC_BUDDY_REPO_ROOT")"
+LANE_PATH_HASH="$(node -e 'const crypto=require("node:crypto"); const fs=require("node:fs"); process.stdout.write(crypto.createHash("sha256").update(fs.realpathSync(process.argv[1])).digest("hex"));' "$OPENSPEC_BUDDY_REPO_ROOT")"
 
 cat > "$tmp_dir/git" <<'EOF'
 #!/usr/bin/env bash
@@ -25,6 +26,13 @@ if [[ "${1:-}" == "-C" ]]; then shift 2; fi
 case "${1:-}" in
   rev-parse)
     if [[ "${2:-}" == "--show-toplevel" ]]; then printf '%s\n' "${OPENSPEC_BUDDY_REPO_ROOT:?}"; exit 0; fi
+    ;;
+  config)
+    if [[ "${2:-}" == "--worktree" && "${3:-}" == "--get" && "${4:-}" == "buddy.worktreeAlias" && "${NO_GIT_ALIAS:-0}" != "1" ]]; then
+      printf 'dev1\n'
+      exit 0
+    fi
+    exit 1
     ;;
   remote)
     if [[ "${2:-}" == "get-url" ]]; then printf 'https://github.com/yong-wei/openspec-buddy.git\n'; exit 0; fi
@@ -51,6 +59,10 @@ if [[ "$1" == "api" && "$2" == "repos/yong-wei/openspec-buddy/issues/42" ]]; the
   exit 0
 fi
 if [[ "$1" == "api" && "$2" == "--paginate" && "$3" == "--slurp" && "$4" == */issues/42/comments* ]]; then
+  if [[ "${ACTIVE_RELEASED:-0}" == "1" ]]; then
+    printf '[[{"created_at":"2026-06-26T00:00:00Z","body":"OpenSpec Buddy Claim\\n\\nclaim_id: claim-42\\nstate: active\\nagent: @YW\\nchange_id: demo-change\\nbranch: demo-change\\nbase_branch: integration\\nbase_sha: base123\\nlease_until: 2026-06-27T00:00:00.000Z\\nworktree_alias: dev1\\nworktree_path_hash: %s"},{"created_at":"2026-06-26T00:01:00Z","body":"OpenSpec Buddy Claim Release\\n\\nclaim_id: claim-42\\nstate: released"}]]\n' "${ACTIVE_PATH_HASH:?}"
+    exit 0
+  fi
   printf '[[{"created_at":"2026-06-26T00:00:00Z","body":"OpenSpec Buddy Claim\\n\\nclaim_id: claim-42\\nstate: active\\nagent: @YW\\nchange_id: demo-change\\nbranch: demo-change\\nbase_branch: integration\\nbase_sha: base123\\nlease_until: 2026-06-27T00:00:00.000Z\\nworktree_alias: %s\\nworktree_path_hash: %s"}]]\n' "${ACTIVE_ALIAS:-dev1}" "${ACTIVE_PATH_HASH:?}"
   exit 0
 fi
@@ -105,6 +117,17 @@ cat > "$OPENSPEC_BUDDY_AUTO_LANE_STATE_DIR/dev2.json" <<'JSON'
   ]
 }
 JSON
+hash16="$(node -e 'process.stdout.write(process.argv[1].slice(0, 16))' "$LANE_PATH_HASH")"
+cat > "$OPENSPEC_BUDDY_AUTO_LANE_STATE_DIR/$hash16.json" <<'JSON'
+{
+  "version": 1,
+  "worktree": { "pathHash": "hash16" },
+  "maxLanes": 2,
+  "lanes": [
+    { "id": "issue-42", "issue": "42", "change": "demo-change", "branch": "demo-change", "pr": "", "head": "", "stage": "blocked" }
+  ]
+}
+JSON
 
 "$helper" 42 --reason "misclaimed lane" --clear-lane > "$tmp_dir/output.txt"
 
@@ -122,6 +145,35 @@ const fs = require("node:fs");
 const data = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
 if (!data.lanes.some((lane) => String(lane.issue) === "42")) process.exit(1);
 ' "$OPENSPEC_BUDDY_AUTO_LANE_STATE_DIR/dev2.json"
+
+export NO_GIT_ALIAS=1
+"$helper" 42 --reason "hash lane" --clear-lane > "$tmp_dir/hash-output.txt"
+node -e '
+const fs = require("node:fs");
+const data = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+if (data.lanes.some((lane) => String(lane.issue) === "42")) process.exit(1);
+' "$OPENSPEC_BUDDY_AUTO_LANE_STATE_DIR/$hash16.json"
+unset NO_GIT_ALIAS
+
+cat > "$OPENSPEC_BUDDY_AUTO_LANE_STATE_DIR/dev1.json" <<'JSON'
+{
+  "version": 1,
+  "worktree": { "alias": "dev1" },
+  "maxLanes": 2,
+  "lanes": [
+    { "id": "issue-42", "issue": "42", "change": "demo-change", "branch": "demo-change", "pr": "", "head": "", "stage": "blocked" }
+  ]
+}
+JSON
+export ACTIVE_RELEASED=1
+"$helper" 42 --reason "retry converge" --clear-lane > "$tmp_dir/retry-output.txt"
+grep -F "reconciled status:ready" "$tmp_dir/retry-output.txt" >/dev/null
+node -e '
+const fs = require("node:fs");
+const data = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+if (data.lanes.some((lane) => String(lane.issue) === "42")) process.exit(1);
+' "$OPENSPEC_BUDDY_AUTO_LANE_STATE_DIR/dev1.json"
+unset ACTIVE_RELEASED
 
 export ACTIVE_ALIAS=dev2
 if "$helper" 42 --reason "foreign" > "$tmp_dir/foreign.out" 2> "$tmp_dir/foreign.err"; then
