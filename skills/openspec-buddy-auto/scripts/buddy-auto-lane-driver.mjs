@@ -219,6 +219,7 @@ function probeLane(lane) {
   return run(path.join(coreScriptDir, 'probe-review-state.sh'), [String(lane.pr)], {
     allowFailure: true,
     env: {
+      OPENSPEC_BUDDY_PROBE_SKIP_WORKTREE_GUARD: '1',
       OPENSPEC_BUDDY_REVIEW_LAST_SIGNATURE: lane.lastSignature || '',
       OPENSPEC_BUDDY_REVIEW_LAST_HEAD: lane.head || '',
       OPENSPEC_BUDDY_REVIEW_PREVIOUS_REQUEST_STATE: lane.lastRequestState || '',
@@ -366,17 +367,103 @@ function claimNextIssue(state, opts) {
   return true;
 }
 
+function parkLaneFromDriverReceipt(state, lane, parsed, driverState) {
+  const issuePrBound = driverState.stages?.issue_pr_bound || {};
+  const reviewRequested = driverState.stages?.review_requested || {};
+  const lanePr = String(driverState.pr || issuePrBound.pr || lane.pr || '');
+  const laneHead = String(driverState.head || reviewRequested.head || issuePrBound.head || lane.head || '');
+  if (parsed.stage === 'review-yield' && (!lanePr || !laneHead)) {
+    return {
+      status: 'blocked',
+      reason: 'buddy-auto-driver returned review-yield without PR/head receipt; refusing to park an unpollable lane.',
+    };
+  }
+  if (parsed.stage !== 'review-yield') return { status: 'ignored' };
+  const candidateLane = {
+    ...lane,
+    issue: String(driverState.issue || issuePrBound.issue || lane.issue || ''),
+    change: driverState.change || lane.change || '',
+    branch: issuePrBound.headRefName || lane.branch || '',
+    pr: lanePr,
+    head: laneHead,
+    stage: 'waiting_review',
+    reviewRequestedAt: reviewRequested.at || lane.reviewRequestedAt || '',
+    lastResult: parsed.stage,
+  };
+  const safe = safeYieldCurrentLane(candidateLane);
+  if (safe.status !== 0) {
+    return {
+      status: 'blocked',
+      reason: safe.stderr || safe.stdout || 'safe-yield gate failed before parking lane',
+    };
+  }
+  upsertLane(state, {
+    ...candidateLane,
+  });
+  writeLaneState(state);
+  return { status: 'parked', lane: candidateLane };
+}
+
 function blockIfForegroundLaneNotParked(state) {
   const blockedStages = new Set(['claiming', 'implementing', 'pr_opened', 'review_requested', 'achieving']);
   const lane = state.lanes.find((candidate) => blockedStages.has(candidate.stage));
   if (!lane) return false;
+  const branch = currentBranch();
+  if (lane.branch && branch && branch !== lane.branch) {
+    emitHandoff([
+      ['stage', lane.stage],
+      ['lane', lane.id],
+      ['issue', lane.issue],
+      ['pr', lane.pr],
+      ['required_action', `Switch to lane branch ${lane.branch} before advancing this foreground lane.`],
+    ]);
+    return true;
+  }
+  const driver = runSingleDriverForLane(lane);
+  if (driver.status !== 0) {
+    lane.stage = 'blocked';
+    lane.blockedReason = driver.stderr || driver.stdout || 'buddy-auto-driver failed while advancing foreground lane';
+    lane.updatedAt = new Date().toISOString();
+    writeLaneState(state);
+    emitBlocked([
+      ['stage', 'advance-lane'],
+      ['lane', lane.id],
+      ['issue', lane.issue],
+      ['pr', lane.pr],
+      ['reason', lane.blockedReason],
+    ]);
+    return true;
+  }
+  const parsed = parseDriverStage(driver.stdout);
+  const driverState = parseDriverState(driver.stdout);
+  const parkResult = parkLaneFromDriverReceipt(state, lane, parsed, driverState);
+  if (parkResult.status === 'blocked') {
+    emitBlocked([
+      ['stage', 'advance-lane'],
+      ['lane', lane.id],
+      ['issue', lane.issue],
+      ['pr', lane.pr],
+      ['reason', parkResult.reason],
+    ]);
+    return true;
+  }
+  if (parkResult.status === 'parked') {
+    emitHandoff([
+      ['stage', parsed.stage],
+      ['lane', lane.id],
+      ['issue', lane.issue],
+      ['pr', parkResult.lane.pr],
+      ['required_action', 'Lane is now safely parked in waiting_review; rerun the lane driver to poll or schedule another lane.'],
+    ], driver.stdout);
+    return true;
+  }
   emitHandoff([
-    ['stage', lane.stage],
+    ['stage', parsed.stage || lane.stage],
     ['lane', lane.id],
     ['issue', lane.issue],
     ['pr', lane.pr],
     ['required_action', 'Finish this lane until it is committed, pushed, review-requested, and safely parked before claiming another issue.'],
-  ]);
+  ], driver.stdout);
   return true;
 }
 

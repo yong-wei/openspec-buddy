@@ -29,7 +29,10 @@ if [[ "\${1:-}" == "-C" ]]; then shift 2; fi
 case "\${1:-}" in
   rev-parse)
     if [[ "\${2:-}" == "--show-toplevel" ]]; then printf '%s\\n' ${JSON.stringify(repoDir)}; exit 0; fi
-    if [[ "\${2:-}" == "HEAD" ]]; then printf 'head-1\\n'; exit 0; fi
+    if [[ "\${2:-}" == "HEAD" ]]; then
+      if [[ "\${CURRENT_BRANCH:-dev1}" == "change-676" ]]; then printf 'head-2\\n'; else printf 'head-1\\n'; fi
+      exit 0
+    fi
     ;;
   config)
     if [[ "\${2:-}" == "--worktree" ]]; then
@@ -44,6 +47,7 @@ case "\${1:-}" in
     if [[ "\${2:-}" == "--show-current" ]]; then printf '%s\\n' "\${CURRENT_BRANCH:-dev1}"; exit 0; fi
     ;;
   status)
+    if [[ "\${BUDDY_FAKE_DIRTY:-0}" == "1" && "\${2:-}" == "--porcelain" ]]; then printf ' M dirty.txt\\n'; exit 0; fi
     exit 0
     ;;
   switch)
@@ -52,6 +56,7 @@ case "\${1:-}" in
     ;;
   ls-remote)
     if [[ "\${4:-}" == "change-675" ]]; then printf 'head-1\\trefs/heads/change-675\\n'; exit 0; fi
+    if [[ "\${4:-}" == "change-676" ]]; then printf 'head-2\\trefs/heads/change-676\\n'; exit 0; fi
     exit 0
     ;;
   remote)
@@ -64,7 +69,12 @@ exit 99
   makeExecutable(path.join(binDir, 'gh'), `#!/bin/bash
 set -euo pipefail
 if [[ "\${1:-}" == "api" && "\${2:-}" == */issues/*/comments* ]]; then printf '[]\\n'; exit 0; fi
-if [[ "\${1:-}" == "pr" && "\${2:-}" == "view" ]]; then printf '%s\\n' '{"number":707,"state":"OPEN","headRefName":"change-675","headRefOid":"head-1"}'; exit 0; fi
+if [[ "\${1:-}" == "pr" && "\${2:-}" == "view" ]]; then
+  case "\${3:-}" in
+    708) printf '%s\\n' '{"number":708,"state":"OPEN","headRefName":"change-676","headRefOid":"head-2"}'; exit 0 ;;
+    *) printf '%s\\n' '{"number":707,"state":"OPEN","headRefName":"change-675","headRefOid":"head-1"}'; exit 0 ;;
+  esac
+fi
 echo "unexpected gh invocation: $*" >&2
 exit 99
 `);
@@ -89,7 +99,7 @@ printf '{"issue":%s,"pr":null,"reason":"no PR"}\\n' "$1"
   makeExecutable(path.join(coreDir, 'verify-current-head-review-request.sh'), `#!/bin/bash\necho "verify-request $*" >> ${JSON.stringify(logFile)}\n`);
   makeExecutable(path.join(coreDir, 'probe-review-state.sh'), `#!/bin/bash
 set -euo pipefail
-echo "probe $*" >> ${JSON.stringify(logFile)}
+echo "probe $* skip=\${OPENSPEC_BUDDY_PROBE_SKIP_WORKTREE_GUARD:-0}" >> ${JSON.stringify(logFile)}
 if [[ "\${PROBE_RETRY_EXPIRED:-0}" == "1" ]]; then
   printf '%s\\n' '{"pr":"707","head":"head-1","signature":"sig","requestState":"present-current-head","state":"waiting","requestAgeSeconds":901,"retryDue":false,"retryExpired":true}'
   exit 0
@@ -143,6 +153,91 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
   assert.match(log, /claim 676/);
   const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
   assert.ok(state.lanes.some((lane) => lane.issue === '676' && lane.stage === 'implementing'));
+}
+
+{
+  const envInfo = makeEnv('implementing-lane-advances-to-review-yield');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 2,
+    lanes: [
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0 },
+    ],
+  }));
+  const first = run(envInfo, { OPENSPEC_BUDDY_AUTO_GOAL: '1', OPENSPEC_BUDDY_AUTO_LANES: '2', CURRENT_BRANCH: 'change-675' });
+  assert.equal(first.status, 0, first.stderr);
+  const second = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '2',
+    CURRENT_BRANCH: 'change-676',
+    FIND_PR_FOR_676: '1',
+  });
+  assert.equal(second.status, 0, second.stderr);
+  assert.match(second.stdout, /^HANDOFF/m);
+  assert.match(second.stdout, /^stage: review-yield$/m);
+  const log = fs.readFileSync(envInfo.logFile, 'utf8');
+  assert.match(log, /find-pr 676/);
+  assert.match(log, /mark-review 676 708/);
+  assert.match(log, /verify-claim --issue 676 --pr 708/);
+  assert.match(log, /verify-request 708/);
+  const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  const lane = state.lanes.find((candidate) => candidate.issue === '676');
+  assert.equal(lane.stage, 'waiting_review');
+  assert.equal(lane.pr, '708');
+  assert.equal(lane.head, 'head-2');
+}
+
+{
+  const envInfo = makeEnv('dirty-foreground-lane-does-not-park');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 2,
+    lanes: [
+      { id: 'issue-676', issue: '676', change: 'change-676', branch: 'change-676', stage: 'implementing', reviewRetryCount: 0 },
+    ],
+  }));
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '2',
+    CURRENT_BRANCH: 'change-676',
+    FIND_PR_FOR_676: '1',
+    BUDDY_FAKE_DIRTY: '1',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^BLOCKED/m);
+  assert.match(result.stdout, /worktree is dirty/);
+  assert.doesNotMatch(result.stdout, /^HANDOFF/m);
+  const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  const lane = state.lanes.find((candidate) => candidate.issue === '676');
+  assert.equal(lane.stage, 'implementing');
+  assert.equal(lane.pr, '');
+}
+
+{
+  const envInfo = makeEnv('foreground-lane-requires-own-branch');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 2,
+    lanes: [
+      { id: 'issue-676', issue: '676', change: 'change-676', branch: 'change-676', stage: 'implementing', reviewRetryCount: 0 },
+    ],
+  }));
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '2',
+    CURRENT_BRANCH: 'dev1',
+    FIND_PR_FOR_676: '1',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^HANDOFF/m);
+  assert.match(result.stdout, /Switch to lane branch change-676/);
+  assert.equal(fs.existsSync(envInfo.logFile), false);
 }
 
 {
@@ -209,6 +304,7 @@ console.log('state_file: ${fakeState}');
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /^BLOCKED/m);
   assert.match(result.stdout, /without PR\/head receipt/);
+  assert.doesNotMatch(result.stdout, /^HANDOFF/m);
   const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
   assert.equal(state.lanes.some((lane) => lane.issue === '676'), false);
 }
@@ -224,11 +320,14 @@ console.log('state_file: ${fakeState}');
       { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', stage: 'implementing', reviewRetryCount: 0 },
     ],
   }));
-  const result = run(envInfo, { OPENSPEC_BUDDY_AUTO_GOAL: '1', OPENSPEC_BUDDY_AUTO_LANES: '2' });
+  const result = run(envInfo, { OPENSPEC_BUDDY_AUTO_GOAL: '1', OPENSPEC_BUDDY_AUTO_LANES: '2', CURRENT_BRANCH: 'change-675' });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /^HANDOFF/m);
-  assert.match(result.stdout, /stage: implementing/);
-  assert.equal(fs.existsSync(envInfo.logFile), false);
+  assert.match(result.stdout, /^stage: implement-or-open-pr$/m);
+  const log = fs.readFileSync(envInfo.logFile, 'utf8');
+  assert.match(log, /find-pr 675/);
+  assert.doesNotMatch(log, /select excludes=/);
+  assert.doesNotMatch(log, /claim 676/);
 }
 
 {
@@ -247,7 +346,7 @@ console.log('state_file: ${fakeState}');
   assert.match(result.stdout, /^DONE/m);
   assert.match(result.stdout, /No lane changed/);
   const log = fs.readFileSync(envInfo.logFile, 'utf8');
-  assert.match(log, /probe 707/);
+  assert.match(log, /probe 707 skip=1/);
   assert.doesNotMatch(log, /check 707/);
 }
 
@@ -260,7 +359,7 @@ console.log('state_file: ${fakeState}');
     maxLanes: 2,
     lanes: [
       { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0, lastRequestState: 'present-current-head' },
-      { id: 'issue-676', issue: '676', change: 'change-676', branch: 'change-676', pr: '708', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0, lastRequestState: 'present-current-head' },
+      { id: 'issue-676', issue: '676', change: 'change-676', branch: 'change-676', pr: '708', head: 'head-2', stage: 'waiting_review', reviewRetryCount: 0, lastRequestState: 'present-current-head' },
     ],
   }));
   const result = run(envInfo, { OPENSPEC_BUDDY_AUTO_GOAL: '1', OPENSPEC_BUDDY_AUTO_LANES: '2', CURRENT_BRANCH: 'dev1' });
