@@ -28,6 +28,12 @@ case "\${1:-}" in
   show)
     if [[ "\${2:-}" == "origin/integration:openspec/changes/archive/2026-06-26-demo/tasks.md" ]]; then printf '%s\\n' '- [x] Done'; exit 0; fi
     ;;
+  ls-tree)
+    if [[ "\${2:-}" == "-r" && "\${3:-}" == "--name-only" && "\${4:-}" == "origin/integration" && "\${5:-}" == "openspec/changes/archive" ]]; then
+      printf '%s\\n' 'openspec/changes/archive/2026-06-26-demo/tasks.md'
+      exit 0
+    fi
+    ;;
 esac
 echo "unexpected git invocation: $*" >&2
 exit 99
@@ -40,6 +46,10 @@ if [[ "\${1:-}" == "api" && "\${2:-}" == "repos/yong-wei/openspec-buddy/pulls/12
   exit 0
 fi
 if [[ "\${1:-}" == "api" && "\${2:-}" == "--paginate" && "\${3:-}" == "repos/yong-wei/openspec-buddy/pulls/123/files?per_page=100" ]]; then
+  if [[ "\${PR_FILES_EMPTY:-0}" == "1" ]]; then
+    printf '%s\\n' '[]'
+    exit 0
+  fi
   printf '%s\\n' '[{"filename":"openspec/changes/archive/2026-06-26-demo/tasks.md"}]'
   exit 0
 fi
@@ -210,6 +220,10 @@ assert.equal(fs.existsSync(preMergeThreadLog), false);
 
 const graphqlProjectEnd = run({ ISSUE_JSON_FILE: issueRestProjectWithoutEndFile });
 assert.equal(graphqlProjectEnd.achieved, true);
+
+const archiveFromBase = run({ PR_FILES_EMPTY: '1' });
+assert.equal(archiveFromBase.achieved, true);
+assert.equal(archiveFromBase.archivePath, 'openspec/changes/archive/2026-06-26-demo');
 
 const unresolved = run({ OPENSPEC_BUDDY_VERIFY_REVIEW_THREADS_RESOLVED_HELPER: path.join(tmp, 'threads-fail') });
 assert.equal(unresolved.achieved, false);

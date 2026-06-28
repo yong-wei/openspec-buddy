@@ -362,6 +362,10 @@ function parseJsonResult(stdout, fallbackReason = 'invalid JSON output') {
   }
 }
 
+function safeToRerun(result) {
+  return /\bsafe_to_rerun:\s*true\b/i.test([result.stdout || '', result.stderr || ''].join('\n'));
+}
+
 function bridgeIssuePr(issue) {
   const result = run(path.join(coreScriptDir, 'find-issue-pr.sh'), [String(issue)], { allowFailure: true });
   if (result.status !== 0) {
@@ -399,6 +403,154 @@ function probeLane(lane) {
 
 function checkLaneReview(lane) {
   return run(path.join(coreScriptDir, 'check-review-clear-once.sh'), [String(lane.pr)], { allowFailure: true });
+}
+
+function verifyAchievedTruth(lane) {
+  return run(path.join(coreScriptDir, 'verify-achieved-truth.mjs'), [String(lane.issue), String(lane.pr)], { allowFailure: true });
+}
+
+function markAchievedPostMerge(lane, archivePath) {
+  return run(path.join(coreScriptDir, 'mark-achieved-post-merge.sh'), [String(lane.issue), archivePath, String(lane.pr)], { allowFailure: true });
+}
+
+function completeMergedLaneAchievement(state, lane) {
+  ensureBoundBranch();
+  const verify = verifyAchievedTruth(lane);
+  if (verify.status !== 0) {
+    const reason = verify.stderr || verify.stdout || 'verify-achieved-truth.mjs failed during post-merge achievement';
+    markLaneFailure(state, lane, reason, {
+      retryable: isTransientFailure(reason),
+      source: 'post-merge-achievement',
+    });
+    emitBlocked([
+      ['stage', 'post-merge-achievement'],
+      ['lane', lane.id],
+      ['issue', lane.issue],
+      ['pr', lane.pr],
+      ['reason', lane.blockedReason],
+    ]);
+    return true;
+  }
+  const parsed = parseJsonResult(verify.stdout, 'verify-achieved-truth.mjs did not return JSON');
+  if (!parsed.ok || parsed.data?.error) {
+    const reason = parsed.data?.error || parsed.reason;
+    markLaneFailure(state, lane, reason, {
+      retryable: isTransientFailure(reason),
+      source: 'post-merge-achievement',
+    });
+    emitBlocked([
+      ['stage', 'post-merge-achievement'],
+      ['lane', lane.id],
+      ['issue', lane.issue],
+      ['pr', lane.pr],
+      ['reason', lane.blockedReason],
+    ]);
+    return true;
+  }
+  if (parsed.data?.achieved === true) {
+    lane.stage = 'done';
+    lane.lastResult = 'achieved';
+    lane.blockedReason = '';
+    clearRetryableState(lane);
+    lane.updatedAt = new Date().toISOString();
+    writeLaneState(state);
+    emitDone([
+      ['stage', 'lane-done'],
+      ['lane', lane.id],
+      ['issue', lane.issue],
+      ['pr', lane.pr],
+    ], verify.stdout);
+    return true;
+  }
+  if (parsed.data?.next === 'mark-achieved-post-merge') {
+    const archivePath = parsed.data.archivePath || parsed.data.archive_path || '';
+    if (!archivePath) {
+      markLaneFailure(state, lane, 'verify-achieved-truth requested post-merge achievement but did not return archivePath', {
+        retryable: false,
+        source: 'post-merge-achievement',
+      });
+      emitBlocked([
+        ['stage', 'post-merge-achievement'],
+        ['lane', lane.id],
+        ['issue', lane.issue],
+        ['pr', lane.pr],
+        ['reason', lane.blockedReason],
+      ]);
+      return true;
+    }
+    let achieve = markAchievedPostMerge(lane, archivePath);
+    if (achieve.status !== 0 && safeToRerun(achieve)) {
+      achieve = markAchievedPostMerge(lane, archivePath);
+    }
+    if (achieve.status !== 0) {
+      const reason = achieve.stderr || achieve.stdout || 'mark-achieved-post-merge.sh failed';
+      markLaneFailure(state, lane, reason, {
+        retryable: isTransientFailure(reason),
+        source: 'post-merge-achievement',
+      });
+      emitBlocked([
+        ['stage', 'post-merge-achievement'],
+        ['lane', lane.id],
+        ['issue', lane.issue],
+        ['pr', lane.pr],
+        ['reason', lane.blockedReason],
+      ]);
+      return true;
+    }
+    const reverify = verifyAchievedTruth(lane);
+    if (reverify.status !== 0) {
+      const reason = reverify.stderr || reverify.stdout || 'verify-achieved-truth.mjs failed after post-merge achievement sync';
+      markLaneFailure(state, lane, reason, {
+        retryable: isTransientFailure(reason),
+        source: 'post-merge-achievement',
+      });
+      emitBlocked([
+        ['stage', 'post-merge-achievement'],
+        ['lane', lane.id],
+        ['issue', lane.issue],
+        ['pr', lane.pr],
+        ['reason', lane.blockedReason],
+      ]);
+      return true;
+    }
+    const terminal = parseJsonResult(reverify.stdout, 'verify-achieved-truth.mjs did not return JSON after post-merge achievement sync');
+    if (!terminal.ok || terminal.data?.achieved !== true) {
+      const reason = terminal.data?.reason || terminal.reason || 'Post-merge achievement sync completed, but terminal truth is still incomplete.';
+      markLaneFailure(state, lane, reason, {
+        retryable: false,
+        source: 'post-merge-achievement',
+      });
+      emitBlocked([
+        ['stage', 'post-merge-achievement'],
+        ['lane', lane.id],
+        ['issue', lane.issue],
+        ['pr', lane.pr],
+        ['reason', lane.blockedReason],
+      ]);
+      return true;
+    }
+    lane.stage = 'done';
+    lane.lastResult = 'mark-achieved-post-merge';
+    lane.blockedReason = '';
+    clearRetryableState(lane);
+    lane.updatedAt = new Date().toISOString();
+    writeLaneState(state);
+    emitDone([
+      ['stage', 'lane-done'],
+      ['lane', lane.id],
+      ['issue', lane.issue],
+      ['pr', lane.pr],
+    ], achieve.stdout);
+    return true;
+  }
+  emitHandoff([
+    ['stage', parsed.data?.next || 'post-merge-achieve'],
+    ['lane', lane.id],
+    ['issue', lane.issue],
+    ['pr', lane.pr],
+    ['required_action', parsed.data?.reason || 'Continue post-merge achievement gates.'],
+  ], verify.stdout);
+  return true;
 }
 
 function reconcileLaneFromTruth(state, lane) {
@@ -927,49 +1079,7 @@ function advanceResumedLane(state, lane) {
     }
     const prState = String(truth.data?.state || '').toUpperCase();
     if (prState === 'MERGED' || truth.data?.mergedAt) {
-      ensureBoundBranch();
-      const driver = runSingleDriverForLane(lane);
-      invalidatePrTruth(lane.pr);
-      if (driver.status !== 0) {
-        const reason = driver.stderr || driver.stdout || 'buddy-auto-driver failed during post-merge achievement';
-        markLaneFailure(state, lane, reason, {
-          retryable: isTransientFailure(reason),
-          source: 'post-merge-achievement',
-        });
-        emitBlocked([
-          ['stage', 'post-merge-achievement'],
-          ['lane', lane.id],
-          ['issue', lane.issue],
-          ['pr', lane.pr],
-          ['reason', lane.blockedReason],
-        ]);
-        return true;
-      }
-      const parsed = parseDriverStage(driver.stdout);
-      if (parsed.stage === 'achieved') {
-        lane.stage = 'done';
-        lane.updatedAt = new Date().toISOString();
-        lane.lastResult = parsed.stage;
-        writeLaneState(state);
-        emitDone([
-          ['stage', 'lane-done'],
-          ['lane', lane.id],
-          ['issue', lane.issue],
-          ['pr', lane.pr],
-        ], driver.stdout);
-        return true;
-      }
-      lane.updatedAt = new Date().toISOString();
-      lane.lastResult = parsed.stage || lane.lastResult || '';
-      writeLaneState(state);
-      emitHandoff([
-        ['stage', 'post-merge-achieve'],
-        ['lane', lane.id],
-        ['issue', lane.issue],
-        ['pr', lane.pr],
-        ['required_action', 'Continue post-merge achievement gates through buddy-auto-driver on the bound branch.'],
-      ], driver.stdout);
-      return true;
+      return completeMergedLaneAchievement(state, lane);
     }
     const resumed = resumeLaneOrFail(state, lane, 'resume-merge-ready-lane');
     if (!resumed.ok) {
@@ -1286,13 +1396,7 @@ function processWaitingLane(state, lane) {
       retryable: false,
       source: 'review-retry-expired',
     });
-    emitBlocked([
-      ['stage', 'waiting_review'],
-      ['lane', lane.id],
-      ['pr', lane.pr],
-      ['reason', lane.blockedReason],
-    ]);
-    return true;
+    return false;
   }
 
   if (result.retryDue === true && Number(lane.reviewRetryCount || 0) === 0) {
