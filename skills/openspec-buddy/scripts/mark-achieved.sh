@@ -65,6 +65,7 @@ if [[ "$state" == "OPEN" ]]; then
 else
   gh issue comment "$issue_number" --body "$body"
 fi
+"$script_dir/verify-issue-closed-status.sh" "$issue_number" "status:archived"
 
 "$script_dir/close-completed-series-parent.sh" "$issue_number"
 buddy_invalidate_issue_cache "$cache_dir" "$issue_number"

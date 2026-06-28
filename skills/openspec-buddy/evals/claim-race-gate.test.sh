@@ -94,6 +94,31 @@ cat >"$tmp_dir/issue-claimed.json" <<'JSON'
 }
 JSON
 
+cat >"$tmp_dir/issue-claimed-extra-status.json" <<'JSON'
+{
+  "number": 42,
+  "state": "open",
+  "labels": [
+    { "name": "status:ready" },
+    { "name": "status:claimed" }
+  ],
+  "assignees": [
+    { "login": "agent-a" }
+  ]
+}
+JSON
+
+cat >"$tmp_dir/issue-claimed-no-assignee.json" <<'JSON'
+{
+  "number": 42,
+  "state": "open",
+  "labels": [
+    { "name": "status:claimed" }
+  ],
+  "assignees": []
+}
+JSON
+
 cat >"$tmp_dir/comments-current.json" <<'JSON'
 [
   {
@@ -193,6 +218,47 @@ if grep -E 'issue develop|project item-edit|set-project' "$BUDDY_TEST_LOG" >/dev
   cat "$BUDDY_TEST_LOG" >&2
   exit 1
 fi
+
+: > "$BUDDY_TEST_LOG"
+export BUDDY_TEST_ISSUE_JSON="$tmp_dir/issue-claimed-extra-status.json"
+export BUDDY_TEST_COMMENTS_JSON="$tmp_dir/comments-current.json"
+
+set +e
+buddy_verify_claim_lock_rest "42" "issue-42-race" "agent-a" "claim-current" "2026-06-13T22:00:00.000Z" "example/repo" "$tmp_dir/verify-extra-status" "issue-42-race" 2>"$tmp_dir/verify-extra-status.err"
+extra_status_verify="$?"
+set -e
+
+if [[ "$extra_status_verify" -eq 0 ]]; then
+  echo "claim verification must reject multiple status labels after claim write" >&2
+  exit 1
+fi
+if ! grep -F "expected exactly status:claimed" "$tmp_dir/verify-extra-status.err" >/dev/null; then
+  echo "claim verification should explain multiple status labels" >&2
+  cat "$tmp_dir/verify-extra-status.err" >&2
+  exit 1
+fi
+
+: > "$BUDDY_TEST_LOG"
+export BUDDY_TEST_ISSUE_JSON="$tmp_dir/issue-claimed-no-assignee.json"
+export BUDDY_TEST_COMMENTS_JSON="$tmp_dir/comments-current.json"
+
+set +e
+buddy_verify_claim_lock_rest "42" "issue-42-race" "agent-a" "claim-current" "2026-06-13T22:00:00.000Z" "example/repo" "$tmp_dir/verify-no-assignee" "issue-42-race" 2>"$tmp_dir/verify-no-assignee.err"
+assignee_verify="$?"
+set -e
+
+if [[ "$assignee_verify" -eq 0 ]]; then
+  echo "claim verification must reject missing assignee after claim write" >&2
+  exit 1
+fi
+if ! grep -F "assignee agent-a is missing" "$tmp_dir/verify-no-assignee.err" >/dev/null; then
+  echo "claim verification should explain missing assignee" >&2
+  cat "$tmp_dir/verify-no-assignee.err" >&2
+  exit 1
+fi
+
+export BUDDY_TEST_ISSUE_JSON="$tmp_dir/issue-claimed.json"
+export BUDDY_TEST_COMMENTS_JSON="$tmp_dir/comments-other.json"
 
 : > "$BUDDY_TEST_LOG"
 buddy_delete_claim_branch_if_owned "42" "issue-42-race" "issue-42-race" "agent-a" "claim-current" "2026-06-13T22:00:00.000Z" "example/repo" "$tmp_dir/delete-not-owner"

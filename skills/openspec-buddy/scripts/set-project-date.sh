@@ -57,6 +57,48 @@ if [[ -z "$project_id" ]]; then
   exit 1
 fi
 
+verify_project_date() {
+  local item="$1"
+  local expected_project_id="$2"
+  local expected_date="$3"
+  local verify_file="$tmp_dir/project-date-verify.json"
+  buddy_graphql_api \
+    -f id="$item" \
+    -f dateField="$field_name" \
+    -f query='
+query($id: ID!, $dateField: String!) {
+  node(id: $id) {
+    ... on ProjectV2Item {
+      id
+      project { id title }
+      date: fieldValueByName(name: $dateField) {
+        ... on ProjectV2ItemFieldDateValue { date }
+      }
+    }
+  }
+}' > "$verify_file"
+  node -e '
+const fs = require("node:fs");
+const data = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+const expectedItem = process.argv[2];
+const expectedProject = process.argv[3];
+const expectedDate = process.argv[4];
+const item = data?.data?.node;
+if (!item || item.id !== expectedItem) {
+  process.stderr.write(`Project date verification failed: item ${expectedItem} was not returned.\n`);
+  process.exit(1);
+}
+if (item.project?.id !== expectedProject) {
+  process.stderr.write(`Project date verification failed: item ${expectedItem} is not in expected project ${expectedProject}.\n`);
+  process.exit(1);
+}
+if (item.date?.date !== expectedDate) {
+  process.stderr.write(`Project date verification failed: expected "${expectedDate}", observed "${item.date?.date || "<none>"}".\n`);
+  process.exit(1);
+}
+' "$verify_file" "$item" "$expected_project_id" "$expected_date"
+}
+
 field_id="$(node -e '
 const fs = require("node:fs");
 const project = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
@@ -96,6 +138,7 @@ gh project item-edit \
   --date "$date_value" \
   --format json \
   --jq '.id' >/dev/null
+verify_project_date "$item_id" "$project_id" "$date_value"
 
 buddy_invalidate_subject_cache_from_file "$subject_file" "$cache_dir"
 

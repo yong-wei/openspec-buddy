@@ -105,11 +105,53 @@ process.exit(names.includes(login) ? 0 : 1);
 ' "$issue_file" "$login"
 }
 
+status_labels_from_issue_json() {
+  node -e '
+const fs=require("node:fs");
+const issue=JSON.parse(fs.readFileSync(0,"utf8"));
+const labels=Array.isArray(issue.labels) ? issue.labels : [];
+process.stdout.write(labels
+  .map((label)=>typeof label==="string" ? label : label?.name)
+  .filter((name)=>/^status:\s*/.test(name || ""))
+  .map((name)=>name.replace(/^status:\s+/, "status:"))
+  .join(","));
+'
+}
+
+verify_ready_status() {
+  local assignee_to_remove="${1:-}"
+  local verify_json="$tmp_dir/release-verify.json"
+  gh issue view "$issue_number" --json labels,assignees > "$verify_json"
+  node -e '
+const fs=require("node:fs");
+const issue=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));
+const assigneeToRemove=process.argv[2] || "";
+const labels=Array.isArray(issue.labels) ? issue.labels : [];
+const statusLabels=labels
+  .map((label)=>typeof label==="string" ? label : label?.name)
+  .filter((name)=>/^status:\s*/.test(name || ""))
+  .map((name)=>name.replace(/^status:\s+/, "status:"));
+const assignees=Array.isArray(issue.assignees) ? issue.assignees : [];
+const assigneeNames=assignees.map((entry)=>typeof entry==="string" ? entry : entry?.login).filter(Boolean);
+const failures=[];
+if (statusLabels.length !== 1 || statusLabels[0] !== "status:ready") {
+  failures.push(`expected exactly status:ready, observed ${statusLabels.join(",") || "<none>"}`);
+}
+if (assigneeToRemove && assigneeNames.includes(assigneeToRemove)) {
+  failures.push(`assignee ${assigneeToRemove} is still present`);
+}
+if (failures.length) {
+  process.stderr.write(`Release verification failed for issue #${process.argv[3]}: ${failures.join("; ")}.\n`);
+  process.exit(1);
+}
+' "$verify_json" "$assignee_to_remove" "$issue_number"
+}
+
 restore_ready_status() {
   local assignee_to_remove="${1:-}"
+  local remove_assignee=""
   existing_statuses="$(
-    gh issue view "$issue_number" --json labels \
-      --jq '[.labels[].name | select(test("^status:\\s*"))] | join(",")'
+    gh issue view "$issue_number" --json labels | status_labels_from_issue_json
   )"
   label_args=(issue edit "$issue_number")
   if [[ -n "$existing_statuses" ]]; then
@@ -118,8 +160,10 @@ restore_ready_status() {
   label_args+=(--add-label "status:ready")
   if issue_has_assignee "$assignee_to_remove"; then
     label_args+=(--remove-assignee "$assignee_to_remove")
+    remove_assignee="$assignee_to_remove"
   fi
   gh "${label_args[@]}"
+  verify_ready_status "$remove_assignee"
 
   cache_dir="$(buddy_cache_dir)"
   buddy_invalidate_issue_cache "$cache_dir" "$issue_number"

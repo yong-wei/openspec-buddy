@@ -64,6 +64,48 @@ if [[ -z "$project_id" ]]; then
   exit 1
 fi
 
+verify_project_status() {
+  local item="$1"
+  local expected_project_id="$2"
+  local expected_status="$3"
+  local verify_file="$tmp_dir/project-status-verify.json"
+  buddy_graphql_api \
+    -f id="$item" \
+    -f statusField="$status_field_name" \
+    -f query='
+query($id: ID!, $statusField: String!) {
+  node(id: $id) {
+    ... on ProjectV2Item {
+      id
+      project { id title }
+      status: fieldValueByName(name: $statusField) {
+        ... on ProjectV2ItemFieldSingleSelectValue { name }
+      }
+    }
+  }
+}' > "$verify_file"
+  node -e '
+const fs = require("node:fs");
+const data = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+const expectedItem = process.argv[2];
+const expectedProject = process.argv[3];
+const expectedStatus = process.argv[4];
+const item = data?.data?.node;
+if (!item || item.id !== expectedItem) {
+  process.stderr.write(`Project Status verification failed: item ${expectedItem} was not returned.\n`);
+  process.exit(1);
+}
+if (item.project?.id !== expectedProject) {
+  process.stderr.write(`Project Status verification failed: item ${expectedItem} is not in expected project ${expectedProject}.\n`);
+  process.exit(1);
+}
+if (item.status?.name !== expectedStatus) {
+  process.stderr.write(`Project Status verification failed: expected "${expectedStatus}", observed "${item.status?.name || "<none>"}".\n`);
+  process.exit(1);
+}
+' "$verify_file" "$item" "$expected_project_id" "$expected_status"
+}
+
 read -r status_field_id status_option_id < <(node -e '
 const fs = require("node:fs");
 const project = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
@@ -105,6 +147,7 @@ gh project item-edit \
   --single-select-option-id "$status_option_id" \
   --format json \
   --jq '.id' >/dev/null
+verify_project_status "$item_id" "$project_id" "$project_status"
 
 buddy_invalidate_subject_cache_from_file "$subject_file" "$cache_dir"
 

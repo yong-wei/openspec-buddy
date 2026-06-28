@@ -184,6 +184,21 @@ JSON
 fi
 
 if [[ "$1" == "project" && "$2" == "item-edit" ]]; then
+  item_id=""
+  status_option=""
+  date_value=""
+  previous=""
+  for arg in "$@"; do
+    if [[ "$previous" == "--id" ]]; then item_id="$arg"; fi
+    if [[ "$previous" == "--single-select-option-id" ]]; then status_option="$arg"; fi
+    if [[ "$previous" == "--date" ]]; then date_value="$arg"; fi
+    previous="$arg"
+  done
+  if [[ -n "$item_id" ]]; then
+    mkdir -p "$STATE_DIR"
+    [[ -n "$status_option" ]] && printf '%s\n' "$status_option" > "$STATE_DIR/status-$item_id"
+    [[ -n "$date_value" ]] && printf '%s\n' "$date_value" > "$STATE_DIR/date-$item_id"
+  fi
   printf '"ITEM_ISSUE_123"\n'
   exit 0
 fi
@@ -209,6 +224,22 @@ if [[ "$1" == "api" && "$2" == "graphql" ]]; then
     fi
     previous="$arg"
   done
+  if [[ "$subject_id" == ITEM_* ]]; then
+    project_id="PROJECT_1"
+    project_title="Major LTE"
+    status_option="$(cat "$STATE_DIR/status-$subject_id" 2>/dev/null || true)"
+    case "$status_option" in
+      OPT_TODO) status_name="Todo" ;;
+      OPT_PROGRESS) status_name="In Progress" ;;
+      OPT_DONE) status_name="Done" ;;
+      *) status_name="" ;;
+    esac
+    date_value="$(cat "$STATE_DIR/date-$subject_id" 2>/dev/null || true)"
+    cat <<JSON
+{"data":{"node":{"id":"$subject_id","project":{"id":"$project_id","title":"$project_title"},"status":{"name":"$status_name"},"date":{"date":"$date_value"}}}}
+JSON
+    exit 0
+  fi
   printf '%s\n' "$*" >> "$GH_LOG_FILE"
   if [[ "$subject_id" == PR_* ]]; then
     item_id="ITEM_PR_45"
@@ -261,6 +292,8 @@ chmod +x "$tmp_dir/gh"
 
 export PATH="$tmp_dir:$PATH"
 export GH_LOG_FILE="$tmp_dir/gh.log"
+export STATE_DIR="$tmp_dir/state"
+mkdir -p "$STATE_DIR"
 export OPENSPEC_BUDDY_REPO_ROOT="$project_root"
 export OPENSPEC_BUDDY_BASE_BRANCH=integration
 export OPENSPEC_BUDDY_RELEASE_BRANCH=main

@@ -11,3 +11,7 @@ AGENTS.md
 .codex/
 .serena/
 .code-review-graph/
+.codegraph/
+.wolf/
+.claude/
+CLAUDE.md
