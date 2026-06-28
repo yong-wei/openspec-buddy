@@ -380,6 +380,11 @@ console.log('legacy helper completed without protocol');
 }
 
 {
+  const mode = fs.statSync(helper).mode & 0o111;
+  assert.notEqual(mode, 0, 'buddy-auto.mjs must be directly executable');
+}
+
+{
   const skill = fs.readFileSync(path.join(repoRoot, 'skills/openspec-buddy-auto/SKILL.md'), 'utf8');
   const refs = [
     'driver-states.md',
