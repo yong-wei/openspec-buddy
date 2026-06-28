@@ -195,11 +195,11 @@ export function resetLaneState({ cwd = process.cwd(), reason = '' } = {}) {
   if (!String(reason || '').trim()) throw new Error('--reset-lane-state requires --reason.');
   ensureBuddyCacheExcluded(cwd);
   const file = laneStatePath(cwd);
+  resetControllerState({ cwd });
   if (!fs.existsSync(file)) return '';
   const stamp = new Date().toISOString().replace(/[^0-9A-Za-z.-]/g, '-');
   const backup = `${file}.${stamp}.bak`;
   fs.renameSync(file, backup);
-  resetControllerState({ cwd });
   return backup;
 }
 

@@ -368,7 +368,21 @@ console.log('legacy helper completed without protocol');
   result = run(envInfo, {}, ['--reset-lane-state', '--reason', 'abandoned']);
   assert.equal(result.status, 0, result.stderr);
   assert.equal(fs.existsSync(laneStateModule.laneStatePath(envInfo.repoDir)), false);
+  assert.equal(fs.existsSync(controllerPath(envInfo)), false);
   assert.equal(fs.readdirSync(envInfo.laneDir).some((name) => name.endsWith('.bak')), true);
+}
+
+{
+  const envInfo = makeEnv('reset-lane-without-lane-file-clears-controller');
+  let result = run(envInfo, { OPENSPEC_BUDDY_AUTO_MODE: 'multi', OPENSPEC_BUDDY_AUTO_LANES: '2' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.existsSync(controllerPath(envInfo)), true);
+  assert.equal(fs.existsSync(laneStateModule.laneStatePath(envInfo.repoDir)), false);
+  result = run(envInfo, {}, ['--reset-lane-state', '--reason', 'abandoned']);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.existsSync(controllerPath(envInfo)), false);
+  assert.equal(fs.existsSync(laneStateModule.laneStatePath(envInfo.repoDir)), false);
+  assert.doesNotMatch(result.stdout, /backup:/);
 }
 
 {
