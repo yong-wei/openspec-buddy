@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readControllerState } from './controller-state.mjs';
 
 const autoScriptDir = path.dirname(fileURLToPath(import.meta.url));
 const defaultCoreScriptDir = path.resolve(autoScriptDir, '../../openspec-buddy/scripts');
@@ -135,6 +136,23 @@ function commandLine(command) {
   return command.map(shellQuote).join(' ');
 }
 
+function controllerChildMode() {
+  return truthy(process.env.OPENSPEC_BUDDY_AUTO_CONTROLLER_CHILD);
+}
+
+function directRunBlockedByController() {
+  if (controllerChildMode()) return '';
+  try {
+    const controller = readControllerState();
+    if (controller.mode === 'multi') {
+      return 'Buddy Auto controller state is multi-lane; run buddy-auto.mjs instead of the single-lane driver.';
+    }
+  } catch {
+    return '';
+  }
+  return '';
+}
+
 function outputBlock(title, entries = []) {
   console.log(title);
   for (const [key, value] of entries) {
@@ -157,10 +175,13 @@ function emitDone({ stage, command = [], state, next, output = '' }) {
   outputBlock('DONE', [
     ['stage', stage],
     ['state_file', statePath(state)],
-    ['command', command.length ? commandLine(command) : ''],
+    ['command', controllerChildMode() ? '' : (command.length ? commandLine(command) : '')],
     ['next_stage', next?.stage || ''],
     ['next_action', next?.reason || ''],
-    ['next_command', next?.command?.length ? commandLine(next.command) : ''],
+    ['next_command', controllerChildMode() ? '' : (next?.command?.length ? commandLine(next.command) : '')],
+    ['agent_action', next?.reason || ''],
+    ['resume_action', 'rerun-controller'],
+    ['driver_internal', controllerChildMode() ? 'true' : ''],
   ]);
   if (output) {
     console.log('output_excerpt:');
@@ -172,7 +193,10 @@ function emitBlocked({ stage, reason, command = [], output = '' }) {
   outputBlock('BLOCKED', [
     ['stage', stage],
     ['reason', reason],
-    ['command', command.length ? commandLine(command) : ''],
+    ['command', controllerChildMode() ? '' : (command.length ? commandLine(command) : '')],
+    ['agent_action', 'Fix only this blocker, then rerun the Buddy Auto controller.'],
+    ['resume_action', 'rerun-controller'],
+    ['driver_internal', controllerChildMode() ? 'true' : ''],
   ]);
   if (output) {
     console.log('diagnostic:');
@@ -180,11 +204,15 @@ function emitBlocked({ stage, reason, command = [], output = '' }) {
   }
 }
 
-function emitHandoff({ stage, reason, command = [] }) {
+function emitHandoff({ stage, reason, command = [], state = null }) {
   outputBlock('HANDOFF', [
     ['stage', stage],
+    ['state_file', state ? statePath(state) : ''],
     ['required_action', reason],
-    ['command', command.length ? commandLine(command) : ''],
+    ['command', controllerChildMode() ? '' : (command.length ? commandLine(command) : '')],
+    ['agent_action', reason],
+    ['resume_action', 'rerun-controller'],
+    ['driver_internal', controllerChildMode() ? 'true' : ''],
   ]);
 }
 
@@ -495,6 +523,7 @@ function emitImplementHandoff(opts, command = []) {
     stage: 'implement-or-open-pr',
     reason: 'Issue is claimed for this driver context and no exact issue-bound PR exists yet. Continue implementation, independent acceptance review, commit, push, and open a ready PR through the core workflow.',
     command,
+    state: opts,
   });
 }
 
@@ -743,11 +772,17 @@ function runDriver(opts) {
 }
 
 function main() {
-  const opts = inferContext(parseArgs(process.argv.slice(2)));
-  if (opts.help) {
+  const parsed = parseArgs(process.argv.slice(2));
+  if (parsed.help) {
     console.log('Usage: buddy-auto-driver.mjs [--dry-run] [--goal] [--target-issue N] [--target-pr N] [--issue N] [--pr N] [--change ID] [--head SHA] [--no-pr]');
     return;
   }
+  const blocked = directRunBlockedByController();
+  if (blocked) {
+    emitBlocked({ stage: 'controller-owned', reason: blocked });
+    return;
+  }
+  const opts = inferContext(parsed);
   if (opts.dryRun) printNext(opts);
   else runDriver(opts);
 }

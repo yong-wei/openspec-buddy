@@ -9,11 +9,13 @@ const defaultCoreScriptDir = path.resolve(scriptDir, '../../openspec-buddy/scrip
 const coreScriptDir = process.env.OPENSPEC_BUDDY_CORE_SCRIPT_DIR || defaultCoreScriptDir;
 
 function run(command, args, options = {}) {
+  const timeoutMs = Number(process.env.OPENSPEC_BUDDY_COMMAND_TIMEOUT_MS || 120000);
   const result = spawnSync(command, args, {
     cwd: options.cwd || process.cwd(),
     env: process.env,
     encoding: 'utf8',
     stdio: 'pipe',
+    timeout: Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 120000,
   });
   if (result.status !== 0) {
     if (options.optional) return '';

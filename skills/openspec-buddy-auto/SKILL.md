@@ -6,83 +6,106 @@ compatibility: Requires openspec CLI, GitHub CLI, OpenSpec Buddy, and a foregrou
 
 # OpenSpec Buddy Auto
 
-OpenSpec Buddy Auto is the high-permission execution layer for OpenSpec changes.
-It must use OpenSpec Buddy helpers for claim, PR coordination, review waiting,
-merge gates, and achievement sync.
+OpenSpec Buddy Auto is the high-permission execution layer for OpenSpec
+changes. The auto controller owns selection, claim, PR coordination, review
+waiting, lane scheduling, merge gates, and achievement sync.
 
 <EXTREMELY_IMPORTANT>
-EVERY OPENSPEC-BUDDY-AUTO STEP MUST START BY RUNNING THE AUTO DRIVER.
+EVERY OPENSPEC-BUDDY-AUTO STEP MUST START BY RUNNING THE AUTO CONTROLLER.
 
 RUN THIS BEFORE SELECTION, CLAIM, IMPLEMENTATION, COMMIT, PUSH, PR REVIEW,
-REVIEW-FIX, MERGE, ACHIEVE, OR GOAL-LOOP CONTINUATION:
+REVIEW-FIX, MERGE, ACHIEVE, GOAL-LOOP CONTINUATION, OR RECOVERY:
 
 ```bash
-<openspec-buddy-auto-skill-dir>/scripts/buddy-auto-driver.mjs
+<openspec-buddy-auto-skill-dir>/scripts/buddy-auto.mjs
 ```
 
-AFTER STARTING THE DRIVER: DO NOT RUN COMMANDS, DO NOT QUERY GITHUB, DO NOT
+AFTER STARTING THE CONTROLLER: DO NOT RUN COMMANDS, DO NOT QUERY GITHUB, DO NOT
 CHECK TIME, DO NOT OUTPUT PROGRESS, AND DO NOT SUMMARIZE. WAIT SILENTLY UNTIL
-THE DRIVER RETURNS `DONE`, `BLOCKED`, OR `HANDOFF`.
+THE CONTROLLER RETURNS `DONE`, `BLOCKED`, OR `HANDOFF`.
 
-DO NOT HAND-WRITE `sleep`, `gh pr view`, `gh api`, REVIEW POLLING, MERGE
-JUDGMENTS, OR STATE TRANSITIONS IN PLACE OF THE DRIVER'S NEXT LEGAL COMMAND.
+DO NOT RUN DETERMINISTIC HELPERS DIRECTLY. DO NOT HAND-WRITE `sleep`, `gh pr
+view`, `gh api`, REVIEW POLLING, MERGE JUDGMENTS, OR STATE TRANSITIONS IN PLACE
+OF THE CONTROLLER.
 </EXTREMELY_IMPORTANT>
 
 Resolve `<openspec-buddy-auto-skill-dir>` to the directory containing this
 `SKILL.md`; do not paste the placeholder literally.
 
-## Operating Rule
+## First Run Seeds
 
-Run the driver without arguments. The driver owns deterministic helper
-execution for the current phase. It returns only when the phase has a result, a
-blocker, or an agent-owned handoff.
-
-If the user names a specific issue or PR, seed that target before running the
-same driver:
+Normal continuation uses no arguments:
 
 ```bash
-OPENSPEC_BUDDY_AUTO_TARGET_ISSUE=<issue-number> <openspec-buddy-auto-skill-dir>/scripts/buddy-auto-driver.mjs
-OPENSPEC_BUDDY_AUTO_TARGET_PR=<pr-number> <openspec-buddy-auto-skill-dir>/scripts/buddy-auto-driver.mjs
+<openspec-buddy-auto-skill-dir>/scripts/buddy-auto.mjs
 ```
 
-Target seeds are normal operation, not manual workflow substitution. A target
-issue must not be overwritten by an ambient current PR from the worktree.
+If the user names a specific issue or PR, seed the first controller run:
+
+```bash
+OPENSPEC_BUDDY_AUTO_TARGET_ISSUE=<issue-number> <openspec-buddy-auto-skill-dir>/scripts/buddy-auto.mjs
+OPENSPEC_BUDDY_AUTO_TARGET_PR=<pr-number> <openspec-buddy-auto-skill-dir>/scripts/buddy-auto.mjs
+```
 
 If the user explicitly asks for goal mode, completion of all available changes,
-or continuing until no executable changes remain, authorize the same driver to
-select the next issue:
+or continuing until no executable changes remain, seed goal mode:
 
 ```bash
-OPENSPEC_BUDDY_AUTO_GOAL=1 <openspec-buddy-auto-skill-dir>/scripts/buddy-auto-driver.mjs
+OPENSPEC_BUDDY_AUTO_GOAL=1 <openspec-buddy-auto-skill-dir>/scripts/buddy-auto.mjs
 ```
 
-Goal authorization is the only empty-context path that may run the selector and
-claim the next issue. Without it, an empty worktree context must stop.
-
-## Multi-Lane Opt-In
-
-Use multi-lane only when the user explicitly asks to work on another issue
-while submitted PRs wait:
+If the user explicitly asks to work on another issue while submitted PRs wait,
+seed multi-lane mode:
 
 ```bash
-OPENSPEC_BUDDY_AUTO_GOAL=1 OPENSPEC_BUDDY_AUTO_LANES=2 <openspec-buddy-auto-skill-dir>/scripts/buddy-auto-lane-driver.mjs
+OPENSPEC_BUDDY_AUTO_MODE=multi OPENSPEC_BUDDY_AUTO_LANES=2 OPENSPEC_BUDDY_AUTO_GOAL=1 <openspec-buddy-auto-skill-dir>/scripts/buddy-auto.mjs
 ```
 
-After starting it, obey the same silence rule. Multi-lane is single-writer
-scheduling; do not mix it with a concurrent single-lane driver. Details live in
-`references/driver-states.md` and `references/review-waiting.md`.
-Lane recovery is driver-owned: use `--reconcile` or `--release-lane`; do not edit lane cache files by hand.
+Seeds are first-run inputs. After controller state exists,
+`openspec/.buddy-cache/auto-controller/` is authoritative for mode, target,
+goal, lanes, and active interrupt. Do not switch between single-lane and
+multi-lane commands; there is only the controller.
 
-If it reports `BLOCKED`, fix only that blocker. If it reports `HANDOFF`, do
-only the requested agent work. After agent-owned work or external state changes,
-run the driver again.
+## Interrupt Rule
 
-The driver writes local receipts under `openspec/.buddy-cache/auto-state/`.
-Receipts do not replace GitHub truth; they only prevent skipped helper sequence.
+`HANDOFF` and `BLOCKED` are persistent controller interrupts, not permission to
+choose a helper script.
+
+- If the controller reports `HANDOFF`, do only the described agent-owned work.
+- If the controller reports `BLOCKED`, fix only that blocker.
+- After any external work or state change, run `buddy-auto.mjs` again.
+- The controller will re-run the relevant verifier or failed phase and decide
+  whether to repeat, advance, or stop.
+
+The controller writes local state under:
+
+```text
+openspec/.buddy-cache/auto-controller/
+openspec/.buddy-cache/auto-state/
+openspec/.buddy-cache/auto-lanes/
+```
+
+These files do not replace GitHub truth; they only prevent skipped sequence and
+recover from handoff, blocked, or review-fix interruption.
+
+## Recovery Commands
+
+Use recovery commands only when the controller tells you to or the user
+explicitly asks for recovery:
+
+```bash
+<openspec-buddy-auto-skill-dir>/scripts/buddy-auto.mjs --reset-controller-state
+<openspec-buddy-auto-skill-dir>/scripts/buddy-auto.mjs --reset-lane-state --reason "<why>"
+```
+
+Both require a clean git worktree. `--reset-controller-state` clears only the
+controller file for this worktree. `--reset-lane-state` moves this worktree's
+local lane cache to a `.bak` file and clears controller state; it does not
+modify GitHub, branches, OpenSpec files, or claims.
 
 ## Required References
 
-- `references/driver-states.md`: receipts, lane states, and next-command rules
+- `references/driver-states.md`: controller receipts, interrupts, lane states
 - `references/selection-rules.md`: executable issue selection
 - `references/execution-loop.md`: one-change lifecycle
 - `references/review-waiting.md`: review wait and review-fix loop
@@ -90,14 +113,15 @@ Receipts do not replace GitHub truth; they only prevent skipped helper sequence.
 
 ## GitHub-Backed Path
 
-The driver and helpers must enforce:
+The controller must enforce:
 
 - selection uses the smallest claimable executable issue
 - claim happens before implementation
-- PRs go through `mark-review.sh` before any review wait
-- review wait uses `wait-for-review-clear.sh` as the foreground wait
-- review-fix commits pass independent review, same-thread reply, and
-  `review-response-gate.sh` before requesting a new current-head review
+- PR coordination and review request happen before review wait
+- review wait is controller-owned; single-lane may block internally, multi-lane
+  parks waiting PRs and schedules other lanes
+- review-fix commits pass independent review, same-thread reply, response gate,
+  and current-head review request before another wait
 - merge and achievement require current review clearance, PR coordination,
   archived tasks, and worktree claim ownership
 
@@ -108,21 +132,16 @@ The driver and helpers must enforce:
 PR, Project, review, or achievement state. Run local review and verification
 instead.
 
-Driver options such as `--dry-run`, `--issue`, `--pr`, `--change`, and
-`--no-pr` are compatibility and diagnostic controls. Prefer the target
-environment variables above for user-specified issue or PR work.
-
 ## Forbidden Manual Substitutes
 
+- direct deterministic helper invocation during normal auto flow
 - manual `sleep` or time checks during review wait
 - manual `gh pr view --comments` review clearance
-- direct `request-pr-review.sh` before PR coordination
-- direct `wait-for-review-clear.sh` when `mark-review` has not passed
-- direct merge or `mark-achieved.sh` without current-head review clearance
+- direct review request, review wait, response gate, merge, or achievement sync
 - takeover of a claim owned by another worktree unless the user explicitly
   requests a takeover workflow
 
 ## Final Report
 
-Report the driver stages, issue, change id, branch, PR, review rounds,
+Report the controller stages, issue, change id, branch, PR, review rounds,
 verification commands, and any blocker or reusable workflow gap.

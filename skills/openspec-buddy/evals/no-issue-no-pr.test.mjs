@@ -50,12 +50,12 @@ assert.match(
 );
 assert.match(
   autoSkill,
-  /EVERY OPENSPEC-BUDDY-AUTO STEP MUST START BY RUNNING THE AUTO DRIVER/i,
+  /EVERY OPENSPEC-BUDDY-AUTO STEP MUST START BY RUNNING THE AUTO CONTROLLER/i,
   "openspec-buddy-auto must select local-only changes before any claim step",
 );
 assert.match(
   autoSkill,
-  /Forbidden Manual Substitutes[\s\S]*direct `wait-for-review-clear\.sh` when `mark-review` has not passed/i,
+  /Forbidden Manual Substitutes[\s\S]*direct deterministic helper invocation during normal auto flow/i,
   "openspec-buddy-auto --no-pr mode must explicitly skip PR and issue helpers",
 );
 assert.match(

@@ -713,10 +713,12 @@ const env = {
 {
   const skill = fs.readFileSync(path.resolve(__dirname, '../SKILL.md'), 'utf8');
   assert.match(skill, /<EXTREMELY_IMPORTANT>/);
-  assert.match(skill, /buddy-auto-driver\.mjs/);
+  assert.match(skill, /buddy-auto\.mjs/);
+  assert.doesNotMatch(skill, /buddy-auto-driver\.mjs/);
+  assert.doesNotMatch(skill, /buddy-auto-lane-driver\.mjs/);
   assert.match(skill, /DO NOT OUTPUT/);
   assert.match(skill, /WAIT SILENTLY/);
-  assert.ok(skill.split('\n').length < 130, 'openspec-buddy-auto SKILL.md should stay focused on the driver entrypoint');
+  assert.ok(skill.split('\n').length < 150, 'openspec-buddy-auto SKILL.md should stay focused on the controller entrypoint');
 }
 
 console.log('buddy-auto-driver tests passed');

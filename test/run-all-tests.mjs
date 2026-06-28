@@ -52,6 +52,7 @@ const commands = [
   { label: 'node skills/openspec-buddy/evals/verify-review-clear.test.mjs', cmd: 'node', args: ['skills/openspec-buddy/evals/verify-review-clear.test.mjs'] },
   { label: 'node skills/openspec-buddy-auto/evals/lane-state.test.mjs', cmd: 'node', args: ['skills/openspec-buddy-auto/evals/lane-state.test.mjs'] },
   { label: 'node skills/openspec-buddy-auto/evals/lane-switch-gate.test.mjs', cmd: 'node', args: ['skills/openspec-buddy-auto/evals/lane-switch-gate.test.mjs'] },
+  { label: 'node skills/openspec-buddy-auto/evals/buddy-auto-controller.test.mjs', cmd: 'node', args: ['skills/openspec-buddy-auto/evals/buddy-auto-controller.test.mjs'] },
   { label: 'node skills/openspec-buddy-auto/evals/buddy-auto-lane-driver.test.mjs', cmd: 'node', args: ['skills/openspec-buddy-auto/evals/buddy-auto-lane-driver.test.mjs'] },
   { label: 'node skills/openspec-buddy-auto/evals/buddy-auto-driver.test.mjs', cmd: 'node', args: ['skills/openspec-buddy-auto/evals/buddy-auto-driver.test.mjs'] },
   { label: 'node skills/openspec-buddy-auto/evals/select-next-change.test.mjs', cmd: 'node', args: ['skills/openspec-buddy-auto/evals/select-next-change.test.mjs'] },
