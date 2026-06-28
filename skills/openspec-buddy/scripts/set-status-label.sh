@@ -55,13 +55,14 @@ existing_statuses="$(
   gh issue view "$issue_number" --json labels | status_labels_from_issue_json
 )"
 
-args=(issue edit "$issue_number")
-if [[ -n "$existing_statuses" ]]; then
-  args+=(--remove-label "$existing_statuses")
+if [[ "$existing_statuses" != "$target_status" ]]; then
+  args=(issue edit "$issue_number")
+  if [[ -n "$existing_statuses" ]]; then
+    args+=(--remove-label "$existing_statuses")
+  fi
+  args+=(--add-label "$target_status")
+  gh "${args[@]}"
 fi
-args+=(--add-label "$target_status")
-
-gh "${args[@]}"
 verify_status_label "$issue_number" "$target_status"
 
 cache_dir="$(buddy_cache_dir)"

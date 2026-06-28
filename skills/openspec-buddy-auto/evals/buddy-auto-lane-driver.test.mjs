@@ -166,7 +166,7 @@ fi
 if [[ "\${PROBE_EMPTY_FOR:-}" == "\${1:-}" ]]; then
   exit 0
 fi
-if [[ "\${PROBE_RETRY_EXPIRED:-0}" == "1" ]]; then
+if [[ "\${PROBE_RETRY_EXPIRED:-0}" == "1" || "\${PROBE_RETRY_EXPIRED_FOR:-}" == "\${1:-}" ]]; then
   printf '%s\\n' '{"pr":"707","head":"head-1","signature":"sig","requestState":"present-current-head","state":"waiting","requestAgeSeconds":901,"retryDue":false,"retryExpired":true}'
   exit 0
 fi
@@ -1483,6 +1483,58 @@ console.log('stage: achieved');
   assert.equal(state.lanes[0].stage, 'waiting_review');
   assert.equal(state.lanes[0].reviewRetryCount, 1);
   assert.equal(state.lanes[0].reviewRequestedAt, '2026-06-28T00:00:00Z');
+}
+
+{
+  const envInfo = makeEnv('retry-expired-does-not-stop-other-waiting-lane');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 2,
+    lanes: [
+      {
+        id: 'issue-675',
+        issue: '675',
+        change: 'change-675',
+        branch: 'change-675',
+        pr: '707',
+        head: 'head-1',
+        stage: 'waiting_review',
+        reviewRetryCount: 1,
+        reviewRequestedAt: '2000-01-01T00:00:00.000Z',
+        lastRequestState: 'present-current-head',
+      },
+      {
+        id: 'issue-676',
+        issue: '676',
+        change: 'change-676',
+        branch: 'change-676',
+        pr: '708',
+        head: 'head-2',
+        stage: 'waiting_review',
+        reviewRetryCount: 0,
+        lastRequestState: 'present-current-head',
+      },
+    ],
+  }));
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '2',
+    OPENSPEC_BUDDY_REVIEW_RETRY_SECONDS: '1',
+    CURRENT_BRANCH: 'dev1',
+    PROBE_RETRY_EXPIRED_FOR: '707',
+    PROBE_STATE_708: 'changed',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^HANDOFF/m);
+  assert.match(result.stdout, /^stage: merge-ready$/m);
+  const log = fs.readFileSync(envInfo.logFile, 'utf8');
+  assert.match(log, /probe 707/);
+  assert.match(log, /probe 708/);
+  const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  assert.equal(state.lanes[0].stage, 'blocked');
+  assert.equal(state.lanes[1].stage, 'merge_ready');
 }
 
 {

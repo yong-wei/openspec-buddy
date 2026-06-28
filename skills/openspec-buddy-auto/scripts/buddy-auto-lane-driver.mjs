@@ -1384,13 +1384,7 @@ function processWaitingLane(state, lane) {
       retryable: false,
       source: 'review-retry-expired',
     });
-    emitBlocked([
-      ['stage', 'waiting_review'],
-      ['lane', lane.id],
-      ['pr', lane.pr],
-      ['reason', lane.blockedReason],
-    ]);
-    return true;
+    return false;
   }
 
   if (result.retryDue === true && Number(lane.reviewRetryCount || 0) === 0) {

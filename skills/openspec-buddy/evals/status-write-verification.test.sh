@@ -26,7 +26,9 @@ if [[ "$1" == "issue" && "$2" == "view" ]]; then
     [[ -f "$count_file" ]] && count="$(cat "$count_file")"
     count=$((count + 1))
     printf '%s\n' "$count" > "$count_file"
-    if [[ "${STATUS_VERIFY_MODE:-ok}" == "missing" && "$count" -gt 1 ]]; then
+    if [[ "${STATUS_VERIFY_MODE:-ok}" == "already-in-progress" ]]; then
+      printf '%s\n' '{"labels":[{"name":"status:in-progress"},{"name":"type:change"}]}'
+    elif [[ "${STATUS_VERIFY_MODE:-ok}" == "missing" && "$count" -gt 1 ]]; then
       printf '%s\n' '{"labels":[{"name":"type:change"}]}'
     else
       printf '%s\n' '{"labels":[{"name":"status:ready"},{"name":"type:change"}]}'
@@ -111,6 +113,19 @@ export OPENSPEC_BUDDY_PROJECT_OWNER=owner
 export OPENSPEC_BUDDY_PROJECT_NUMBER=1
 export OPENSPEC_BUDDY_PROJECT_TITLE="Major LTE"
 export OPENSPEC_BUDDY_DISABLE_SIGNAL=1
+
+STATUS_VERIFY_MODE=already-in-progress "$repo_root/skills/openspec-buddy/scripts/set-status-label.sh" 123 status:in-progress > "$tmp_dir/already-status.out"
+if grep -F "issue edit 123" "$tmp_dir/gh.log" >/dev/null; then
+  echo "set-status-label.sh should not remove and re-add a status label that is already present" >&2
+  cat "$tmp_dir/gh.log" >&2
+  exit 1
+fi
+if ! grep -F "project item-edit" "$tmp_dir/gh.log" >/dev/null; then
+  echo "set-status-label.sh should still sync the Project status when the issue status label is already present" >&2
+  cat "$tmp_dir/gh.log" >&2
+  exit 1
+fi
+rm -f "$tmp_dir/gh.log" "$STATE_DIR/label-view-count"
 
 set +e
 STATUS_VERIFY_MODE=missing "$repo_root/skills/openspec-buddy/scripts/set-status-label.sh" 123 status:archived > "$tmp_dir/missing-label.out" 2> "$tmp_dir/missing-label.err"
