@@ -13,6 +13,17 @@ already committed, pushed, and waiting for a current-head Codex review, then
 move the single foreground worktree to another lane. This is pooled waiting, not
 parallel implementation.
 
+For multi-lane branch context:
+
+- Review retry, review-clear checks, review-fix continuation, and open-PR merge
+  gates must resume the lane claim branch before calling helpers.
+- Post-merge achievement and archive synchronization run on the bound
+  coordination branch after GitHub truth shows the PR is merged.
+- A lane with local HEAD ahead of the parked PR head is a review-fix lane; do
+  not turn it into a generic blocked wrong-head state.
+- `head_changed` is recoverable when the current head already has the configured
+  review request; update `lane.head` and keep waiting.
+
 The wait should block the current execution flow with exactly one command:
 
 ```bash
@@ -59,6 +70,12 @@ clean review, stop the auto loop and mark the issue for human attention.
 In multi-lane mode, retry requests are deduplicated with a stable comment
 marker containing lane id, head sha, and retry round. Do not rely only on local
 lane state before sending a forced retry request.
+
+Repeated or duplicate actionable Codex threads should stay in the review-fix
+path. The lane driver should not scan all review thread bodies during idle
+polling; it should enter `review_fix` when `check-review-clear-once.sh` reports
+actionable review state, then let same-thread replies and
+`review-response-gate.sh` resolve the concrete threads.
 
 Before sleeping, the helper checks two preconditions. First, the current PR
 head must have a fresh `OPENSPEC_BUDDY_PR_REVIEW_REQUEST` comment; otherwise it

@@ -22,6 +22,7 @@ const commands = [
   { label: 'bash skills/openspec-buddy/evals/link-issue-dependencies-budget.test.sh', cmd: 'bash', args: ['skills/openspec-buddy/evals/link-issue-dependencies-budget.test.sh'] },
   { label: 'bash skills/openspec-buddy/evals/list-ready-change-relationships.test.sh', cmd: 'bash', args: ['skills/openspec-buddy/evals/list-ready-change-relationships.test.sh'] },
   { label: 'bash skills/openspec-buddy/evals/mark-achieved-post-merge.test.sh', cmd: 'bash', args: ['skills/openspec-buddy/evals/mark-achieved-post-merge.test.sh'] },
+  { label: 'bash skills/openspec-buddy/evals/mark-in-progress.test.sh', cmd: 'bash', args: ['skills/openspec-buddy/evals/mark-in-progress.test.sh'] },
   { label: 'bash skills/openspec-buddy/evals/mark-review.test.sh', cmd: 'bash', args: ['skills/openspec-buddy/evals/mark-review.test.sh'] },
   { label: 'node skills/openspec-buddy/evals/open-issue-claim.test.mjs', cmd: 'node', args: ['skills/openspec-buddy/evals/open-issue-claim.test.mjs'] },
   { label: 'node skills/openspec-buddy/evals/propose-default-artifacts.test.mjs', cmd: 'node', args: ['skills/openspec-buddy/evals/propose-default-artifacts.test.mjs'] },

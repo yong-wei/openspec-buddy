@@ -97,8 +97,8 @@ function requireClaimGuard({ issue, pr }) {
 export function verifySafeYield(opts) {
   requireCleanWorktree();
   const branch = requireCurrentBranch(opts.branch);
-  const head = requireHead(opts.head);
   requireClaimGuard(opts);
+  const head = requireHead(opts.head);
   requirePrTruth({ ...opts, branch, head: opts.head || head });
   requireRemoteBranch(opts.branch || branch);
   if (opts.pr) {
@@ -116,8 +116,8 @@ export function verifyResume(opts) {
     }
   }
   const branch = requireCurrentBranch(opts.branch);
-  const head = requireHead(opts.head);
   requireClaimGuard(opts);
+  const head = requireHead(opts.head);
   requirePrTruth({ ...opts, branch, head: opts.head || head });
   return { ok: true, branch, head };
 }
