@@ -1171,7 +1171,8 @@ function processWaitingLane(state, lane) {
 
   if (result.state === 'head_changed' && result.requestState === 'present-current-head' && result.head) {
     lane.head = String(result.head);
-    if (!lane.reviewRequestedAt) lane.reviewRequestedAt = new Date().toISOString();
+    lane.reviewRetryCount = 0;
+    lane.reviewRequestedAt = new Date().toISOString();
     lane.updatedAt = new Date().toISOString();
     writeLaneState(state);
     return false;

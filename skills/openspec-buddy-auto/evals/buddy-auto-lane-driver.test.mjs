@@ -726,7 +726,7 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
         pr: '707',
         head: 'old-head',
         stage: 'waiting_review',
-        reviewRetryCount: 0,
+        reviewRetryCount: 1,
         lastRequestState: 'present-current-head',
         reviewRequestedAt: '2026-06-27T00:00:00.000Z',
       },
@@ -750,7 +750,9 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
   assert.equal(state.lanes[0].stage, 'waiting_review');
   assert.equal(state.lanes[0].head, 'new-head');
   assert.equal(state.lanes[0].lastSignature, 'new-sig');
-  assert.equal(state.lanes[0].reviewRequestedAt, '2026-06-27T00:00:00.000Z');
+  assert.equal(state.lanes[0].reviewRetryCount, 0);
+  assert.match(state.lanes[0].reviewRequestedAt, /^\d{4}-\d{2}-\d{2}T/);
+  assert.notEqual(state.lanes[0].reviewRequestedAt, '2026-06-27T00:00:00.000Z');
 }
 
 {
