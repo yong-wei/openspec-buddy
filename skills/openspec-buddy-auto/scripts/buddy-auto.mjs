@@ -106,6 +106,7 @@ function childEnv(state) {
   delete env.OPENSPEC_BUDDY_AUTO_PR;
   delete env.OPENSPEC_BUDDY_AUTO_HEAD;
   delete env.OPENSPEC_BUDDY_AUTO_CHANGE_ID;
+  delete env.OPENSPEC_BUDDY_AUTO_REVIEW_WAIT_MODE;
   if (state.reviewFix.pending) env.OPENSPEC_BUDDY_REVIEW_FIX_CONTEXT = '1';
   else delete env.OPENSPEC_BUDDY_REVIEW_FIX_CONTEXT;
   return env;
@@ -128,6 +129,33 @@ function isReviewFixStage(stage) {
 function shouldClearReviewFix(status, stage) {
   if (status !== 'DONE') return false;
   return ['review-response-gate', 'review-yield', 'wait-review', 'review_clear', 'stub-done', 'lane-done'].includes(String(stage || ''));
+}
+
+function readChildState(fields) {
+  const file = fields.state_file || '';
+  if (!file || !fs.existsSync(file)) return {};
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+function syncTargetFromChildState(state, parsed) {
+  const childState = readChildState(parsed.fields);
+  const target = {
+    issue: parsed.fields.issue || childState.issue || state.target.issue || '',
+    pr: parsed.fields.pr || childState.pr || state.target.pr || '',
+    change: parsed.fields.change || childState.change || state.target.change || '',
+  };
+  if (
+    target.issue === state.target.issue
+    && target.pr === state.target.pr
+    && target.change === state.target.change
+  ) {
+    return state;
+  }
+  return writeControllerState({ ...state, target });
 }
 
 function handleChildResult(state, result) {
@@ -168,6 +196,7 @@ function handleChildResult(state, result) {
     ], text);
     return;
   }
+  state = syncTargetFromChildState(state, parsed);
   if (isReviewFixStage(stage)) {
     state = setReviewFix(state, {
       pending: true,

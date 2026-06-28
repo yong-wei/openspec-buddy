@@ -52,10 +52,24 @@ fs.appendFileSync(${JSON.stringify(logFile)}, JSON.stringify({
   pr: process.env.OPENSPEC_BUDDY_AUTO_TARGET_PR || process.env.OPENSPEC_BUDDY_AUTO_PR || '',
   head: process.env.OPENSPEC_BUDDY_AUTO_HEAD || '',
   change: process.env.OPENSPEC_BUDDY_AUTO_CHANGE || process.env.OPENSPEC_BUDDY_AUTO_CHANGE_ID || '',
+  waitMode: process.env.OPENSPEC_BUDDY_AUTO_REVIEW_WAIT_MODE || '',
   goal: process.env.OPENSPEC_BUDDY_AUTO_GOAL || '',
   reviewFix: process.env.OPENSPEC_BUDDY_REVIEW_FIX_CONTEXT || '',
   controllerChild: process.env.OPENSPEC_BUDDY_AUTO_CONTROLLER_CHILD || ''
 }) + '\\n');
+if (process.env.BUDDY_STUB_STATE_ISSUE) {
+  const stateFile = ${JSON.stringify(root)} + '/stub-state.json';
+  fs.writeFileSync(stateFile, JSON.stringify({
+    issue: process.env.BUDDY_STUB_STATE_ISSUE || '',
+    pr: process.env.BUDDY_STUB_STATE_PR || '',
+    change: process.env.BUDDY_STUB_STATE_CHANGE || ''
+  }));
+  console.log('HANDOFF');
+  console.log('stage: implement-or-open-pr');
+  console.log('state_file: ' + stateFile);
+  console.log('required_action: do external work');
+  process.exit(0);
+}
 if (process.env.BUDDY_STUB_STATUS === 'BLOCKED') {
   console.log('BLOCKED');
   console.log('stage: stub-blocked');
@@ -217,7 +231,33 @@ function controllerPath(envInfo) {
   assert.equal(log[0].pr, '');
   assert.equal(log[0].head, '');
   assert.equal(log[0].change, '');
+  assert.equal(log[0].waitMode, '');
   assert.equal(log[0].reviewFix, '');
+}
+
+{
+  const envInfo = makeEnv('lane-wait-mode-cleared');
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_REVIEW_WAIT_MODE: 'yield',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const log = readLog(envInfo);
+  assert.equal(log[0].waitMode, '');
+}
+
+{
+  const envInfo = makeEnv('child-state-target-sync');
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    BUDDY_STUB_STATE_ISSUE: '675',
+    BUDDY_STUB_STATE_CHANGE: 'change-675',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^HANDOFF/m);
+  const state = readController(envInfo);
+  assert.equal(state.target.issue, '675');
+  assert.equal(state.target.change, 'change-675');
+  assert.equal(state.interrupt.issue, '675');
 }
 
 {

@@ -204,9 +204,10 @@ function emitBlocked({ stage, reason, command = [], output = '' }) {
   }
 }
 
-function emitHandoff({ stage, reason, command = [] }) {
+function emitHandoff({ stage, reason, command = [], state = null }) {
   outputBlock('HANDOFF', [
     ['stage', stage],
+    ['state_file', state ? statePath(state) : ''],
     ['required_action', reason],
     ['command', controllerChildMode() ? '' : (command.length ? commandLine(command) : '')],
     ['agent_action', reason],
@@ -522,6 +523,7 @@ function emitImplementHandoff(opts, command = []) {
     stage: 'implement-or-open-pr',
     reason: 'Issue is claimed for this driver context and no exact issue-bound PR exists yet. Continue implementation, independent acceptance review, commit, push, and open a ready PR through the core workflow.',
     command,
+    state: opts,
   });
 }
 
