@@ -331,6 +331,18 @@ console.log('legacy helper completed without protocol');
 }
 
 {
+  const envInfo = makeEnv('review-yield-clears-review-fix');
+  let result = run(envInfo, { BUDDY_STUB_STAGE: 'review-fix' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(readController(envInfo).reviewFix.pending, true);
+  result = run(envInfo, { BUDDY_STUB_STAGE: 'review-yield' });
+  assert.equal(result.status, 0, result.stderr);
+  const state = readController(envInfo);
+  assert.equal(state.reviewFix.pending, false);
+  assert.equal(state.interrupt.stage, 'review-yield');
+}
+
+{
   const envInfo = makeEnv('reset-controller');
   let result = run(envInfo, { OPENSPEC_BUDDY_AUTO_TARGET_ISSUE: '1' });
   assert.equal(result.status, 0, result.stderr);

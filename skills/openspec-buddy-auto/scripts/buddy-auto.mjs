@@ -127,7 +127,7 @@ function isReviewFixStage(stage) {
 }
 
 function shouldClearReviewFix(status, stage) {
-  if (status !== 'DONE') return false;
+  if (status !== 'DONE' && status !== 'HANDOFF') return false;
   return ['review-response-gate', 'review-yield', 'wait-review', 'review_clear', 'stub-done', 'lane-done'].includes(String(stage || ''));
 }
 
@@ -207,6 +207,9 @@ function handleChildResult(state, result) {
   }
 
   if (parsed.status === 'HANDOFF') {
+    if (shouldClearReviewFix(parsed.status, stage)) {
+      state = setReviewFix(state, { pending: false }, {});
+    }
     const next = writeInterrupt(state, {
       type: 'handoff',
       stage,
