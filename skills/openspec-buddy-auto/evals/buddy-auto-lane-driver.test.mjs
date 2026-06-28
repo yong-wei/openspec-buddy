@@ -84,7 +84,7 @@ exit 99
 set -euo pipefail
 if [[ "\${1:-}" == "api" && "\${2:-}" == */issues/*/comments* ]]; then
   if [[ "\${RETRY_MARKER_EXISTS:-0}" == "1" ]]; then
-    printf '%s\\n' '[{"body":"OpenSpec Buddy review retry\\nlane_id: issue-675\\nhead: head-1\\nretry_round: 1"}]'
+    printf '%s\\n' '[{"created_at":"2026-06-28T00:00:00Z","body":"OpenSpec Buddy review retry\\nlane_id: issue-675\\nhead: head-1\\nretry_round: 1"}]'
   else
     printf '[]\\n'
   fi
@@ -1333,6 +1333,7 @@ console.log('stage: achieved');
   const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
   assert.equal(state.lanes[0].stage, 'waiting_review');
   assert.equal(state.lanes[0].reviewRetryCount, 1);
+  assert.equal(state.lanes[0].reviewRequestedAt, '2026-06-28T00:00:00Z');
 }
 
 {

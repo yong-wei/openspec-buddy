@@ -522,17 +522,21 @@ function retryMarker(lane, retryRound) {
 
 function retryMarkerExists(lane, retryRound) {
   const repo = repoNwoFromRemote();
-  if (!repo) return false;
+  if (!repo) return { exists: false, at: '' };
   const result = run('gh', ['api', `repos/${repo}/issues/${lane.pr}/comments?per_page=100`], { allowFailure: true });
-  if (result.status !== 0) return false;
+  if (result.status !== 0) return { exists: false, at: '' };
   let comments = [];
   try {
     comments = JSON.parse(result.stdout || '[]');
   } catch {
-    return false;
+    return { exists: false, at: '' };
   }
   const marker = retryMarker(lane, retryRound);
-  return comments.some((comment) => String(comment.body || '').includes(marker));
+  const comment = comments.find((item) => String(item.body || '').includes(marker));
+  return {
+    exists: Boolean(comment),
+    at: String(comment?.created_at || comment?.createdAt || ''),
+  };
 }
 
 function writeRetryContext(lane, retryRound) {
@@ -555,7 +559,8 @@ function writeRetryContext(lane, retryRound) {
 
 function requestRetry(lane) {
   const retryRound = (lane.reviewRetryCount || 0) + 1;
-  if (retryMarkerExists(lane, retryRound)) return { skipped: true, retryRound };
+  const existingMarker = retryMarkerExists(lane, retryRound);
+  if (existingMarker.exists) return { skipped: true, retryRound, requestedAt: existingMarker.at || new Date().toISOString() };
   const contextFile = writeRetryContext(lane, retryRound);
   const result = run(path.join(coreScriptDir, 'request-pr-review.sh'), [String(lane.pr), '--force', '--context-file', contextFile], { allowFailure: true });
   fs.rmSync(path.dirname(contextFile), { recursive: true, force: true });
@@ -564,7 +569,7 @@ function requestRetry(lane) {
     error.status = result.status;
     throw error;
   }
-  return { skipped: false, retryRound };
+  return { skipped: false, retryRound, requestedAt: new Date().toISOString() };
 }
 
 function markIssueInProgress(issue) {
@@ -1228,7 +1233,7 @@ function processWaitingLane(state, lane) {
       return true;
     }
     lane.reviewRetryCount = retry.retryRound;
-    if (!retry.skipped) lane.reviewRequestedAt = new Date().toISOString();
+    lane.reviewRequestedAt = retry.requestedAt || new Date().toISOString();
     lane.updatedAt = new Date().toISOString();
     writeLaneState(state);
     return false;
