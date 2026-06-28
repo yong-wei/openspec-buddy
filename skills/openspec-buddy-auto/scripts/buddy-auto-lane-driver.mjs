@@ -494,6 +494,21 @@ function reconcileRecoverableLanes(state) {
   return false;
 }
 
+function reconcileWaitingReviewPrTruth(state) {
+  let changed = false;
+  const candidates = state.lanes.filter((lane) => lane.stage === 'waiting_review' && lane.pr);
+  for (const lane of candidates) {
+    const result = refreshWaitingLanePrTruth(state, lane);
+    if (result.emitted) return true;
+    if (result.handled) changed = true;
+  }
+  if (changed) {
+    const refreshed = readLaneState({ maxLanes: state.maxLanes });
+    if (emitBlockedLaneSummaryIfTerminal(refreshed)) return true;
+  }
+  return false;
+}
+
 function emitBlockedLaneSummaryIfTerminal(state) {
   const blockedLanes = state.lanes.filter(laneBlocksGoalCompletion);
   const activeLanes = state.lanes.filter((lane) => lane.stage !== 'done' && !laneBlocksGoalCompletion(lane));
@@ -1136,7 +1151,69 @@ function advanceResumedLane(state, lane) {
   return true;
 }
 
+function refreshWaitingLanePrTruth(state, lane) {
+  if (!lane.pr) return { handled: false, emitted: false };
+
+  const truth = forceRefreshPrTruth(lane.pr);
+  if (truth.status !== 0) {
+    const reason = truth.reason || 'gh pr view failed';
+    const retryable = isTransientFailure(reason);
+    markLaneFailure(state, lane, reason, {
+      retryable,
+      source: 'pr-truth',
+    });
+    if (retryable) return { handled: true, emitted: false };
+    emitBlocked([
+      ['stage', 'pr-truth'],
+      ['lane', lane.id],
+      ['issue', lane.issue],
+      ['pr', lane.pr],
+      ['reason', lane.blockedReason],
+    ]);
+    return { handled: true, emitted: true };
+  }
+
+  const stateValue = String(truth.data?.state || '').toUpperCase();
+  if (stateValue === 'MERGED' || truth.data?.mergedAt) {
+    refreshLanePrFields(lane, truth.data);
+    lane.stage = 'merge_ready';
+    lane.blockedReason = '';
+    lane.lastResult = 'pr-truth-merged';
+    clearRetryableState(lane);
+    lane.updatedAt = new Date().toISOString();
+    writeLaneState(state);
+    emitHandoff([
+      ['stage', 'merge-ready'],
+      ['lane', lane.id],
+      ['issue', lane.issue],
+      ['pr', lane.pr],
+      ['required_action', 'PR is already merged; run the auto driver on this lane to complete achievement gates.'],
+    ]);
+    return { handled: true, emitted: true };
+  }
+
+  if (stateValue && stateValue !== 'OPEN') {
+    markLaneFailure(state, lane, `PR ${lane.pr} is not open`, {
+      retryable: false,
+      source: 'pr-truth',
+    });
+    emitBlocked([
+      ['stage', 'pr-truth'],
+      ['lane', lane.id],
+      ['issue', lane.issue],
+      ['pr', lane.pr],
+      ['reason', lane.blockedReason],
+    ]);
+    return { handled: true, emitted: true };
+  }
+
+  return { handled: false, emitted: false };
+}
+
 function processWaitingLane(state, lane) {
+  const prTruth = refreshWaitingLanePrTruth(state, lane);
+  if (prTruth.handled) return prTruth.emitted;
+
   const probe = probeLane(lane);
   if (probe.status !== 0) {
     const reason = probe.stderr || probe.stdout || 'probe-review-state.sh failed';
@@ -1359,6 +1436,7 @@ function runScheduler(opts) {
 
     if (opts.reconcile) {
       if (reconcileRecoverableLanes(state)) return;
+      if (reconcileWaitingReviewPrTruth(state)) return;
       const refreshed = readLaneState({ maxLanes });
       if (emitBlockedLaneSummaryIfTerminal(refreshed)) return;
       emitDone([

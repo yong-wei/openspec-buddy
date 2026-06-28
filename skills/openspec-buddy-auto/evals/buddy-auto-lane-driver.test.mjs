@@ -494,6 +494,66 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
 }
 
 {
+  const envInfo = makeEnv('waiting-review-merged-pr-becomes-merge-ready-before-probe');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 1,
+    lanes: [
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'old-head', stage: 'waiting_review', reviewRetryCount: 1, lastRequestState: 'present-current-head' },
+    ],
+  }));
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '1',
+    CURRENT_BRANCH: 'dev1',
+    PR_707_STATE: 'MERGED',
+    PR_707_HEAD: 'merged-head',
+    PR_707_MERGED_AT: '"2026-06-28T00:00:00Z"',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^HANDOFF/m);
+  assert.match(result.stdout, /^stage: merge-ready$/m);
+  const log = fs.existsSync(envInfo.logFile) ? fs.readFileSync(envInfo.logFile, 'utf8') : '';
+  assert.doesNotMatch(log, /probe 707/);
+  const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  assert.equal(state.lanes[0].stage, 'merge_ready');
+  assert.equal(state.lanes[0].head, 'merged-head');
+  assert.equal(state.lanes[0].lastResult, 'pr-truth-merged');
+}
+
+{
+  const envInfo = makeEnv('reconcile-waiting-review-merged-pr-becomes-merge-ready');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 1,
+    lanes: [
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'old-head', stage: 'waiting_review', reviewRetryCount: 1, lastRequestState: 'present-current-head' },
+    ],
+  }));
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '1',
+    CURRENT_BRANCH: 'dev1',
+    PR_707_STATE: 'MERGED',
+    PR_707_HEAD: 'merged-head',
+    PR_707_MERGED_AT: '"2026-06-28T00:00:00Z"',
+  }, ['--reconcile']);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^HANDOFF/m);
+  assert.match(result.stdout, /^stage: merge-ready$/m);
+  const log = fs.existsSync(envInfo.logFile) ? fs.readFileSync(envInfo.logFile, 'utf8') : '';
+  assert.doesNotMatch(log, /probe 707/);
+  const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  assert.equal(state.lanes[0].stage, 'merge_ready');
+  assert.equal(state.lanes[0].head, 'merged-head');
+  assert.equal(state.lanes[0].lastResult, 'pr-truth-merged');
+}
+
+{
   const envInfo = makeEnv('local-head-ahead-becomes-review-fix');
   fs.mkdirSync(envInfo.stateDir, { recursive: true });
   fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
