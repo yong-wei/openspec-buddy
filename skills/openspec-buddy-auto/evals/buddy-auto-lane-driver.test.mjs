@@ -1225,6 +1225,7 @@ throw new Error('merge_ready should hand off instead of running fake single driv
   let state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
   assert.equal(state.lanes[0].stage, 'retryable_blocked');
   assert.equal(state.lanes[0].retryableStage, 'merge_ready');
+  assert.equal(state.lanes[0].retryableHead, 'head-1');
 
   const second = run(envInfo, {
     OPENSPEC_BUDDY_AUTO_GOAL: '1',
@@ -1236,6 +1237,44 @@ throw new Error('merge_ready should hand off instead of running fake single driv
   state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
   assert.equal(state.lanes[0].stage, 'merge_ready');
   assert.equal(state.lanes[0].retryableStage || '', '');
+}
+
+{
+  const envInfo = makeEnv('merge-ready-pr-truth-retry-head-change-waits-review');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 1,
+    lanes: [
+      {
+        id: 'issue-675',
+        issue: '675',
+        change: 'change-675',
+        branch: 'change-675',
+        pr: '707',
+        head: 'head-1',
+        stage: 'retryable_blocked',
+        blockedReason: 'GitHub API EOF',
+        retryAttempts: 1,
+        retryableStage: 'merge_ready',
+        retryableHead: 'head-1',
+      },
+    ],
+  }));
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '1',
+    CURRENT_BRANCH: 'dev1',
+    PR_707_HEAD: 'head-2',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^DONE/m);
+  const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  assert.equal(state.lanes[0].stage, 'waiting_review');
+  assert.equal(state.lanes[0].head, 'head-2');
+  assert.equal(state.lanes[0].retryableStage || '', '');
+  assert.equal(state.lanes[0].retryableHead || '', '');
 }
 
 {

@@ -224,6 +224,7 @@ export function normalizeLane(lane) {
     lastResult: String(lane.lastResult || ''),
     blockedReason: String(lane.blockedReason || ''),
     retryableStage: String(lane.retryableStage || ''),
+    retryableHead: String(lane.retryableHead || ''),
     retryableSince: String(lane.retryableSince || ''),
     retryAttempts: Number(lane.retryAttempts || 0),
     updatedAt: String(lane.updatedAt || ''),

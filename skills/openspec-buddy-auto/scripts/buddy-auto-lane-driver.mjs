@@ -163,6 +163,7 @@ function clearRetryableState(lane) {
   lane.retryableSince = '';
   lane.retryAttempts = 0;
   lane.retryableStage = '';
+  lane.retryableHead = '';
 }
 
 function markLaneFailure(state, lane, reason, { retryable = false, source = '' } = {}) {
@@ -171,7 +172,10 @@ function markLaneFailure(state, lane, reason, { retryable = false, source = '' }
   lane.blockedReason = reason || 'lane failed';
   lane.lastResult = source || lane.lastResult || '';
   if (retryable) {
-    if (previousStage !== 'retryable_blocked') lane.retryableStage = previousStage;
+    if (previousStage !== 'retryable_blocked') {
+      lane.retryableStage = previousStage;
+      lane.retryableHead = lane.head || '';
+    }
     lane.retryableSince ||= new Date().toISOString();
     lane.retryAttempts = Number(lane.retryAttempts || 0) + 1;
   } else {
@@ -417,10 +421,14 @@ function reconcileLaneFromTruth(state, lane) {
       });
       return { handled: true, emitted: false };
     }
+    const retryableStage = lane.retryableStage || '';
+    const retryableHead = lane.retryableHead || '';
     refreshLanePrFields(lane, truth.data);
     const stateValue = String(truth.data?.state || '').toUpperCase();
     if (stateValue === 'OPEN') {
-      lane.stage = lane.retryableStage === 'merge_ready' ? 'merge_ready' : 'waiting_review';
+      lane.stage = retryableStage === 'merge_ready' && String(truth.data?.headRefOid || '') === retryableHead
+        ? 'merge_ready'
+        : 'waiting_review';
       lane.blockedReason = '';
       lane.lastResult = 'reconciled-open-pr';
       clearRetryableState(lane);
