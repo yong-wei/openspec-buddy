@@ -128,12 +128,22 @@ function isReviewFixStage(stage) {
 
 function shouldClearReviewFix(status, stage) {
   if (status !== 'DONE' && status !== 'HANDOFF') return false;
-  return ['review-response-gate', 'review-yield', 'wait-review', 'review_clear', 'stub-done', 'lane-done'].includes(String(stage || ''));
+  return [
+    'review-response-gate',
+    'review-yield',
+    'wait-review',
+    'review_clear',
+    'merge-pr',
+    'achieved',
+    'mark-achieved-post-merge',
+    'stub-done',
+    'lane-done',
+  ].includes(String(stage || ''));
 }
 
 function shouldClearTarget(status, stage) {
   if (status !== 'DONE') return false;
-  return ['achieved', 'lane-done'].includes(String(stage || ''));
+  return ['achieved', 'mark-achieved-post-merge', 'lane-done'].includes(String(stage || ''));
 }
 
 function readChildState(fields) {

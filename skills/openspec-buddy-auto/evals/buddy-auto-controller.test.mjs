@@ -312,6 +312,23 @@ console.log('legacy helper completed without protocol');
 }
 
 {
+  const envInfo = makeEnv('post-merge-achieved-clears-target');
+  let result = run(envInfo, {
+    BUDDY_STUB_STATE_ISSUE: '675',
+    BUDDY_STUB_STATE_PR: '707',
+    BUDDY_STUB_STATE_CHANGE: 'change-675',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(readController(envInfo).target.issue, '675');
+  result = run(envInfo, { BUDDY_STUB_DONE_STAGE: 'mark-achieved-post-merge' });
+  assert.equal(result.status, 0, result.stderr);
+  const state = readController(envInfo);
+  assert.equal(state.target.issue, '');
+  assert.equal(state.target.pr, '');
+  assert.equal(state.target.change, '');
+}
+
+{
   const envInfo = makeEnv('legacy-lane');
   process.env.PATH = `${envInfo.binDir}:${process.env.PATH}`;
   process.env.OPENSPEC_BUDDY_AUTO_LANE_STATE_DIR = envInfo.laneDir;
@@ -375,6 +392,18 @@ console.log('legacy helper completed without protocol');
   const state = readController(envInfo);
   assert.equal(state.reviewFix.pending, false);
   assert.equal(state.interrupt.stage, 'review-yield');
+}
+
+{
+  const envInfo = makeEnv('review-merge-handoff-clears-review-fix');
+  let result = run(envInfo, { BUDDY_STUB_STAGE: 'review-fix' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(readController(envInfo).reviewFix.pending, true);
+  result = run(envInfo, { BUDDY_STUB_STAGE: 'merge-pr' });
+  assert.equal(result.status, 0, result.stderr);
+  const state = readController(envInfo);
+  assert.equal(state.reviewFix.pending, false);
+  assert.equal(state.interrupt.stage, 'merge-pr');
 }
 
 {
