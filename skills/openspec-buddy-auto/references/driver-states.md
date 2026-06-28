@@ -43,6 +43,12 @@ Lane state is local scheduling evidence, not GitHub truth. The lane driver must
 still use GitHub helpers for claim ownership, PR head, review request, review
 clearance, merge, Project, and achievement decisions.
 
+`lane.head` is a cached expected head, not final truth. The lane driver may
+update it from the target PR when the PR has a current-head review request, or
+from the current local branch when the branch is ahead of the parked PR head
+after a review-fix commit. A local claim branch ahead of the parked PR head is a
+`review_fix` continuation, not a fatal wrong-head blocker.
+
 Allowed lane stages:
 
 ```text
@@ -67,8 +73,10 @@ PR head, and claim-worktree guard all pass.
 
 Blocked lanes that still own an issue, PR, branch, or claim id reserve capacity.
 They are not empty slots. A transient GitHub failure such as EOF, rate limit,
-timeout, or 5xx enters `retryable_blocked`; the next lane driver run must first
-reconcile that lane from GitHub truth before selecting another issue.
+timeout, empty JSON, or 5xx enters `retryable_blocked`; it must not be treated
+as an empty slot. If other waiting lanes can progress in the same driver tick,
+the driver should continue probing them before returning. A later driver run
+must reconcile retryable lanes from GitHub truth before selecting another issue.
 
 Recovery controls:
 
@@ -82,6 +90,29 @@ Use `--reconcile` when local lane state may lag GitHub truth. Use
 `release-claim.sh`, restores `status:ready`, and clears matching local lane
 state. Do not hand-edit `openspec/.buddy-cache/auto-lanes/*.json` during normal
 operation.
+
+## Lane Truth Reads
+
+The lane driver should read the smallest truth surface that can answer the
+current phase:
+
+- Local branch and HEAD from Git for lane switching and stale-head recovery.
+- `gh pr view <pr> --json state,headRefOid,headRefName,mergedAt,number` for the
+  lane's own PR only.
+- `find-issue-pr.sh <issue>` only when an owned lane has no PR recorded.
+- `probe-review-state.sh <pr>` for idle review polling.
+- `check-review-clear-once.sh <pr>` only after probe state changes or when a
+  review-fix lane needs a current decision.
+
+Do not add repository-wide issue, PR, Project, or review thread scans to the
+lane driver. Duplicate actionable review threads remain the responsibility of
+the review-fix handoff and `review-response-gate.sh`; the lane driver responds
+to `check-review-clear-once.sh` status and does not poll all thread bodies.
+
+PR truth may be cached within one driver invocation, but the cache must be
+invalidated after helpers that can push, request review, merge, or otherwise
+change PR head/state. Review-fix parking after a possible push must refresh PR
+truth before deciding whether `lane.head` is current.
 
 ## Receipts
 

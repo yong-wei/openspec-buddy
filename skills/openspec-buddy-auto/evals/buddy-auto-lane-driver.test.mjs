@@ -20,6 +20,7 @@ function makeEnv(name) {
   const coreDir = path.join(root, 'core');
   const repoDir = path.join(root, 'repo');
   const stateDir = path.join(root, 'state');
+  const branchFile = path.join(root, 'current-branch.txt');
   fs.mkdirSync(binDir, { recursive: true });
   fs.mkdirSync(coreDir, { recursive: true });
   fs.mkdirSync(repoDir, { recursive: true });
@@ -27,12 +28,16 @@ function makeEnv(name) {
   makeExecutable(path.join(binDir, 'git'), `#!/bin/bash
 set -euo pipefail
 if [[ "\${1:-}" == "-C" ]]; then shift 2; fi
+branch_file=${JSON.stringify(branchFile)}
+current_branch="\${CURRENT_BRANCH:-dev1}"
+if [[ -f "$branch_file" ]]; then current_branch="$(<"$branch_file")"; fi
 case "\${1:-}" in
   rev-parse)
     if [[ "\${2:-}" == "--show-toplevel" ]]; then printf '%s\\n' ${JSON.stringify(repoDir)}; exit 0; fi
     if [[ "\${2:-}" == "HEAD" ]]; then
-      if [[ -n "\${REVIEW_FIX_NEW_HEAD:-}" && "\${CURRENT_BRANCH:-dev1}" == "change-675" ]]; then printf '%s\\n' "\${REVIEW_FIX_NEW_HEAD}"; exit 0; fi
-      if [[ "\${CURRENT_BRANCH:-dev1}" == "change-676" ]]; then printf 'head-2\\n'; else printf 'head-1\\n'; fi
+      if [[ -n "\${LOCAL_HEAD_675:-}" && "$current_branch" == "change-675" ]]; then printf '%s\\n' "\${LOCAL_HEAD_675}"; exit 0; fi
+      if [[ -n "\${REVIEW_FIX_NEW_HEAD:-}" && "$current_branch" == "change-675" ]]; then printf '%s\\n' "\${REVIEW_FIX_NEW_HEAD}"; exit 0; fi
+      if [[ "$current_branch" == "change-676" ]]; then printf 'head-2\\n'; else printf 'head-1\\n'; fi
       exit 0
     fi
     ;;
@@ -46,7 +51,7 @@ case "\${1:-}" in
     fi
     ;;
   branch)
-    if [[ "\${2:-}" == "--show-current" ]]; then printf '%s\\n' "\${CURRENT_BRANCH:-dev1}"; exit 0; fi
+    if [[ "\${2:-}" == "--show-current" ]]; then printf '%s\\n' "$current_branch"; exit 0; fi
     ;;
   status)
     if [[ "\${BUDDY_FAKE_DIRTY:-0}" == "1" && "\${2:-}" == "--porcelain" ]]; then printf ' M dirty.txt\\n'; exit 0; fi
@@ -54,6 +59,7 @@ case "\${1:-}" in
     ;;
   switch)
     echo "switch \${2:-}" >> ${JSON.stringify(logFile)}
+    printf '%s\\n' "\${2:-}" > "$branch_file"
     exit 0
     ;;
   ls-remote)
@@ -70,17 +76,24 @@ exit 99
 `);
   makeExecutable(path.join(binDir, 'gh'), `#!/bin/bash
 set -euo pipefail
-if [[ "\${1:-}" == "api" && "\${2:-}" == */issues/*/comments* ]]; then printf '[]\\n'; exit 0; fi
+if [[ "\${1:-}" == "api" && "\${2:-}" == */issues/*/comments* ]]; then
+  if [[ "\${RETRY_MARKER_EXISTS:-0}" == "1" ]]; then
+    printf '%s\\n' '[{"body":"OpenSpec Buddy review retry\\nlane_id: issue-675\\nhead: head-1\\nretry_round: 1"}]'
+  else
+    printf '[]\\n'
+  fi
+  exit 0
+fi
 if [[ "\${1:-}" == "pr" && "\${2:-}" == "view" ]]; then
   if [[ " $* " == *" --jq .headRefOid "* ]]; then
     case "\${3:-}" in
-      708) printf 'head-2\\n'; exit 0 ;;
-      *) printf '%s\\n' "\${REVIEW_FIX_NEW_HEAD:-head-1}"; exit 0 ;;
+      708) printf '%s\\n' "\${PR_708_HEAD:-head-2}"; exit 0 ;;
+      *) printf '%s\\n' "\${PR_707_HEAD:-\${REVIEW_FIX_NEW_HEAD:-head-1}}"; exit 0 ;;
     esac
   fi
   case "\${3:-}" in
-    708) printf '%s\\n' '{"number":708,"state":"OPEN","headRefName":"change-676","headRefOid":"head-2"}'; exit 0 ;;
-    *) printf '{"number":707,"state":"OPEN","headRefName":"change-675","headRefOid":"%s"}\\n' "\${REVIEW_FIX_NEW_HEAD:-head-1}"; exit 0 ;;
+    708) printf '{"number":708,"state":"%s","headRefName":"change-676","headRefOid":"%s","mergedAt":%s}\\n' "\${PR_708_STATE:-OPEN}" "\${PR_708_HEAD:-head-2}" "\${PR_708_MERGED_AT:-null}"; exit 0 ;;
+    *) printf '{"number":707,"state":"%s","headRefName":"change-675","headRefOid":"%s","mergedAt":%s}\\n' "\${PR_707_STATE:-OPEN}" "\${PR_707_HEAD:-\${REVIEW_FIX_NEW_HEAD:-head-1}}" "\${PR_707_MERGED_AT:-null}"; exit 0 ;;
   esac
 fi
 echo "unexpected gh invocation: $*" >&2
@@ -113,20 +126,34 @@ printf '{"issue":%s,"pr":null,"reason":"no PR"}\\n' "$1"
 `);
   makeExecutable(path.join(coreDir, 'mark-in-progress.sh'), `#!/bin/bash\necho "mark-in-progress $*" >> ${JSON.stringify(logFile)}\n`);
   makeExecutable(path.join(coreDir, 'mark-review.sh'), `#!/bin/bash\necho "mark-review $*" >> ${JSON.stringify(logFile)}\n`);
-  makeExecutable(path.join(coreDir, 'verify-claim-worktree.sh'), `#!/bin/bash\necho "verify-claim $*" >> ${JSON.stringify(logFile)}\n`);
+  makeExecutable(path.join(coreDir, 'verify-claim-worktree.sh'), `#!/bin/bash
+echo "verify-claim $*" >> ${JSON.stringify(logFile)}
+if [[ "\${CLAIM_GUARD_FAIL:-0}" == "1" ]]; then
+  echo "foreign claim" >&2
+  exit 42
+fi
+`);
   makeExecutable(path.join(coreDir, 'verify-current-head-review-request.sh'), `#!/bin/bash\necho "verify-request $*" >> ${JSON.stringify(logFile)}\n`);
   makeExecutable(path.join(coreDir, 'probe-review-state.sh'), `#!/bin/bash
 set -euo pipefail
 echo "probe $* skip=\${OPENSPEC_BUDDY_PROBE_SKIP_WORKTREE_GUARD:-0}" >> ${JSON.stringify(logFile)}
-if [[ "\${PROBE_EOF:-0}" == "1" ]]; then
-  echo "GitHub API EOF" >&2
-  exit 1
+	if [[ "\${PROBE_EOF:-0}" == "1" || "\${PROBE_EOF_FOR:-}" == "\${1:-}" ]]; then
+	  echo "GitHub API EOF" >&2
+	  exit 1
+	fi
+if [[ "\${PROBE_EMPTY_FOR:-}" == "\${1:-}" ]]; then
+  exit 0
 fi
 if [[ "\${PROBE_RETRY_EXPIRED:-0}" == "1" ]]; then
   printf '%s\\n' '{"pr":"707","head":"head-1","signature":"sig","requestState":"present-current-head","state":"waiting","requestAgeSeconds":901,"retryDue":false,"retryExpired":true}'
   exit 0
 fi
-printf '%s\\n' '{"pr":"707","head":"head-1","signature":"sig","requestState":"present-current-head","state":"waiting","requestAgeSeconds":60,"retryDue":false}'
+	pr="\${1:-707}"
+	if [[ "$pr" == "708" ]]; then
+	  printf '{"pr":"708","head":"%s","signature":"%s","requestState":"%s","state":"%s","requestAgeSeconds":60,"retryDue":false}\\n' "\${PROBE_HEAD_708:-head-2}" "\${PROBE_SIGNATURE_708:-sig-708}" "\${PROBE_REQUEST_STATE_708:-present-current-head}" "\${PROBE_STATE_708:-waiting}"
+	else
+	  printf '{"pr":"707","head":"%s","signature":"%s","requestState":"%s","state":"%s","requestAgeSeconds":%s,"retryDue":%s}\\n' "\${PROBE_HEAD_707:-head-1}" "\${PROBE_SIGNATURE_707:-sig}" "\${PROBE_REQUEST_STATE_707:-present-current-head}" "\${PROBE_STATE_707:-waiting}" "\${PROBE_AGE_707:-60}" "\${PROBE_RETRY_DUE_707:-false}"
+	fi
 `);
   makeExecutable(path.join(coreDir, 'check-review-clear-once.sh'), `#!/bin/bash
 echo "check $*" >> ${JSON.stringify(logFile)}
@@ -150,6 +177,7 @@ if (process.env.OPENSPEC_BUDDY_AUTO_TARGET_ISSUE) {
 if ((issue === '676' || pr === '708') && process.env.FIND_PR_FOR_676 === '1') {
   fs.appendFileSync(${JSON.stringify(logFile)}, 'find-pr ' + (issue || '676') + '\\n');
   fs.appendFileSync(${JSON.stringify(logFile)}, 'mark-review 676 708\\n');
+  fs.writeFileSync(${JSON.stringify(branchFile)}, 'change-676\\n');
   const stateFile = path.join(${JSON.stringify(root)}, 'fake-driver-state-' + process.pid + '.json');
   fs.writeFileSync(stateFile, JSON.stringify({
     issue: '676',
@@ -169,10 +197,15 @@ if ((issue === '676' || pr === '708') && process.env.FIND_PR_FOR_676 === '1') {
   console.log('stage: implement-or-open-pr');
 }
 `, { mode: 0o755 });
-  return { root, binDir, coreDir, repoDir, stateDir, logFile, singleDriver };
+  return { root, binDir, coreDir, repoDir, stateDir, logFile, singleDriver, branchFile };
 }
 
 function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
+  if (extraEnv.CURRENT_BRANCH) {
+    fs.writeFileSync(envInfo.branchFile, `${extraEnv.CURRENT_BRANCH}\n`);
+  } else {
+    fs.rmSync(envInfo.branchFile, { force: true });
+  }
   return spawnSync(process.execPath, [helper, ...args], {
     cwd: envInfo.repoDir,
     timeout: 20000,
@@ -386,6 +419,211 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
   assert.equal(state.lanes[0].stage, 'retryable_blocked');
   assert.match(state.lanes[0].retryableSince, /^\d{4}-\d{2}-\d{2}T/);
   assert.equal(state.lanes[0].retryAttempts, 1);
+}
+
+{
+  const envInfo = makeEnv('probe-empty-output-becomes-retryable-blocked');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 1,
+    lanes: [
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0, lastRequestState: 'present-current-head' },
+    ],
+  }));
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '1',
+    CURRENT_BRANCH: 'dev1',
+    PROBE_EMPTY_FOR: '707',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^BLOCKED/m);
+  assert.match(result.stdout, /probe-review-state.sh returned invalid JSON/);
+  const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  assert.equal(state.lanes[0].stage, 'retryable_blocked');
+  assert.equal(state.lanes[0].retryAttempts, 1);
+}
+
+{
+  const envInfo = makeEnv('local-head-ahead-becomes-review-fix');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 2,
+    lanes: [
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0, lastRequestState: 'present-current-head' },
+    ],
+  }));
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '2',
+    CURRENT_BRANCH: 'change-675',
+    LOCAL_HEAD_675: 'new-local-head',
+    PR_707_HEAD: 'head-1',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^HANDOFF/m);
+  assert.match(result.stdout, /^stage: review-fix$/m);
+  const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  assert.equal(state.lanes[0].stage, 'review_fix');
+  assert.equal(state.lanes[0].head, 'new-local-head');
+}
+
+{
+  const envInfo = makeEnv('local-head-ahead-becomes-review-fix-at-full-capacity');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 1,
+    lanes: [
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0, lastRequestState: 'present-current-head' },
+    ],
+  }));
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '1',
+    CURRENT_BRANCH: 'change-675',
+    LOCAL_HEAD_675: 'new-local-head',
+    PR_707_HEAD: 'head-1',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^HANDOFF/m);
+  assert.match(result.stdout, /^stage: review-fix$/m);
+  const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  assert.equal(state.lanes[0].stage, 'review_fix');
+  assert.equal(state.lanes[0].head, 'new-local-head');
+}
+
+{
+  const envInfo = makeEnv('local-head-ahead-does-not-bypass-claim-guard');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 1,
+    lanes: [
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'review_fix', reviewRetryCount: 0 },
+    ],
+  }));
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '1',
+    CURRENT_BRANCH: 'change-675',
+    LOCAL_HEAD_675: 'new-local-head',
+    PR_707_HEAD: 'head-1',
+    CLAIM_GUARD_FAIL: '1',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^BLOCKED/m);
+  assert.match(result.stdout, /foreign claim/);
+  const log = fs.readFileSync(envInfo.logFile, 'utf8');
+  assert.match(log, /verify-claim --issue 675 --pr 707/);
+  const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  assert.equal(state.lanes[0].stage, 'blocked');
+}
+
+{
+  const envInfo = makeEnv('retryable-blocked-local-head-ahead-does-not-bypass-claim-guard');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 1,
+    lanes: [
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'retryable_blocked', blockedReason: 'GitHub API EOF', retryAttempts: 1 },
+    ],
+  }));
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '1',
+    CURRENT_BRANCH: 'change-675',
+    LOCAL_HEAD_675: 'new-local-head',
+    PR_707_HEAD: 'head-1',
+    CLAIM_GUARD_FAIL: '1',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^BLOCKED/m);
+  assert.match(result.stdout, /foreign claim/);
+  const log = fs.readFileSync(envInfo.logFile, 'utf8');
+  assert.match(log, /verify-claim --issue 675 --pr 707/);
+  const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  assert.equal(state.lanes[0].stage, 'blocked');
+}
+
+{
+  const envInfo = makeEnv('head-changed-current-head-self-heals');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 1,
+    lanes: [
+      {
+        id: 'issue-675',
+        issue: '675',
+        change: 'change-675',
+        branch: 'change-675',
+        pr: '707',
+        head: 'old-head',
+        stage: 'waiting_review',
+        reviewRetryCount: 0,
+        lastRequestState: 'present-current-head',
+        reviewRequestedAt: '2026-06-27T00:00:00.000Z',
+      },
+    ],
+  }));
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '1',
+    CURRENT_BRANCH: 'dev1',
+    PROBE_STATE_707: 'head_changed',
+    PROBE_HEAD_707: 'new-head',
+    PROBE_SIGNATURE_707: 'new-sig',
+    PROBE_REQUEST_STATE_707: 'present-current-head',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^DONE/m);
+  assert.doesNotMatch(result.stdout, /^BLOCKED/m);
+  const log = fs.readFileSync(envInfo.logFile, 'utf8');
+  assert.doesNotMatch(log, /check 707/);
+  const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  assert.equal(state.lanes[0].stage, 'waiting_review');
+  assert.equal(state.lanes[0].head, 'new-head');
+  assert.equal(state.lanes[0].lastSignature, 'new-sig');
+  assert.equal(state.lanes[0].reviewRequestedAt, '2026-06-27T00:00:00.000Z');
+}
+
+{
+  const envInfo = makeEnv('probe-eof-does-not-stop-other-waiting-lane');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 2,
+    lanes: [
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0, lastRequestState: 'present-current-head' },
+      { id: 'issue-676', issue: '676', change: 'change-676', branch: 'change-676', pr: '708', head: 'head-2', stage: 'waiting_review', reviewRetryCount: 0, lastRequestState: 'present-current-head' },
+    ],
+  }));
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '2',
+    CURRENT_BRANCH: 'dev1',
+    PROBE_EOF_FOR: '707',
+    PROBE_STATE_708: 'changed',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^HANDOFF/m);
+  assert.match(result.stdout, /^stage: merge-ready$/m);
+  const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  const first = state.lanes.find((lane) => lane.issue === '675');
+  const second = state.lanes.find((lane) => lane.issue === '676');
+  assert.equal(first.stage, 'retryable_blocked');
+  assert.equal(second.stage, 'merge_ready');
 }
 
 {
@@ -810,6 +1048,40 @@ throw new Error('merge_ready should hand off instead of running fake single driv
 }
 
 {
+  const envInfo = makeEnv('merge-ready-merged-runs-post-merge-on-bound-branch');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 1,
+    lanes: [
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'merge_ready', reviewRetryCount: 0 },
+    ],
+  }));
+  const fakeDriver = path.join(envInfo.root, 'fake-achieved-driver.mjs');
+  fs.writeFileSync(fakeDriver, `#!/usr/bin/env node
+console.log('DONE');
+console.log('stage: achieved');
+`, { mode: 0o755 });
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '1',
+    CURRENT_BRANCH: 'change-675',
+    PR_707_STATE: 'MERGED',
+    PR_707_MERGED_AT: '"2026-06-28T00:00:00Z"',
+    OPENSPEC_BUDDY_AUTO_SINGLE_DRIVER: fakeDriver,
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^DONE/m);
+  assert.match(result.stdout, /^stage: lane-done$/m);
+  const log = fs.readFileSync(envInfo.logFile, 'utf8');
+  assert.match(log, /switch dev1/);
+  assert.doesNotMatch(log, /verify-claim --issue 675 --pr 707/);
+  const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  assert.equal(state.lanes[0].stage, 'done');
+}
+
+{
   const envInfo = makeEnv('pooled-two-waiting');
   fs.mkdirSync(envInfo.stateDir, { recursive: true });
   fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
@@ -829,6 +1101,47 @@ throw new Error('merge_ready should hand off instead of running fake single driv
   assert.match(log, /probe 708/);
   const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
   assert.deepEqual(state.lanes.map((lane) => lane.stage), ['waiting_review', 'waiting_review']);
+}
+
+{
+  const envInfo = makeEnv('retry-due-resumes-branch-and-dedupes-marker');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 1,
+    lanes: [
+      {
+        id: 'issue-675',
+        issue: '675',
+        change: 'change-675',
+        branch: 'change-675',
+        pr: '707',
+        head: 'head-1',
+        stage: 'waiting_review',
+        reviewRetryCount: 0,
+        reviewRequestedAt: '2000-01-01T00:00:00.000Z',
+        lastRequestState: 'present-current-head',
+      },
+    ],
+  }));
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '1',
+    CURRENT_BRANCH: 'change-676',
+    PROBE_RETRY_DUE_707: 'true',
+    PROBE_AGE_707: '901',
+    RETRY_MARKER_EXISTS: '1',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^DONE/m);
+  const log = fs.readFileSync(envInfo.logFile, 'utf8');
+  assert.match(log, /switch change-675/);
+  assert.match(log, /verify-claim --issue 675 --pr 707/);
+  assert.doesNotMatch(log, /request 707 --force/);
+  const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  assert.equal(state.lanes[0].stage, 'waiting_review');
+  assert.equal(state.lanes[0].reviewRetryCount, 1);
 }
 
 {
