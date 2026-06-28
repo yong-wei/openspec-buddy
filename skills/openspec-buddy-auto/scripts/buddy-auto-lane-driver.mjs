@@ -1122,7 +1122,7 @@ function processWaitingLane(state, lane) {
   const probe = probeLane(lane);
   if (probe.status !== 0) {
     const reason = probe.stderr || probe.stdout || 'probe-review-state.sh failed';
-    const retryable = isTransientFailure(reason) || !String(probe.stdout || '').trim();
+    const retryable = isTransientFailure(reason);
     markLaneFailure(state, lane, reason, {
       retryable,
       source: 'probe-review-state',

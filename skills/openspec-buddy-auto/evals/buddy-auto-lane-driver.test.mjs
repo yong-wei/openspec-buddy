@@ -147,6 +147,10 @@ echo "probe $* skip=\${OPENSPEC_BUDDY_PROBE_SKIP_WORKTREE_GUARD:-0}" >> ${JSON.s
 	  echo "GitHub API EOF" >&2
 	  exit 1
 	fi
+if [[ "\${PROBE_AUTH_FOR:-}" == "\${1:-}" ]]; then
+  echo "HTTP 401 Unauthorized" >&2
+  exit 1
+fi
 if [[ "\${PROBE_EMPTY_FOR:-}" == "\${1:-}" ]]; then
   exit 0
 fi
@@ -450,6 +454,31 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
   const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
   assert.equal(state.lanes[0].stage, 'retryable_blocked');
   assert.equal(state.lanes[0].retryAttempts, 1);
+}
+
+{
+  const envInfo = makeEnv('probe-auth-failure-becomes-terminal-blocked');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 1,
+    lanes: [
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0, lastRequestState: 'present-current-head' },
+    ],
+  }));
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '1',
+    CURRENT_BRANCH: 'dev1',
+    PROBE_AUTH_FOR: '707',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^BLOCKED/m);
+  assert.match(result.stdout, /HTTP 401 Unauthorized/);
+  const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  assert.equal(state.lanes[0].stage, 'blocked');
+  assert.equal(state.lanes[0].retryAttempts || 0, 0);
 }
 
 {
