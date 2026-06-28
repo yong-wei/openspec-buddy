@@ -77,7 +77,7 @@ function prStatus(pr) {
   return json('gh', ['pr', 'view', String(pr), '--json', 'number,mergedAt,state,body,url,files'], { optional: true }) || {};
 }
 
-function findArchivePath(pr, supplied) {
+function findArchivePath(pr, supplied, issue, base) {
   if (supplied) return supplied;
   const repo = repoNwo();
   if (repo) {
@@ -87,7 +87,25 @@ function findArchivePath(pr, supplied) {
   }
   const view = json('gh', ['pr', 'view', String(pr), '--json', 'files'], { optional: true });
   const hit = (view?.files || []).find((file) => /^openspec\/changes\/archive\/[^/]+\/tasks\.md$/.test(file.path || file.filename || ''));
-  return hit ? String(hit.path || hit.filename).replace(/\/tasks\.md$/, '') : '';
+  if (hit) return String(hit.path || hit.filename).replace(/\/tasks\.md$/, '');
+  return findArchivePathOnBase(issue, base);
+}
+
+function findArchivePathOnBase(issue, base) {
+  let metadata;
+  try {
+    metadata = issueMetadata(issue);
+  } catch {
+    return '';
+  }
+  const changeId = String(metadata.change_id || '').trim();
+  if (!changeId) return '';
+  const tree = run('git', ['ls-tree', '-r', '--name-only', base, 'openspec/changes/archive'], { optional: true });
+  const escapedChangeId = changeId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const archiveTask = tree
+    .split('\n')
+    .find((file) => new RegExp(`^openspec/changes/archive/\\d{4}-\\d{2}-\\d{2}-${escapedChangeId}/tasks\\.md$`).test(file));
+  return archiveTask ? archiveTask.replace(/\/tasks\.md$/, '') : '';
 }
 
 function issueMetadata(issue) {
@@ -369,7 +387,7 @@ try {
   const issue = issueStatus(issueNumber);
   const prData = prStatus(pr);
   const base = boundBase();
-  const archivePath = findArchivePath(pr, archiveArg);
+  const archivePath = findArchivePath(pr, archiveArg, issue, base);
   const labels = (issue.labels || []).map((label) => label.name || label).filter(Boolean);
   const statusLabels = labels.filter((label) => /^status:\s*/.test(label));
   const prMerged = Boolean(prData.merged === true || prData.merged_at || prData.mergedAt);

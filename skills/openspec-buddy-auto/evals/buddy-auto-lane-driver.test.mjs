@@ -187,6 +187,21 @@ case "\${CHECK_REVIEW_STATUS:-0}" in
 esac
 `);
   makeExecutable(path.join(coreDir, 'request-pr-review.sh'), `#!/bin/bash\necho "request $*" >> ${JSON.stringify(logFile)}\n`);
+  makeExecutable(path.join(coreDir, 'verify-achieved-truth.mjs'), `#!/bin/bash
+echo "verify-achieved-truth $*" >> ${JSON.stringify(logFile)}
+if [[ "\${ACHIEVED_TRUTH_NEXT_POST_MERGE:-0}" == "1" ]]; then
+  marker=${JSON.stringify(root)}"/achieved-truth-post-merge-once"
+  if [[ ! -f "$marker" ]]; then
+    touch "$marker"
+    printf '%s\\n' '{"achieved":false,"next":"mark-achieved-post-merge","reason":"needs post merge sync","archivePath":"openspec/archive/change-675"}'
+    exit 0
+  fi
+fi
+printf '%s\\n' '{"achieved":true,"reason":"terminal truth satisfied"}'
+`);
+  makeExecutable(path.join(coreDir, 'mark-achieved-post-merge.sh'), `#!/bin/bash
+echo "mark-achieved-post-merge $*" >> ${JSON.stringify(logFile)}
+`);
   const singleDriver = path.join(root, 'fake-single-driver.mjs');
   fs.writeFileSync(singleDriver, `#!/usr/bin/env node
 import fs from 'node:fs';
@@ -551,6 +566,39 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
   assert.equal(state.lanes[0].stage, 'merge_ready');
   assert.equal(state.lanes[0].head, 'merged-head');
   assert.equal(state.lanes[0].lastResult, 'pr-truth-merged');
+}
+
+{
+  const envInfo = makeEnv('merge-ready-merged-pr-completes-post-merge-without-mark-review');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 1,
+    lanes: [
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'merged-head', stage: 'merge_ready', reviewRetryCount: 1, lastRequestState: 'present-current-head' },
+    ],
+  }));
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '1',
+    CURRENT_BRANCH: 'dev1',
+    PR_707_STATE: 'MERGED',
+    PR_707_HEAD: 'merged-head',
+    PR_707_MERGED_AT: '"2026-06-28T00:00:00Z"',
+    ACHIEVED_TRUTH_NEXT_POST_MERGE: '1',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^DONE/m);
+  assert.match(result.stdout, /^stage: lane-done$/m);
+  const log = fs.readFileSync(envInfo.logFile, 'utf8');
+  assert.match(log, /verify-bound --phase goal-loop-start/);
+  assert.match(log, /verify-achieved-truth 675 707/);
+  assert.match(log, /mark-achieved-post-merge 675 openspec\/archive\/change-675 707/);
+  assert.doesNotMatch(log, /mark-review 675 707/);
+  const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  assert.equal(state.lanes[0].stage, 'done');
+  assert.equal(state.lanes[0].lastResult, 'mark-achieved-post-merge');
 }
 
 {
