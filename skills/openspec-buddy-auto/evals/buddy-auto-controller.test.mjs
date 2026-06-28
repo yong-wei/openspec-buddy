@@ -72,8 +72,12 @@ if (process.env.BUDDY_STUB_STATE_ISSUE) {
 }
 if (process.env.BUDDY_STUB_STATUS === 'BLOCKED') {
   console.log('BLOCKED');
-  console.log('stage: stub-blocked');
+  console.log('stage: ' + (process.env.BUDDY_STUB_BLOCKED_STAGE || 'stub-blocked'));
   console.log('reason: stub blocker');
+  process.exit(Number(process.env.BUDDY_STUB_EXIT || 0));
+} else if (process.env.BUDDY_STUB_DONE_STAGE) {
+  console.log('DONE');
+  console.log('stage: ' + process.env.BUDDY_STUB_DONE_STAGE);
 } else if (process.env.BUDDY_STUB_STAGE) {
   console.log('HANDOFF');
   console.log('stage: ' + process.env.BUDDY_STUB_STAGE);
@@ -274,6 +278,37 @@ console.log('legacy helper completed without protocol');
   const state = readController(envInfo);
   assert.equal(state.interrupt.type, 'blocked');
   assert.equal(state.interrupt.stage, 'child-protocol');
+}
+
+{
+  const envInfo = makeEnv('nonzero-child-blocked-preserves-stage');
+  const result = run(envInfo, {
+    BUDDY_STUB_STATUS: 'BLOCKED',
+    BUDDY_STUB_BLOCKED_STAGE: 'review-response-gate',
+    BUDDY_STUB_EXIT: '7',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^BLOCKED/m);
+  assert.match(result.stdout, /^stage: review-response-gate$/m);
+  const state = readController(envInfo);
+  assert.equal(state.interrupt.stage, 'review-response-gate');
+  assert.equal(state.reviewFix.pending, true);
+}
+
+{
+  const envInfo = makeEnv('achieved-clears-target');
+  let result = run(envInfo, {
+    BUDDY_STUB_STATE_ISSUE: '675',
+    BUDDY_STUB_STATE_CHANGE: 'change-675',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(readController(envInfo).target.issue, '675');
+  result = run(envInfo, { BUDDY_STUB_DONE_STAGE: 'achieved' });
+  assert.equal(result.status, 0, result.stderr);
+  const state = readController(envInfo);
+  assert.equal(state.target.issue, '');
+  assert.equal(state.target.pr, '');
+  assert.equal(state.target.change, '');
 }
 
 {

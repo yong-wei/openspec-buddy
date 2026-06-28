@@ -131,6 +131,11 @@ function shouldClearReviewFix(status, stage) {
   return ['review-response-gate', 'review-yield', 'wait-review', 'review_clear', 'stub-done', 'lane-done'].includes(String(stage || ''));
 }
 
+function shouldClearTarget(status, stage) {
+  if (status !== 'DONE') return false;
+  return ['achieved', 'lane-done'].includes(String(stage || ''));
+}
+
 function readChildState(fields) {
   const file = fields.state_file || '';
   if (!file || !fs.existsSync(file)) return {};
@@ -160,7 +165,9 @@ function syncTargetFromChildState(state, parsed) {
 
 function handleChildResult(state, result) {
   const text = compact(result);
-  if (result.status !== 0) {
+  const parsed = parseBlock(result.stdout);
+  const stage = parsed.fields.stage || '';
+  if (result.status !== 0 && !parsed.status) {
     const next = writeInterrupt(state, {
       type: 'blocked',
       stage: 'child-process',
@@ -176,9 +183,23 @@ function handleChildResult(state, result) {
     ], text);
     return;
   }
-
-  const parsed = parseBlock(result.stdout);
-  const stage = parsed.fields.stage || '';
+  if (result.status !== 0 && parsed.status !== 'BLOCKED') {
+    const next = writeInterrupt(state, {
+      type: 'blocked',
+      stage: 'child-process',
+      blockedCode: `exit-${result.status ?? 1}`,
+      allowedWork: 'Fix only this blocker, then rerun buddy-auto.mjs.',
+      child: state.mode,
+    });
+    emit('BLOCKED', [
+      ['stage', 'child-process'],
+      ['state_file', controllerStatePath()],
+      ['allowed_work', next.interrupt.allowedWork],
+      ['resume_action', 'rerun buddy-auto.mjs'],
+      ['reason', `Child driver exited ${result.status ?? 1} after ${parsed.status}.`],
+    ], text);
+    return;
+  }
   if (!parsed.status) {
     const next = writeInterrupt(state, {
       type: 'blocked',
@@ -248,6 +269,9 @@ function handleChildResult(state, result) {
   let next = clearInterrupt(state);
   if (shouldClearReviewFix(parsed.status, stage)) {
     next = setReviewFix(next, { pending: false }, {});
+  }
+  if (shouldClearTarget(parsed.status, stage)) {
+    next = writeControllerState({ ...next, target: { issue: '', pr: '', change: '' } });
   }
   emit('DONE', [
     ['stage', stage || 'controller'],
