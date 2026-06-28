@@ -21,7 +21,11 @@ printf '%s\n' "$*" >> "$GH_LOG_FILE"
 
 if [[ "$1" == "issue" && "$2" == "view" ]]; then
   if [[ "$*" == *"--json labels"* && "$*" != *"body"* ]]; then
-    printf '%s\n' '{"labels":[{"name":"status:ready"},{"name":"type:change"}]}'
+    if [[ -f "$STATE_DIR/status-archived" ]]; then
+      printf '%s\n' '{"labels":[{"name":"status:archived"},{"name":"type:change"}]}'
+    else
+      printf '%s\n' '{"labels":[{"name":"status:ready"},{"name":"type:change"}]}'
+    fi
     exit 0
   fi
   cat <<'JSON'
@@ -47,6 +51,7 @@ JSON
 fi
 
 if [[ "$1" == "issue" && "$2" == "edit" ]]; then
+  touch "$STATE_DIR/status-archived"
   exit 0
 fi
 
@@ -75,6 +80,12 @@ JSON
 fi
 
 if [[ "$1" == "api" && "$2" == "graphql" ]]; then
+  if [[ "$*" == *"id=ITEM_ISSUE_123"* ]]; then
+    cat <<'JSON'
+{"data":{"node":{"id":"ITEM_ISSUE_123","project":{"id":"PROJECT_1","title":"Major LTE"},"status":{"name":"Done"}}}}
+JSON
+    exit 0
+  fi
   cat <<'JSON'
 {"data":{"repository":{"issue0":{"number":555,"labels":{"nodes":[{"name":"status:ready"},{"name":"type:change"}]},"subIssues":{"nodes":[]},"blockedBy":{"nodes":[{"number":123,"labels":{"nodes":[{"name":"status:archived"},{"name":"type:change"}]}}]},"blocking":{"nodes":[]}}}}}
 JSON
@@ -98,6 +109,8 @@ printf '%s\n' "{\"fetchedAt\":\"$fetched_at\",\"source\":\"rest\",\"repo\":\"own
 
 export PATH="$tmp_dir:$PATH"
 export GH_LOG_FILE="$tmp_dir/gh.log"
+export STATE_DIR="$tmp_dir/state"
+mkdir -p "$STATE_DIR"
 export OPENSPEC_BUDDY_REPO_ROOT="$project_root"
 export OPENSPEC_BUDDY_BASE_BRANCH=integration
 export OPENSPEC_BUDDY_RELEASE_BRANCH=main

@@ -22,9 +22,37 @@ source "$script_dir/github-fetch.sh"
 # shellcheck source=./cache-signal.sh
 source "$script_dir/cache-signal.sh"
 
+status_labels_from_issue_json() {
+  node -e '
+const fs = require("node:fs");
+const issue = JSON.parse(fs.readFileSync(0, "utf8"));
+const labels = Array.isArray(issue.labels) ? issue.labels : [];
+process.stdout.write(labels
+  .map((label) => typeof label === "string" ? label : label?.name)
+  .filter((name) => /^status:\s*/.test(name || ""))
+  .map((name) => name.replace(/^status:\s+/, "status:"))
+  .join(","));
+'
+}
+
+verify_status_label() {
+  local issue="$1"
+  local expected_status="$2"
+  local labels_json status_csv
+  labels_json="$(gh issue view "$issue" --json labels)"
+  status_csv="$(printf '%s\n' "$labels_json" | status_labels_from_issue_json)"
+  if [[ "$status_csv" != "$expected_status" ]]; then
+    {
+      echo "Status label verification failed for issue #$issue."
+      echo "Expected exactly: $expected_status"
+      echo "Observed: ${status_csv:-<none>}"
+    } >&2
+    return 1
+  fi
+}
+
 existing_statuses="$(
-  gh issue view "$issue_number" --json labels \
-    --jq '[.labels[].name | select(test("^status:\\s*"))] | join(",")'
+  gh issue view "$issue_number" --json labels | status_labels_from_issue_json
 )"
 
 args=(issue edit "$issue_number")
@@ -34,6 +62,7 @@ fi
 args+=(--add-label "$target_status")
 
 gh "${args[@]}"
+verify_status_label "$issue_number" "$target_status"
 
 cache_dir="$(buddy_cache_dir)"
 buddy_invalidate_issue_cache "$cache_dir" "$issue_number"

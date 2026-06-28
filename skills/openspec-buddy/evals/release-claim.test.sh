@@ -79,11 +79,28 @@ if [[ "$1" == "issue" && "$2" == "comment" ]]; then
   exit 0
 fi
 if [[ "$1" == "issue" && "$2" == "view" ]]; then
+  if [[ "$*" == *"--json labels"* ]]; then
+    if [[ "$*" == *"--jq"* ]]; then
+      if [[ "${RELEASE_VERIFY_MODE:-ok}" == "stale" || ! -f "${STATE_DIR:?}/ready-42" ]]; then
+        printf 'status:claimed\n'
+      else
+        printf 'status:ready\n'
+      fi
+      exit 0
+    fi
+    if [[ "${RELEASE_VERIFY_MODE:-ok}" == "stale" || ! -f "${STATE_DIR:?}/ready-42" ]]; then
+      printf '%s\n' '{"labels":[{"name":"status:claimed"}],"assignees":[{"login":"YW"}]}'
+    else
+      printf '%s\n' '{"labels":[{"name":"status:ready"}],"assignees":[]}'
+    fi
+    exit 0
+  fi
   printf 'status:claimed\n'
   exit 0
 fi
 if [[ "$1" == "issue" && "$2" == "edit" ]]; then
   printf '%s\n' "$*" >> "${EDIT_LOG:?}"
+  touch "${STATE_DIR:?}/ready-42"
   exit 0
 fi
 echo "unexpected gh invocation: $*" >&2
@@ -95,6 +112,8 @@ export PATH="$tmp_dir:$PATH"
 export GH_LOG="$tmp_dir/gh.log"
 export COMMENT_LOG="$tmp_dir/comment.log"
 export EDIT_LOG="$tmp_dir/edit.log"
+export STATE_DIR="$tmp_dir/state"
+mkdir -p "$STATE_DIR"
 
 cat > "$OPENSPEC_BUDDY_AUTO_LANE_STATE_DIR/dev1.json" <<'JSON'
 {
@@ -167,6 +186,7 @@ cat > "$OPENSPEC_BUDDY_AUTO_LANE_STATE_DIR/dev1.json" <<'JSON'
 JSON
 export ACTIVE_RELEASED=1
 : > "$EDIT_LOG"
+rm -f "$STATE_DIR/ready-42"
 "$helper" 42 --reason "retry converge" --clear-lane > "$tmp_dir/retry-output.txt"
 grep -F "reconciled status:ready" "$tmp_dir/retry-output.txt" >/dev/null
 grep -F -- "--remove-label status:claimed --add-label status:ready --remove-assignee YW" "$EDIT_LOG" >/dev/null
@@ -176,6 +196,13 @@ const data = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
 if (data.lanes.some((lane) => String(lane.issue) === "42")) process.exit(1);
 ' "$OPENSPEC_BUDDY_AUTO_LANE_STATE_DIR/dev1.json"
 unset ACTIVE_RELEASED
+
+rm -f "$STATE_DIR/ready-42"
+if RELEASE_VERIFY_MODE=stale "$helper" 42 --reason "stale restore" > "$tmp_dir/stale-restore.out" 2> "$tmp_dir/stale-restore.err"; then
+  echo "release-claim should fail when ready-status verification observes stale GitHub state" >&2
+  exit 1
+fi
+grep -F "Release verification failed" "$tmp_dir/stale-restore.err" >/dev/null
 
 export ACTIVE_ALIAS=dev2
 if "$helper" 42 --reason "foreign" > "$tmp_dir/foreign.out" 2> "$tmp_dir/foreign.err"; then

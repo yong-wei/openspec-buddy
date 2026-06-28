@@ -466,12 +466,21 @@ function latestActiveClaim(comments) {
 }
 const state = String(issue.state || "").toUpperCase();
 const labels = labelsOf(issue.labels);
+const statusLabels = labels.filter((name) => /^status:/.test(name));
+const assignees = Array.isArray(issue.assignees) ? issue.assignees : issue.assignees?.nodes || [];
+const assigneeLogins = assignees
+  .map((assignee) => typeof assignee === "string" ? assignee : assignee?.login)
+  .filter(Boolean);
 if (state !== "OPEN") {
   process.stderr.write(`Claim verification failed: issue is not open (${issue.state || "unknown"}).\n`);
   process.exit(20);
 }
-if (!labels.includes("status:claimed")) {
-  process.stderr.write("Claim verification failed: issue is not status:claimed.\n");
+if (statusLabels.length !== 1 || statusLabels[0] !== "status:claimed") {
+  process.stderr.write(`Claim verification failed: expected exactly status:claimed, observed ${statusLabels.join(",") || "<none>"}.\n`);
+  process.exit(21);
+}
+if (!assigneeLogins.includes(viewer)) {
+  process.stderr.write(`Claim verification failed: assignee ${viewer} is missing.\n`);
   process.exit(21);
 }
 const latest = latestActiveClaim(comments);

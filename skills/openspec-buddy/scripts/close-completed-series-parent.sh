@@ -236,6 +236,7 @@ if [[ "$state" == "OPEN" ]]; then
 else
   gh issue comment -R "$repo_nwo" "$parent_number" --body "$body"
 fi
+"$script_dir/verify-issue-closed-status.sh" --repo "$repo_nwo" "$parent_number" "status:archived"
 
 buddy_invalidate_issue_cache "$cache_dir" "$parent_number"
 buddy_invalidate_ready_scan_cache "$cache_dir"

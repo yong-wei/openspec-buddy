@@ -48,12 +48,28 @@ if [[ "$1" == "issue" && "$2" == "view" ]]; then
     printf 'ISSUE_%s\n' "$ref"
     exit 0
   fi
+  if [[ "$*" == *"--json state"* && "$*" == *"labels"* ]]; then
+    if [[ -f "$STATE_DIR/closed-$ref" ]]; then
+      printf '%s\n' '{"state":"CLOSED","labels":[{"name":"status:archived"},{"name":"type:series-parent"}]}'
+    else
+      printf '%s\n' '{"state":"OPEN","labels":[{"name":"status:archived"},{"name":"type:series-parent"}]}'
+    fi
+    exit 0
+  fi
   if [[ "$*" == *"--json state"* ]]; then
-    printf 'OPEN\n'
+    if [[ -f "$STATE_DIR/closed-$ref" ]]; then
+      printf 'CLOSED\n'
+    else
+      printf 'OPEN\n'
+    fi
     exit 0
   fi
   if [[ "$*" == *"--json labels"* && "$*" != *"body"* ]]; then
-    printf '%s\n' '{"labels":[{"name":"status:tracking"},{"name":"type:series-parent"}]}'
+    if [[ -f "$STATE_DIR/status-archived-$ref" ]]; then
+      printf '%s\n' '{"labels":[{"name":"status:archived"},{"name":"type:series-parent"}]}'
+    else
+      printf '%s\n' '{"labels":[{"name":"status:tracking"},{"name":"type:series-parent"}]}'
+    fi
     exit 0
   fi
   cat <<JSON
@@ -78,6 +94,20 @@ if [[ "$1" == "api" && "$2" == "graphql" ]]; then
     fi
     previous="$arg"
   done
+  if [[ "$id" == ITEM_* ]]; then
+    date_value="$(cat "$STATE_DIR/date-$id" 2>/dev/null || true)"
+    status_option="$(cat "$STATE_DIR/status-$id" 2>/dev/null || true)"
+    case "$status_option" in
+      OPT_TODO) status_name="Todo" ;;
+      OPT_PROGRESS) status_name="In Progress" ;;
+      OPT_DONE) status_name="Done" ;;
+      *) status_name="" ;;
+    esac
+    cat <<JSON
+{"data":{"node":{"id":"$id","project":{"id":"PROJECT_1","title":"Major LTE"},"status":{"name":"$status_name"},"date":{"date":"$date_value"}}}}
+JSON
+    exit 0
+  fi
   if [[ "$id" == "ISSUE_101" ]]; then
     cat <<'JSON'
 {"data":{"node":{"id":"ISSUE_101","number":101,"title":"Child 101","state":"CLOSED","url":"https://github.com/owner/repo/issues/101","labels":{"nodes":[{"name":"type:change"},{"name":"status:archived"}]},"parent":{"id":"ISSUE_100","number":100,"title":"Parent","state":"OPEN","url":"https://github.com/owner/repo/issues/100","labels":{"nodes":[{"name":"type:series-parent"},{"name":"status:tracking"}]}}}}}
@@ -119,15 +149,46 @@ JSON
 fi
 
 if [[ "$1" == "project" && "$2" == "item-edit" ]]; then
+  item_id=""
+  status_option=""
+  date_value=""
+  previous=""
+  for arg in "$@"; do
+    if [[ "$previous" == "--id" ]]; then item_id="$arg"; fi
+    if [[ "$previous" == "--single-select-option-id" ]]; then status_option="$arg"; fi
+    if [[ "$previous" == "--date" ]]; then date_value="$arg"; fi
+    previous="$arg"
+  done
+  if [[ -n "$item_id" ]]; then
+    mkdir -p "$STATE_DIR"
+    [[ -n "$status_option" ]] && printf '%s\n' "$status_option" > "$STATE_DIR/status-$item_id"
+    [[ -n "$date_value" ]] && printf '%s\n' "$date_value" > "$STATE_DIR/date-$item_id"
+  fi
   printf '"ITEM_100"\n'
   exit 0
 fi
 
 if [[ "$1" == "issue" && "$2" == "edit" ]]; then
+  touch "$STATE_DIR/status-archived-100"
   exit 0
 fi
 
 if [[ "$1" == "issue" && "$2" == "close" ]]; then
+  if [[ "${CLOSE_VERIFY_MODE:-ok}" != "stale" ]]; then
+    close_ref=""
+    previous=""
+    for arg in "$@"; do
+      if [[ "$previous" == "-R" ]]; then
+        previous=""
+        continue
+      fi
+      if [[ "$arg" =~ ^[0-9]+$ ]]; then
+        close_ref="$arg"
+      fi
+      previous="$arg"
+    done
+    touch "$STATE_DIR/closed-$close_ref"
+  fi
   exit 0
 fi
 
@@ -142,6 +203,8 @@ chmod +x "$tmp_dir/gh"
 
 export PATH="$tmp_dir:$PATH"
 export GH_LOG_FILE="$tmp_dir/gh.log"
+export STATE_DIR="$tmp_dir/state"
+mkdir -p "$STATE_DIR"
 export OPENSPEC_BUDDY_REPO_ROOT="$project_root"
 export OPENSPEC_BUDDY_BASE_BRANCH=integration
 export OPENSPEC_BUDDY_RELEASE_BRANCH=main
@@ -203,6 +266,23 @@ if grep -F 'issue close' "$GH_LOG_FILE" >/dev/null; then
 fi
 
 : > "$GH_LOG_FILE"
+rm -f "$STATE_DIR/closed-100" "$STATE_DIR/status-archived-100"
+set +e
+CLOSE_VERIFY_MODE=stale "$repo_root/skills/openspec-buddy/scripts/close-completed-series-parent.sh" 101 >"$tmp_dir/stale-close.out" 2>"$tmp_dir/stale-close.err"
+stale_close_status="$?"
+set -e
+if [[ "$stale_close_status" -eq 0 ]]; then
+  echo "close-completed-series-parent.sh should fail when close verification still observes an open parent" >&2
+  exit 1
+fi
+if ! grep -F 'Issue close verification failed' "$tmp_dir/stale-close.err" >/dev/null; then
+  echo "expected close verification diagnostic" >&2
+  cat "$tmp_dir/stale-close.out" "$tmp_dir/stale-close.err" >&2
+  exit 1
+fi
+
+: > "$GH_LOG_FILE"
+rm -f "$STATE_DIR/closed-100" "$STATE_DIR/status-archived-100"
 "$repo_root/skills/openspec-buddy/scripts/close-completed-series-parent.sh" 101 >"$tmp_dir/complete.out"
 if ! grep -F 'Series parent #100 finalized.' "$tmp_dir/complete.out" >/dev/null; then
   echo "expected completed parent finalization" >&2

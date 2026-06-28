@@ -32,6 +32,7 @@ const commands = [
   { label: 'bash skills/openspec-buddy/evals/relationship-cache-invalidation.test.sh', cmd: 'bash', args: ['skills/openspec-buddy/evals/relationship-cache-invalidation.test.sh'] },
   { label: 'bash skills/openspec-buddy/evals/select-next-change-local-only.test.sh', cmd: 'bash', args: ['skills/openspec-buddy/evals/select-next-change-local-only.test.sh'] },
   { label: 'bash skills/openspec-buddy/evals/set-status-label-cache-invalidation.test.sh', cmd: 'bash', args: ['skills/openspec-buddy/evals/set-status-label-cache-invalidation.test.sh'] },
+  { label: 'bash skills/openspec-buddy/evals/status-write-verification.test.sh', cmd: 'bash', args: ['skills/openspec-buddy/evals/status-write-verification.test.sh'] },
   { label: 'node skills/openspec-buddy/evals/verify-issue-relationships.test.mjs', cmd: 'node', args: ['skills/openspec-buddy/evals/verify-issue-relationships.test.mjs'] },
   { label: 'bash skills/openspec-buddy/evals/verify-issue-relationships-wrapper.test.sh', cmd: 'bash', args: ['skills/openspec-buddy/evals/verify-issue-relationships-wrapper.test.sh'] },
   { label: 'node skills/openspec-buddy/evals/pre-archive-change-validation.test.mjs', cmd: 'node', args: ['skills/openspec-buddy/evals/pre-archive-change-validation.test.mjs'] },
