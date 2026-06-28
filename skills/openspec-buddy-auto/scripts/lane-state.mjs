@@ -223,6 +223,7 @@ export function normalizeLane(lane) {
     lastRequestState: String(lane.lastRequestState || ''),
     lastResult: String(lane.lastResult || ''),
     blockedReason: String(lane.blockedReason || ''),
+    retryableStage: String(lane.retryableStage || ''),
     retryableSince: String(lane.retryableSince || ''),
     retryAttempts: Number(lane.retryAttempts || 0),
     updatedAt: String(lane.updatedAt || ''),

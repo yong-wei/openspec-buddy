@@ -162,13 +162,16 @@ function isTransientFailure(output) {
 function clearRetryableState(lane) {
   lane.retryableSince = '';
   lane.retryAttempts = 0;
+  lane.retryableStage = '';
 }
 
 function markLaneFailure(state, lane, reason, { retryable = false, source = '' } = {}) {
+  const previousStage = lane.stage;
   lane.stage = retryable ? 'retryable_blocked' : 'blocked';
   lane.blockedReason = reason || 'lane failed';
   lane.lastResult = source || lane.lastResult || '';
   if (retryable) {
+    if (previousStage !== 'retryable_blocked') lane.retryableStage = previousStage;
     lane.retryableSince ||= new Date().toISOString();
     lane.retryAttempts = Number(lane.retryAttempts || 0) + 1;
   } else {
@@ -417,7 +420,7 @@ function reconcileLaneFromTruth(state, lane) {
     refreshLanePrFields(lane, truth.data);
     const stateValue = String(truth.data?.state || '').toUpperCase();
     if (stateValue === 'OPEN') {
-      lane.stage = 'waiting_review';
+      lane.stage = lane.retryableStage === 'merge_ready' ? 'merge_ready' : 'waiting_review';
       lane.blockedReason = '';
       lane.lastResult = 'reconciled-open-pr';
       clearRetryableState(lane);

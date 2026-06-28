@@ -99,6 +99,10 @@ if [[ "\${1:-}" == "pr" && "\${2:-}" == "view" ]]; then
       exit 1
     fi
   fi
+  if [[ "\${PR_707_TRUTH_EOF_ALWAYS:-0}" == "1" && "\${3:-}" == "707" ]]; then
+    echo "GitHub API EOF" >&2
+    exit 1
+  fi
   if [[ " $* " == *" --jq .headRefOid "* ]]; then
     case "\${3:-}" in
       708) printf '%s\\n' "\${PR_708_HEAD:-head-2}"; exit 0 ;;
@@ -1197,6 +1201,41 @@ throw new Error('merge_ready should hand off instead of running fake single driv
   assert.match(log, /verify-claim --issue 675 --pr 707/);
   const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
   assert.equal(state.lanes[0].stage, 'merge_ready');
+}
+
+{
+  const envInfo = makeEnv('merge-ready-pr-truth-retry-preserves-stage');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 1,
+    lanes: [
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'merge_ready', reviewRetryCount: 0 },
+    ],
+  }));
+  const first = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '1',
+    CURRENT_BRANCH: 'dev1',
+    PR_707_TRUTH_EOF_ALWAYS: '1',
+  });
+  assert.equal(first.status, 0, first.stderr);
+  assert.match(first.stdout, /^BLOCKED/m);
+  let state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  assert.equal(state.lanes[0].stage, 'retryable_blocked');
+  assert.equal(state.lanes[0].retryableStage, 'merge_ready');
+
+  const second = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '1',
+    CURRENT_BRANCH: 'dev1',
+  });
+  assert.equal(second.status, 0, second.stderr);
+  assert.match(second.stdout, /^DONE/m);
+  state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  assert.equal(state.lanes[0].stage, 'merge_ready');
+  assert.equal(state.lanes[0].retryableStage || '', '');
 }
 
 {
