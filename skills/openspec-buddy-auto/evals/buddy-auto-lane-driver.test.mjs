@@ -41,6 +41,12 @@ case "\${1:-}" in
       exit 0
     fi
     ;;
+  merge-base)
+    if [[ "\${2:-}" == "--is-ancestor" ]]; then
+      if [[ "\${LOCAL_HEAD_675_NOT_AHEAD:-0}" == "1" && "$current_branch" == "change-675" ]]; then exit 1; fi
+      exit 0
+    fi
+    ;;
   config)
     if [[ "\${2:-}" == "--worktree" ]]; then
       case "\${3:-}" in
@@ -543,6 +549,33 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
     LOCAL_HEAD_675: 'new-local-head',
     PR_707_HEAD: 'head-1',
     PR_707_BRANCH: 'other-branch',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^BLOCKED/m);
+  assert.doesNotMatch(result.stdout, /^stage: review-fix$/m);
+  const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  assert.equal(state.lanes[0].stage, 'blocked');
+  assert.equal(state.lanes[0].head, 'head-1');
+}
+
+{
+  const envInfo = makeEnv('local-head-ahead-requires-ancestor-proof');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 1,
+    lanes: [
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0, lastRequestState: 'present-current-head' },
+    ],
+  }));
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '1',
+    CURRENT_BRANCH: 'change-675',
+    LOCAL_HEAD_675: 'old-local-head',
+    LOCAL_HEAD_675_NOT_AHEAD: '1',
+    PR_707_HEAD: 'head-1',
   });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /^BLOCKED/m);

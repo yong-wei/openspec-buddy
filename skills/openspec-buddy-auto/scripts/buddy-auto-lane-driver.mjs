@@ -108,6 +108,12 @@ function gitHead() {
   return result.status === 0 ? result.stdout.trim() : '';
 }
 
+function gitIsAncestor(base, head) {
+  if (!base || !head) return false;
+  const result = run('git', ['merge-base', '--is-ancestor', String(base), String(head)], { allowFailure: true });
+  return result.status === 0;
+}
+
 function boundBranch() {
   const result = run('git', ['config', '--worktree', 'buddy.boundBranch'], { allowFailure: true });
   return result.status === 0 ? result.stdout.trim() : '';
@@ -316,6 +322,7 @@ function normalizeLocalAhead(lane, truth) {
   if (!truth.pr || String(truth.pr.state || '').toUpperCase() !== 'OPEN') return false;
   if (!lane.branch || truth.pr.headRefName !== lane.branch) return false;
   if (!remoteHead || remoteHead !== lane.head) return false;
+  if (!gitIsAncestor(lane.head, truth.localHead)) return false;
   lane.stage = 'review_fix';
   lane.head = truth.localHead;
   lane.blockedReason = '';
