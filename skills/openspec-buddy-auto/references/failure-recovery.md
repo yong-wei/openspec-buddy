@@ -30,14 +30,8 @@ do not mark the issue `status:archived` from metadata alone.
 
 If the merged PR contains the archive path on the configured bound base but the
 issue or Project terminal state drifted, do not switch to the claim branch.
-Run the driver again. It will use:
-
-```bash
-<openspec-buddy-skill-dir>/scripts/verify-achieved-truth.mjs <issue> <pr>
-<openspec-buddy-skill-dir>/scripts/mark-achieved-post-merge.sh <issue> <archive-path> <pr>
-```
-
-This post-merge helper runs from the bound coordination branch, verifies the PR
+Run the controller again. It will internally run post-merge truth checks and
+achievement synchronization from the bound coordination branch. That sync verifies the PR
 is merged, verifies the archive `tasks.md` exists and is complete on
 `buddy.boundBase` or `origin/$OPENSPEC_BUDDY_BASE_BRANCH`, verifies review
 threads are resolved, then synchronizes `status:archived`, Project `Done`,
@@ -52,8 +46,8 @@ Use this as legacy recovery only:
 4. Run the archive command on a recovery branch or the normal claimed branch,
    validate the affected specs, and include the archive path plus synced main
    specs in the recovery update.
-5. Only after that archive update is present on the base branch, run
-   `mark-achieved.sh <issue-number> <archive-path> <pr-url>`.
+5. Only after that archive update is present on the base branch, run the
+   controller again so it can re-check post-merge achievement truth.
 
 If the active change directory is missing, the archive command conflicts, or
 the merged implementation cannot be matched to the OpenSpec change with high
@@ -76,9 +70,8 @@ Otherwise stop. Do not force-push or delete another agent's branch.
 
 ## Unresolved Review Thread
 
-If `request-pr-review.sh`, `wait-for-review-clear.sh`, or
-`mark-achieved.sh` fails because unresolved actionable Codex review threads
-exist, do not request another review and do not merge by timeout.
+If the controller blocks because unresolved actionable Codex review threads
+exist, do not request another review directly and do not merge by timeout.
 
 Recover only by:
 
@@ -86,12 +79,10 @@ Recover only by:
 2. Committing and pushing any required change.
 3. Replying in the same review thread with the fix commit or non-actionable
    rationale plus verification evidence.
-4. Running:
-   ```bash
-   <openspec-buddy-skill-dir>/scripts/review-response-gate.sh <pr> --head <head-sha>
-   ```
-5. Continuing only after the gate reports that GraphQL confirms the addressed
-   actionable threads are resolved.
+4. Running the controller again so it can execute the response gate and
+   current-head review request path.
+5. Continuing only after the controller reports that GraphQL confirms the
+   addressed actionable threads are resolved.
 
 If the gate refuses to resolve because a reply is missing or lacks evidence,
 write the missing reply. If the resolve mutation fails or a fresh GraphQL read
@@ -101,14 +92,8 @@ opening another review round.
 ## Resume Or Branch Drift
 
 After a resume, compaction, or manual branch operation, verify the current
-branch before editing or committing. For GitHub-backed Buddy work, prefer the
-core guard over ad hoc checks:
-
-```bash
-<openspec-buddy-skill-dir>/scripts/verify-claim-worktree.sh --issue <issue-number> --pr <pr-number-or-url>
-```
-
-The guard must pass before editing, committing, pushing, requesting review,
+branch before editing or committing. For GitHub-backed Buddy work, the
+controller-owned claim/worktree guard must pass before editing, committing, pushing, requesting review,
 waiting for review, merging, or marking achieved. If it reports
 `foreign-claim-detected` or says the active claim belongs to another worktree,
 stop. Do not switch to the other worktree, do not reuse its branch, and do not

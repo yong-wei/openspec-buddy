@@ -237,6 +237,7 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
       OPENSPEC_BUDDY_CORE_SCRIPT_DIR: envInfo.coreDir,
       OPENSPEC_BUDDY_AUTO_LANE_STATE_DIR: envInfo.stateDir,
       OPENSPEC_BUDDY_AUTO_SINGLE_DRIVER: envInfo.singleDriver,
+      OPENSPEC_BUDDY_COMMAND_TIMEOUT_MS: '10000',
       ...extraEnv,
     },
     encoding: 'utf8',

@@ -25,8 +25,8 @@ assert.match(
 );
 assert.match(
   buddyAutoSkill,
-  /EVERY OPENSPEC-BUDDY-AUTO STEP MUST START BY RUNNING THE AUTO DRIVER/i,
-  'openspec-buddy-auto SKILL.md must focus agents on the auto driver entrypoint',
+  /EVERY OPENSPEC-BUDDY-AUTO STEP MUST START BY RUNNING THE AUTO CONTROLLER/i,
+  'openspec-buddy-auto SKILL.md must focus agents on the auto controller entrypoint',
 );
 
 assert.match(
@@ -76,8 +76,8 @@ assert.match(
 );
 assert.match(
   autoDriverStates,
-  /review-response-gate\.sh[\s\S]*request-pr-review\.sh --context-file[\s\S]*Return to the auto driver/i,
-  'core apply review-fix loop must require independent review before committing fixes',
+  /review-fix-handoff -> response-gate -> current-head-review-request -> review-wait/i,
+  'core apply review-fix loop must require response gate before current-head review waiting',
 );
 
 assert.match(
@@ -87,27 +87,27 @@ assert.match(
 );
 assert.match(
   buddyAutoSkill,
-  /Receipts do not replace GitHub truth/i,
+  /These files do not replace GitHub truth/i,
   'auto must require implementation threads to propose AC satisfaction with evidence',
 );
 assert.match(
   buddyAutoSkill,
-  /buddy-auto-driver\.mjs/,
-  'auto review-fix gate must require structured independent review before commit',
+  /buddy-auto\.mjs/,
+  'auto review-fix gate must route through the controller entrypoint',
 );
 assert.match(
   executionLoop,
-  /Before committing a review-fix diff[\s\S]*independent review/i,
+  /must obtain independent review before committing the review-fix diff/i,
   'execution loop must put independent review before review-fix commits',
 );
 assert.match(
   executionLoop,
-  /check the\s+reviewed AC items in the issue checklist or issue tasks/i,
+  /Independent review decides\s+which AC items may be checked/i,
   'execution loop must allow only reviewer-approved AC/task checkoff after review',
 );
 assert.match(
   executionLoop,
-  /does not block normal OpenSpec `tasks\.md` completion/i,
+  /OpenSpec task progress must reach `remaining: 0`/i,
   'execution loop must distinguish issue AC checkoff from OpenSpec tasks.md completion',
 );
 

@@ -28,12 +28,18 @@ function truthy(value) {
   return ['1', 'true', 'yes', 'on'].includes(String(value || '').toLowerCase());
 }
 
+function controllerChildMode() {
+  return truthy(process.env.OPENSPEC_BUDDY_AUTO_CONTROLLER_CHILD);
+}
+
 function run(command, args, options = {}) {
+  const timeoutMs = Number(process.env.OPENSPEC_BUDDY_COMMAND_TIMEOUT_MS || 120000);
   const result = spawnSync(command, args, {
     cwd: options.cwd || process.cwd(),
     env: { ...process.env, ...(options.env || {}) },
     encoding: 'utf8',
     stdio: 'pipe',
+    timeout: Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 120000,
   });
   if (result.status !== 0 && !options.allowFailure) {
     const error = new Error((result.stderr || result.stdout || `${command} ${args.join(' ')} failed`).trim());
@@ -54,7 +60,13 @@ function commandLine(command) {
 
 function emit(title, entries = [], output = '') {
   console.log(title);
-  for (const [key, value] of entries) {
+  const extra = controllerChildMode()
+    ? [
+        ['resume_action', 'rerun-controller'],
+        ['driver_internal', 'true'],
+      ]
+    : [];
+  for (const [key, value] of [...entries, ...extra]) {
     if (value === undefined || value === null || value === '') continue;
     console.log(`${key}: ${value}`);
   }

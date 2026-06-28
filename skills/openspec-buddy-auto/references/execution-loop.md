@@ -1,27 +1,23 @@
 # Execution Loop
 
-## Start
-
-Verify:
+All automatic phase progression starts with the controller:
 
 ```bash
-git status --short --branch
-<openspec-buddy-skill-dir>/scripts/sync-base-branch.sh
+<openspec-buddy-auto-skill-dir>/scripts/buddy-auto.mjs
 ```
 
-The helper fetches the configured alignment ref and verifies the current
-worktree is aligned with it. If the worktree config contains
-`buddy.boundBranch`, the helper must run on that bound coordination branch and
-may fast-forward it to `buddy.boundBase`, defaulting to
-`origin/$OPENSPEC_BUDDY_BASE_BRANCH` when `buddy.boundBase` is unset; detached
-HEAD and other branches fail before selection or claim. Without
-`buddy.boundBranch`, the legacy behavior remains: the helper may fast-forward
-the base branch itself, and other branches pass only when the current `HEAD`
-already equals
-`origin/$OPENSPEC_BUDDY_BASE_BRANCH`. Stop if the worktree is dirty or the bound
-branch/base alignment fails.
+The controller owns deterministic Buddy helpers. The agent receives only
+`DONE`, `HANDOFF`, or `BLOCKED` and must run the controller again after any
+external work.
 
-For permanent worktrees, initialize the local binding once:
+## Start And Worktree Guards
+
+The controller internally verifies bound worktree alignment before selection,
+claim, review, merge, and achievement. Detached HEAD, a non-bound coordination
+branch, dirty worktree, or foreign claim is a hard stop unless the user
+explicitly requests a takeover or recovery workflow.
+
+For permanent worktrees, the project should have these local worktree configs:
 
 ```bash
 git config extensions.worktreeConfig true
@@ -30,295 +26,107 @@ git config --worktree buddy.boundBase origin/$OPENSPEC_BUDDY_BASE_BRANCH
 git config --worktree buddy.worktreeAlias <alias>
 ```
 
-If the project explicitly shares `OPENSPEC_BUDDY_CACHE_DIR` or a cache-signal
-Ref, use that layer only to invalidate or reuse local cache between worktrees.
-It is an internal coordination accelerator, not a substitute for current
-GitHub review, Project, or merge truth.
-
-Before editing, committing, pushing, requesting review, waiting for review,
-merging, or marking achieved, the relevant core helper must pass the worktree
-claim guard. The guard rejects detached HEAD, a PR head that does not match the
-current branch, a claim branch bound to another local worktree, or an active
-claim comment whose `worktree_alias` or `worktree_path_hash` belongs to another
-worker. Treat `foreign-claim-detected` as a hard stop unless the user explicitly
-requests a takeover workflow.
-
-In explicit multi-lane mode, the worktree remains single-writer. A lane may be
-parked only after the PR is committed, pushed, coordinated by `mark-review.sh`,
-has a current-head review request, and the worktree is clean. Do not park or
-switch lanes during implementation, local subagent review, uncommitted
-review-fix work, same-thread review replies, review-response gate, merge,
-archive, or achievement.
-
 ## Claim
 
-For GitHub-coordinated changes, use `openspec-buddy claim [issue-number]`. If
-no issue number is supplied, it must select the smallest claimable open issue
-number.
+For GitHub-coordinated changes, claim is a hard gate. Candidate lists and cache
+data are accelerators only; immediately before writing claim state the internal
+claim helper must read GitHub truth for the target issue, claim branch, open PR,
+and current claim comments.
 
-Claim is a hard gate, not a best-effort setup step. Candidate lists and Buddy
-caches are only accelerators; immediately before writing claim state the claim
-script must read GitHub truth for the target issue, claim branch, open PR, and
-current claim comments. Before the claim lock is verified, it must not create
-or modify a Development link, Project fields, local branch, remote branch, or
-implementation files.
-
-The minimal claim lock writes only:
-
-```text
-status:claimed
-OpenSpec Buddy Claim comment with claim_id and lease_until
-worktree_alias, worktree_path_hash, coordination_branch, and run_id
-issue assignee for the claiming agent
-Buddy metadata body for ordinary open issues adopted in place
-```
-
-Immediately after the minimal lock, the script must re-read GitHub through REST
-and verify:
-
-```text
-issue is still open
-issue is status:claimed
-latest valid OpenSpec Buddy Claim comment has this claim_id
-latest valid OpenSpec Buddy Claim comment has this lease_until
-latest valid OpenSpec Buddy Claim comment belongs to this agent
-latest valid OpenSpec Buddy Claim comment belongs to this worktree when those
-ownership fields are present
-```
-
-Only after that verification succeeds may the claim script create:
-
-```text
-origin/<change_id>
-issue Development branch link for <change_id>
-Project Status: In Progress
-Project Start: current local date
-```
-
-If verification fails, stop that issue immediately. Do not create a branch,
-Development link, Project update, PR, or implementation commit for the issue.
-
-If the claimed issue was an ordinary open issue, the claim adopts the same
-original issue by prepending the hidden Buddy metadata block. Do not create a
-mirror issue just to preserve the original request. Classify it before
-switching branches. Simple issues continue as one executable change. Complex
-issues are split into child issues; the source issue becomes a tracking parent
-only after the children exist and are linked.
+Before the claim lock is verified, no Development link, Project field, local
+branch, remote branch, or implementation file may be created or modified.
 
 If selection returns a local-only change created through
-`openspec-buddy propose --no-issue`, take that branch before any GitHub claim
-step. Skip claim entirely. There is no GitHub Issue, no Development branch
-link, no Project item, and no remote branch lock in this path. Execute and
-archive the change locally on `$OPENSPEC_BUDDY_BASE_BRANCH` or a local topic
-branch derived from it.
-
-Then switch to `<change_id>` for a simple or prepared change and mark
-`status:in-progress`; the Project `Status` must remain `In Progress`.
-`mark-in-progress.sh` enforces that the current worktree is on the claimed
-branch and that the active claim belongs to this worktree before changing the
-issue state.
+`openspec-buddy propose --no-issue`, the controller enters the local-only path.
+There is no GitHub Issue, PR, Project item, Development link, or remote branch
+lock in that path.
 
 ## Implement
 
-Read `openspec instructions apply --change <change_id> --json`.
-Implement one task set at a time, mark tasks complete immediately after verification, and keep commits scoped to the claimed change.
-Before leaving implementation, rerun `openspec instructions apply --change <change_id> --json` and require `progress.remaining` to be `0`.
-If behavior is already implemented on the branch but `tasks.md` is still unchecked, mark the verified tasks complete and include that file in the implementation PR.
-Do not treat a GitHub issue, PR, or merged code path as complete while local OpenSpec tasks remain open.
+When the controller returns an implementation handoff, the agent may edit code
+only for that claimed change and must keep commits scoped to that change.
+
+Before leaving implementation:
+
+- OpenSpec task progress must reach `remaining: 0`.
+- Local verification must pass.
+- If the issue has an Acceptance Checklist, the implementation thread may only
+  record proposed satisfied AC ids with evidence. Independent review decides
+  which AC items may be checked.
+- Before commit, PR creation, or local `--no-pr` merge, obtain independent
+  review of issue scope, task-to-AC mapping, current diff, and evidence.
+
+After implementation work, run the controller again. It decides whether to
+repeat verification, open/bridge a PR, or continue.
 
 ## Pre-Archive Before PR
 
-Once implementation and verification are complete, archive the OpenSpec change
-before the first implementation commit and before opening the PR. The PR should
-contain the whole record: code, tests, completed `tasks.md`, synced main specs,
-and `openspec/changes/archive/YYYY-MM-DD-<change_id>/`.
+Before the first implementation PR, the implementation and OpenSpec archive
+must be in the same change set:
 
-Required sequence:
-
-1. Confirm `openspec instructions apply --change <change_id> --json` reports
-   `remaining: 0`.
-2. Inspect `openspec/changes/<change_id>/specs/**/spec.md`. If a delta spec
-   adds a capability and `openspec/specs/<capability>/spec.md` does not exist,
-   create the main spec file with `## Purpose` and `## Requirements` before
-   archiving.
-3. Validate the active change before it is moved to the archive:
-   ```bash
-   openspec validate <change_id> --strict
-   ```
-   This catches invalid delta spec format that main-spec validation after
-   archive can no longer see.
-4. Run:
-   ```bash
-   openspec archive <change_id> --yes
-   ```
-5. Validate every affected main spec, for example:
-   ```bash
-   openspec validate <capability> --strict
-   ```
-6. Commit the implementation and archive together.
+1. Confirm OpenSpec task progress is complete.
+2. Ensure any new capability has a synced main spec.
+3. Run `openspec validate <change_id> --strict`.
+4. Run `openspec archive <change_id> --yes`.
+5. Validate affected main specs.
+6. Commit code, tests, completed tasks, synced main specs, and archive together.
 
 Do not mark the GitHub issue `status:archived` during pre-archive. The issue
-stays `status:in-progress` until the PR is opened, then `status:in-review`
-until merge. If PR review changes requirements or tasks, edit the archived
-change files and main specs in the same PR; do not move the archived change
-back to `openspec/changes/<change_id>/`.
+stays active until PR merge and achievement sync.
 
-## PR
+## PR Coordination
 
-Open a formal PR:
+After a ready PR exists, run the controller. It internally verifies PR base,
+labels, assignees, Project state, origin issue, Development-link policy, review
+request, and issue `status:in-review` synchronization.
 
-```text
-title: concise change title
-base: $OPENSPEC_BUDDY_BASE_BRANCH
-body: summary, verification, origin issue reference
-```
+Do not reimplement PR metadata, review request, or Development-link rules in
+the auto thread. If coordination fails, the controller blocks before review
+waiting.
 
-Do not let `gh pr create` fall back to the repository default branch; pass
-`--base "$OPENSPEC_BUDDY_BASE_BRANCH"` explicitly.
-Do not hand-write closing keywords in `gh pr create`. `configure-pr-metadata.sh`
-is responsible for the Development-link policy and verification.
-
-After the ready PR exists, call the core review marker:
-
-```bash
-<openspec-buddy-skill-dir>/scripts/mark-review.sh <issue-number> <pr-number-or-url>
-```
-
-Auto mode must not reimplement PR metadata, label, assignee, Project, review
-request, or Development-link rules. `mark-review.sh` verifies the PR base and
-ready state, verifies the current worktree owns the PR head and claim, calls
-`configure-pr-metadata.sh`, posts
-`OPENSPEC_BUDDY_PR_REVIEW_REQUEST` through `request-pr-review.sh`, runs
-`verify-pr-coordination.sh`, and only then sets the issue to
-`status:in-review`. This must leave the issue and PR Project `Status` as
-`In Progress`. If any coordination step fails, stop before review waiting; do
-not silently continue with an untracked or unreviewed PR.
-
-Call `mark-review.sh` only after OpenSpec task progress is `complete == total`;
-otherwise finish or reconcile the local tasks first.
-For issues that contain an `Acceptance Checklist`, the implementation thread
-may record `Proposed satisfied: AC-...` with evidence, but it must not check AC
-items itself. Before the first implementation commit, PR creation, or local
-`--no-pr` merge, obtain an independent review with the issue body, task-to-AC
-mapping, current diff, and evidence. The review must explicitly return
-`approved_to_commit`, `approved_ac`, `rejected_ac`, `scope_status`,
-`regression_risk`, and `required_fixes`. Only the reviewed AC items in
-`approved_ac` may be checked in the issue checklist or issue tasks linked to
-those AC ids. This does not block normal OpenSpec `tasks.md` completion, which
-still must reach `remaining: 0` before archive.
-
-After a PR is merged, archive closeout runs from the bound coordination branch,
-not the claim branch. The driver reads the configured bound base as
-`buddy.boundBase` when present, otherwise
-`origin/$OPENSPEC_BUDDY_BASE_BRANCH`. It then uses
-`verify-achieved-truth.mjs` to decide whether the issue is already terminal,
-whether `mark-achieved-post-merge.sh` can safely synchronize issue and Project
-state, or whether the agent must merge/archive manually first. Do not switch
-back to the claim branch merely to mark a merged PR achieved.
-
-If the user invoked `openspec-buddy-auto --no-pr`, stop before any `gh pr`
-operation. Run local review and verification only, fix findings in the same
-branch, and merge locally onto `$OPENSPEC_BUDDY_BASE_BRANCH` without opening a
-PR. In this mode, skip `mark-review.sh`, `wait-for-review-clear.sh`,
-`verify-review-clear.sh`, and `mark-achieved.sh` because no GitHub review or
-issue state exists. This exception applies only to a selected local-only change
-created through `openspec-buddy propose --no-issue`; issue-backed changes keep
-the standard PR and issue synchronization flow.
-
-In multi-lane mode, a successful `mark-review.sh` plus current-head review
-request is the first point where the scheduler may park the lane. Before
-switching away, it must verify the PR head, current branch, remote branch,
-current-head review request, and claim worktree guard.
+In multi-lane mode, the first safe parking point is after the PR is committed,
+pushed, coordinated, has a current-head review request, and the worktree is
+clean.
 
 ## Review Fix Loop
 
-If Codex review returns actionable `P0`, `P1`, or `P2` feedback, fix or verify
-the finding and run local verification. Before committing a review-fix diff,
-obtain an independent review using the original issue, Acceptance Checklist if
-present, task-to-AC mapping, current diff, addressed review comments, and
-verification evidence. The review must decide whether the diff is still in
-scope and return `approved_to_commit`, `approved_ac`, `rejected_ac`,
-`scope_status`, `regression_risk`, and `required_fixes`. Do not commit until
-`approved_to_commit: yes`. After the approved commit is pushed, check the
-reviewed AC items in the issue checklist or issue tasks only for `approved_ac`.
-That commit is not complete at push time. Before requesting another review or
-entering `wait-for-review-clear.sh`, reply in each addressed review thread with
-the fix commit or non-actionable rationale plus verification evidence, then run:
+If Codex returns actionable `P0`, `P1`, or `P2` feedback, the controller hands
+off review-fix work. The agent may fix or verify only that review feedback and
+must obtain independent review before committing the review-fix diff.
 
-```bash
-<openspec-buddy-skill-dir>/scripts/review-response-gate.sh <pr-number-or-url> --head <head-sha>
+After a review-fix commit is pushed, the commit is not complete. The required
+state transition is:
+
+```text
+same-thread evidence reply -> response gate -> current-head review request -> review wait
 ```
 
-The loop may continue only after the helper resolves the addressed actionable
-Codex threads through `resolve-review-thread.sh` and a fresh GraphQL read
-confirms `isResolved=true`. Then write a review-fix context file with the
-current head, addressed thread ids or URLs, fix commit, evidence reply status,
-and passed gate status. Request review for the current head before waiting:
-
-```bash
-<openspec-buddy-skill-dir>/scripts/request-pr-review.sh <pr-number-or-url> --context-file <review-fix-context.md>
-<openspec-buddy-skill-dir>/scripts/wait-for-review-clear.sh <pr-number-or-url>
-```
-
-Do not silently resolve review threads. Do not wait for review or merge while
-`verify-review-threads-resolved.sh <pr-number-or-url>` fails, and do not treat
-resolved old threads as a current-head clean review.
-The review gate and wait helpers also run the worktree claim guard before any
-review-thread or polling work; a foreign claim is not waitable.
+The controller persists this as `reviewFix.pending`, so a process restart or
+context compaction cannot skip the response gate. After reply/evidence work,
+run the controller again.
 
 ## Merge And Achieve
 
-After PR merge:
+The controller may hand off merge only after current-head review clearance and
+merge gates pass. If the PR is already merged, the controller runs post-merge
+truth checks and achievement sync from the bound coordination branch, not the
+claim branch.
 
-1. Keep the claim branch until issue achievement sync is complete.
-2. Fast-forward the claim branch to `origin/$OPENSPEC_BUDDY_BASE_BRANCH`.
-3. Verify the merged PR already contains
-   `openspec/changes/archive/YYYY-MM-DD-<change_id>/` and synced main specs.
-4. Recheck the archived `tasks.md` source before marking achieved. All tasks
-   must be checked. If the PR merged without the archive path or with incomplete
-   tasks, stop and use the legacy archive recovery path instead of marking the
-   issue archived.
-5. Validate the synced spec or affected spec set, for example:
-   ```bash
-   openspec validate <capability> --strict
-   ```
-   A failing unrelated spec in `openspec validate --all --strict` is not a reason
-   to edit unrelated capabilities in the current issue-sync step; record it as
-   existing debt unless the claimed change caused it.
-6. Run `mark-achieved.sh <issue-number> <archive-path> <pr-url>` to sync the
-   GitHub issue and Project state, then reconcile completed series parents.
-   When a PR URL is supplied, this helper first verifies the current worktree
-   owns the PR head and active claim, then runs `verify-review-threads-resolved.sh`
-   so unresolved actionable Codex threads cannot be archived into a completed
-   issue.
-7. Verify the issue has exactly one `status:*` label and that it is `status:archived`.
-   If the issue is already closed or the Project item is already `Done`, still rerun
-   `mark-achieved.sh` to reconcile the label, archive comment, and Project `End`.
-8. Verify the linked series parent. If every child issue under the parent is
-   closed with `status:archived`, Project `Status: Done`, and Project `End`
-   set, the parent must also be closed with the same terminal state. For a
-   direct repair or audit, use:
-   ```bash
-   <openspec-buddy-skill-dir>/scripts/close-completed-series-parent.sh <child-or-parent-issue>
-   ```
-   If this reports repairable terminal drift in a child issue, rerun
-   `mark-achieved.sh` for that child before continuing.
-9. Delete the remote claim branch before deleting the local branch. Local `git branch -d`
-   can reject deletion while the local branch still tracks an older remote claim branch,
-   even when the branch is merged to current `HEAD`.
-10. Return to the bound coordination branch when configured:
-   ```bash
-   git switch "$(git config --worktree buddy.boundBranch)"
-   git merge --ff-only "$(git config --worktree buddy.boundBase 2>/dev/null || echo origin/$OPENSPEC_BUDDY_BASE_BRANCH)"
-   <openspec-buddy-skill-dir>/scripts/verify-bound-worktree.sh --phase goal-loop-start
-   ```
-   If no `buddy.boundBranch` is configured, return to the repository's normal
-   coordination branch and run `sync-base-branch.sh`. Do not enter the next
-   selection loop from detached HEAD, the deleted claim branch, or another
-   worker's branch.
+After merge, terminal state requires:
 
-The post-merge achievement step must set the issue to `status:archived`, close the issue, set Project `Status` to `Done`, and set Project `End` to the current local date.
-The same completion rule applies to a series parent after its last child change is archived.
+- archive path exists on the configured base
+- archived tasks are complete
+- affected specs validate
+- issue has `status:archived`
+- issue is closed
+- Project Status is `Done`
+- Project End is set
+- completed series parents are reconciled
+
+After any manual merge, archive repair, or blocker fix, run the controller
+again. It decides whether to repeat verification, synchronize achievement, or
+continue goal selection.
+
 Buddy automation must not merge or push `$OPENSPEC_BUDDY_RELEASE_BRANCH`;
-promoting `$OPENSPEC_BUDDY_BASE_BRANCH` to `$OPENSPEC_BUDDY_RELEASE_BRANCH`
-is a manual release decision unless the project configures otherwise.
+promoting base to release remains a manual release decision unless the project
+configures otherwise.
