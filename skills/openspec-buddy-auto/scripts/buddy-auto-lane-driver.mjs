@@ -313,7 +313,9 @@ function normalizeLocalAhead(lane, truth) {
   const remoteHead = String(truth.pr?.headRefOid || '');
   if (!lane.pr || !truth.localHead || !lane.head || truth.localHead === lane.head) return false;
   if (truth.branch !== lane.branch) return false;
-  if (remoteHead && remoteHead !== lane.head) return false;
+  if (!truth.pr || String(truth.pr.state || '').toUpperCase() !== 'OPEN') return false;
+  if (!lane.branch || truth.pr.headRefName !== lane.branch) return false;
+  if (!remoteHead || remoteHead !== lane.head) return false;
   lane.stage = 'review_fix';
   lane.head = truth.localHead;
   lane.blockedReason = '';

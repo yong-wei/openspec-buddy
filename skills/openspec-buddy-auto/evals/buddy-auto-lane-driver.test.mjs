@@ -92,8 +92,8 @@ if [[ "\${1:-}" == "pr" && "\${2:-}" == "view" ]]; then
     esac
   fi
   case "\${3:-}" in
-    708) printf '{"number":708,"state":"%s","headRefName":"change-676","headRefOid":"%s","mergedAt":%s}\\n' "\${PR_708_STATE:-OPEN}" "\${PR_708_HEAD:-head-2}" "\${PR_708_MERGED_AT:-null}"; exit 0 ;;
-    *) printf '{"number":707,"state":"%s","headRefName":"change-675","headRefOid":"%s","mergedAt":%s}\\n' "\${PR_707_STATE:-OPEN}" "\${PR_707_HEAD:-\${REVIEW_FIX_NEW_HEAD:-head-1}}" "\${PR_707_MERGED_AT:-null}"; exit 0 ;;
+    708) printf '{"number":708,"state":"%s","headRefName":"%s","headRefOid":"%s","mergedAt":%s}\\n' "\${PR_708_STATE:-OPEN}" "\${PR_708_BRANCH:-change-676}" "\${PR_708_HEAD:-head-2}" "\${PR_708_MERGED_AT:-null}"; exit 0 ;;
+    *) printf '{"number":707,"state":"%s","headRefName":"%s","headRefOid":"%s","mergedAt":%s}\\n' "\${PR_707_STATE:-OPEN}" "\${PR_707_BRANCH:-change-675}" "\${PR_707_HEAD:-\${REVIEW_FIX_NEW_HEAD:-head-1}}" "\${PR_707_MERGED_AT:-null}"; exit 0 ;;
   esac
 fi
 echo "unexpected gh invocation: $*" >&2
@@ -496,6 +496,60 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
   const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
   assert.equal(state.lanes[0].stage, 'review_fix');
   assert.equal(state.lanes[0].head, 'new-local-head');
+}
+
+{
+  const envInfo = makeEnv('local-head-ahead-requires-open-pr-truth');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 1,
+    lanes: [
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0, lastRequestState: 'present-current-head' },
+    ],
+  }));
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '1',
+    CURRENT_BRANCH: 'change-675',
+    LOCAL_HEAD_675: 'new-local-head',
+    PR_707_HEAD: 'head-1',
+    PR_707_STATE: 'CLOSED',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^BLOCKED/m);
+  assert.doesNotMatch(result.stdout, /^stage: review-fix$/m);
+  const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  assert.equal(state.lanes[0].stage, 'blocked');
+  assert.equal(state.lanes[0].head, 'head-1');
+}
+
+{
+  const envInfo = makeEnv('local-head-ahead-requires-pr-branch-match');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 1,
+    lanes: [
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0, lastRequestState: 'present-current-head' },
+    ],
+  }));
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '1',
+    CURRENT_BRANCH: 'change-675',
+    LOCAL_HEAD_675: 'new-local-head',
+    PR_707_HEAD: 'head-1',
+    PR_707_BRANCH: 'other-branch',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^BLOCKED/m);
+  assert.doesNotMatch(result.stdout, /^stage: review-fix$/m);
+  const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  assert.equal(state.lanes[0].stage, 'blocked');
+  assert.equal(state.lanes[0].head, 'head-1');
 }
 
 {
