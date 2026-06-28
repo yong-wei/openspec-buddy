@@ -91,6 +91,14 @@ if [[ "\${1:-}" == "api" && "\${2:-}" == */issues/*/comments* ]]; then
   exit 0
 fi
 if [[ "\${1:-}" == "pr" && "\${2:-}" == "view" ]]; then
+  if [[ "\${PR_707_TRUTH_EOF_ONCE:-0}" == "1" && "\${3:-}" == "707" ]]; then
+    marker=${JSON.stringify(root)}"/pr-707-truth-eof-once"
+    if [[ ! -f "$marker" ]]; then
+      touch "$marker"
+      echo "GitHub API EOF" >&2
+      exit 1
+    fi
+  fi
   if [[ " $* " == *" --jq .headRefOid "* ]]; then
     case "\${3:-}" in
       708) printf '%s\\n' "\${PR_708_HEAD:-head-2}"; exit 0 ;;
@@ -668,6 +676,34 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
   assert.match(log, /verify-claim --issue 675 --pr 707/);
   const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
   assert.equal(state.lanes[0].stage, 'blocked');
+}
+
+{
+  const envInfo = makeEnv('transient-pr-truth-failure-is-not-cached');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 2,
+    lanes: [
+      { id: 'issue-675a', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'retryable_blocked', blockedReason: 'GitHub API EOF', retryAttempts: 1 },
+      { id: 'issue-675b', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'retryable_blocked', blockedReason: 'GitHub API EOF', retryAttempts: 1 },
+    ],
+  }));
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '2',
+    CURRENT_BRANCH: 'dev1',
+    PR_707_HEAD: 'head-1',
+    PR_707_TRUTH_EOF_ONCE: '1',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^DONE/m);
+  const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  assert.equal(state.lanes[0].stage, 'retryable_blocked');
+  assert.equal(state.lanes[1].stage, 'waiting_review');
+  assert.equal(state.lanes[1].blockedReason || '', '');
+  assert.equal(state.lanes[1].retryAttempts || 0, 0);
 }
 
 {

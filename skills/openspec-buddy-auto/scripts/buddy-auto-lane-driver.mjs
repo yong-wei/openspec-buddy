@@ -287,8 +287,10 @@ function prTruth(pr) {
 function cachedPrTruth(pr) {
   if (!pr) return { status: 1, reason: 'lane has no PR' };
   const key = String(pr);
-  if (!prTruthCache.has(key)) prTruthCache.set(key, prTruth(pr));
-  return prTruthCache.get(key);
+  if (prTruthCache.has(key)) return prTruthCache.get(key);
+  const truth = prTruth(pr);
+  if (truth.status === 0) prTruthCache.set(key, truth);
+  return truth;
 }
 
 function invalidatePrTruth(pr) {
