@@ -33,6 +33,18 @@ const clock = () => new Date('2026-06-30T00:00:00.000Z');
 }
 
 {
+  const truth = classifyProbe({
+    pr: '743',
+    head: 'head-1',
+    signature: 'sig-2',
+    requestState: 'present-current-head',
+    state: 'changed',
+    retryExpired: true,
+  }, { previousHead: 'head-1', previousSignature: 'sig-1', clock });
+  assert.equal(truth.probeState, 'changed');
+}
+
+{
   const truth = mergeReviewTruth({
     head: 'old-head',
     threadState: 'clear',

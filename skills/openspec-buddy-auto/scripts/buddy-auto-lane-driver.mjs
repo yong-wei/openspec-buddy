@@ -1484,7 +1484,7 @@ function processWaitingLane(state, lane) {
   applyReviewTruthToLane(lane, mergeReviewTruth(laneReviewTruth(lane), truth));
   lane.lastProbeAt = lane.restFreshAt;
 
-  if (result.retryExpired === true) {
+  if (truth.probeState === 'retry_expired') {
     markLaneFailure(state, lane, 'review retry window expired without current-head clean review', {
       retryable: false,
       source: 'review-retry-expired',

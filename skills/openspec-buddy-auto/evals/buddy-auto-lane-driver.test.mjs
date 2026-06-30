@@ -166,6 +166,10 @@ fi
 if [[ "\${PROBE_EMPTY_FOR:-}" == "\${1:-}" ]]; then
   exit 0
 fi
+if [[ "\${PROBE_CHANGED_RETRY_EXPIRED_FOR:-}" == "\${1:-}" ]]; then
+  printf '%s\\n' '{"pr":"707","head":"head-1","signature":"new-sig","requestState":"present-current-head","state":"changed","requestAgeSeconds":901,"retryDue":false,"retryExpired":true}'
+  exit 0
+fi
 if [[ "\${PROBE_RETRY_EXPIRED:-0}" == "1" || "\${PROBE_RETRY_EXPIRED_FOR:-}" == "\${1:-}" ]]; then
   printf '%s\\n' '{"pr":"707","head":"head-1","signature":"sig","requestState":"present-current-head","state":"waiting","requestAgeSeconds":901,"retryDue":false,"retryExpired":true}'
   exit 0
@@ -1614,6 +1618,47 @@ console.log('stage: achieved');
   const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
   assert.equal(state.lanes[0].stage, 'blocked');
   assert.equal(state.lanes[1].stage, 'merge_ready');
+}
+
+{
+  const envInfo = makeEnv('changed-signature-before-retry-expired-deep-checks');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 1,
+    lanes: [
+      {
+        id: 'issue-675',
+        issue: '675',
+        change: 'change-675',
+        branch: 'change-675',
+        pr: '707',
+        head: 'head-1',
+        stage: 'waiting_review',
+        reviewRetryCount: 1,
+        reviewRequestedAt: '2000-01-01T00:00:00.000Z',
+        lastSignature: 'old-sig',
+        lastRequestState: 'present-current-head',
+      },
+    ],
+  }));
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '1',
+    OPENSPEC_BUDDY_REVIEW_RETRY_SECONDS: '1',
+    CURRENT_BRANCH: 'change-675',
+    CHECK_REVIEW_STATUS: '1',
+    PROBE_CHANGED_RETRY_EXPIRED_FOR: '707',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.doesNotMatch(result.stdout, /^BLOCKED/m);
+  const log = fs.readFileSync(envInfo.logFile, 'utf8');
+  assert.match(log, /check 707/);
+  const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  assert.equal(state.lanes[0].stage, 'waiting_review');
+  assert.equal(state.lanes[0].reviewRetryCount, 1);
+  assert.equal(state.lanes[0].lastSignature, 'new-sig');
 }
 
 {
