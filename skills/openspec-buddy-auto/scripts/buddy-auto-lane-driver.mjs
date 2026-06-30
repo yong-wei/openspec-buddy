@@ -16,6 +16,9 @@ import {
   selectorExcludedIssues,
   writeLaneState,
 } from './lane-state.mjs';
+import { decideLaneAction } from './auto-decision.mjs';
+import { applyReviewTruthToLane, classifyProbe, laneReviewTruth, mergeReviewTruth } from './review-truth.mjs';
+import { runLaneAction } from './lane-action-runner.mjs';
 
 const autoScriptDir = path.dirname(fileURLToPath(import.meta.url));
 const defaultCoreScriptDir = path.resolve(autoScriptDir, '../../openspec-buddy/scripts');
@@ -241,10 +244,12 @@ function runSingleDriverForIssue(issue) {
 
 function runSingleDriverForLane(lane) {
   const env = {
+    OPENSPEC_BUDDY_AUTO_TARGET_ISSUE: '',
+    OPENSPEC_BUDDY_AUTO_TARGET_PR: '',
     OPENSPEC_BUDDY_AUTO_ISSUE: String(lane.issue || ''),
     OPENSPEC_BUDDY_AUTO_PR: String(lane.pr || ''),
     OPENSPEC_BUDDY_AUTO_HEAD: String(lane.head || ''),
-    OPENSPEC_BUDDY_AUTO_REVIEW_WAIT_MODE: 'yield',
+    OPENSPEC_BUDDY_AUTO_REVIEW_WAIT_MODE: lane.stage === 'merge_ready' ? 'verify-once' : 'yield',
   };
   if (lane.stage === 'review_fix') {
     env.OPENSPEC_BUDDY_REVIEW_FIX_CONTEXT = '1';
@@ -1096,34 +1101,57 @@ function advanceResumedLane(state, lane) {
       }
       return true;
     }
-    emitHandoff([
-      ['stage', lane.stage],
-      ['lane', lane.id],
-      ['issue', lane.issue],
-      ['pr', lane.pr],
-      ['required_action', 'Continue merge gates through buddy-auto-driver; do not claim or resume another lane until closeout is complete.'],
-    ]);
-    return true;
+  } else {
+    const resumed = resumeLaneOrFail(state, lane, 'resume-lane');
+    if (!resumed.ok) {
+      if (resumed.handoff === 'review_fix') {
+        emitReviewFixHandoff(lane, resumed.reason);
+      } else {
+        emitBlocked([
+          ['stage', 'resume-lane'],
+          ['lane', lane.id],
+          ['reason', lane.blockedReason],
+        ]);
+      }
+      return true;
+    }
   }
-  const resumed = resumeLaneOrFail(state, lane, 'resume-lane');
-  if (!resumed.ok) {
-    if (resumed.handoff === 'review_fix') {
-      emitReviewFixHandoff(lane, resumed.reason);
-    } else {
+  let driver = null;
+  let parsed = { status: '', stage: '' };
+  let driverState = {};
+  let advanceAttempts = 0;
+  for (; advanceAttempts < 4; advanceAttempts += 1) {
+    driver = runSingleDriverForLane(lane);
+    invalidatePrTruth(lane.pr);
+    if (driver.status !== 0) {
+      const reason = driver.stderr || driver.stdout || 'buddy-auto-driver failed while advancing resumed lane';
+      markLaneFailure(state, lane, reason, {
+        retryable: isTransientFailure(reason),
+        source: 'advance-resumed-lane',
+      });
       emitBlocked([
-        ['stage', 'resume-lane'],
+        ['stage', 'advance-lane'],
         ['lane', lane.id],
+        ['issue', lane.issue],
+        ['pr', lane.pr],
         ['reason', lane.blockedReason],
       ]);
+      return true;
     }
-    return true;
+    parsed = parseDriverStage(driver.stdout);
+    driverState = parseDriverState(driver.stdout);
+    if (parsed.status === 'DONE' && parsed.stage === 'review_clear') {
+      lane.stage = 'merge_ready';
+      lane.updatedAt = new Date().toISOString();
+      lane.lastResult = 'review_clear';
+      writeLaneState(state);
+      continue;
+    }
+    break;
   }
-  const driver = runSingleDriverForLane(lane);
-  invalidatePrTruth(lane.pr);
-  if (driver.status !== 0) {
-    const reason = driver.stderr || driver.stdout || 'buddy-auto-driver failed while advancing resumed lane';
-    markLaneFailure(state, lane, reason, {
-      retryable: isTransientFailure(reason),
+  if (parsed.status === 'DONE' && parsed.stage === 'review_clear') {
+    markLaneFailure(state, lane, 'buddy-auto-driver stopped at internal review_clear after repeated lane advancement attempts', {
+      retryable: false,
       source: 'advance-resumed-lane',
     });
     emitBlocked([
@@ -1135,8 +1163,6 @@ function advanceResumedLane(state, lane) {
     ]);
     return true;
   }
-  const parsed = parseDriverStage(driver.stdout);
-  const driverState = parseDriverState(driver.stdout);
   const parkResult = parkLaneFromDriverReceipt(state, lane, parsed, driverState);
   if (parkResult.status === 'blocked') {
     emitBlocked([
@@ -1332,6 +1358,88 @@ function refreshWaitingLanePrTruth(state, lane) {
   return { handled: false, emitted: false };
 }
 
+function enterReviewFix(state, lane, output = '') {
+  const statusResult = markIssueInProgress(lane.issue);
+  if (statusResult.status !== 0) {
+    const reason = statusResult.stderr || statusResult.stdout || 'mark-in-progress.sh failed before review fix';
+    markLaneFailure(state, lane, reason, {
+      retryable: isTransientFailure(reason),
+      source: 'mark-in-progress',
+    });
+    emitBlocked([
+      ['stage', 'mark-in-progress'],
+      ['lane', lane.id],
+      ['issue', lane.issue],
+      ['pr', lane.pr],
+      ['reason', lane.blockedReason],
+    ]);
+    return true;
+  }
+  lane.stage = 'review_fix';
+  lane.updatedAt = new Date().toISOString();
+  writeLaneState(state);
+  emitHandoff([
+    ['stage', 'review-fix'],
+    ['lane', lane.id],
+    ['issue', lane.issue],
+    ['pr', lane.pr],
+    ['required_action', 'Address actionable review feedback on this lane only.'],
+  ], output);
+  return true;
+}
+
+function enterMergeReady(state, lane, output = '') {
+  lane.stage = 'merge_ready';
+  lane.updatedAt = new Date().toISOString();
+  lane.lastResult = 'review-clear';
+  writeLaneState(state);
+  emitHandoff([
+    ['stage', 'merge-ready'],
+    ['lane', lane.id],
+    ['issue', lane.issue],
+    ['pr', lane.pr],
+    ['required_action', 'Run the auto driver on this lane to continue merge and achievement gates.'],
+  ], output);
+  return true;
+}
+
+function runDeepReviewCheck(state, lane, source = 'deep-check-review') {
+  const resumed = resumeLaneOrFail(state, lane, 'resume-lane');
+  if (!resumed.ok) {
+    if (resumed.handoff === 'review_fix') {
+      emitReviewFixHandoff(lane, resumed.reason);
+    } else {
+      emitBlocked([
+        ['stage', 'resume-lane'],
+        ['lane', lane.id],
+        ['reason', lane.blockedReason],
+      ]);
+    }
+    return true;
+  }
+  const check = checkLaneReview(lane);
+  if (check.status === 0) return enterMergeReady(state, lane, check.stdout);
+  if (check.status === 1) {
+    lane.stage = 'waiting_review';
+    lane.updatedAt = new Date().toISOString();
+    lane.lastResult = source;
+    writeLaneState(state);
+    return false;
+  }
+  if (check.status === 3) return enterReviewFix(state, lane, check.stdout || check.stderr);
+  const reason = check.stderr || check.stdout || 'check-review-clear-once.sh failed';
+  markLaneFailure(state, lane, reason, {
+    retryable: isTransientFailure(reason),
+    source: 'check-review-clear-once',
+  });
+  emitBlocked([
+    ['stage', 'check-review-clear-once'],
+    ['lane', lane.id],
+    ['reason', lane.blockedReason],
+  ]);
+  return true;
+}
+
 function processWaitingLane(state, lane) {
   const prTruth = refreshWaitingLanePrTruth(state, lane);
   if (prTruth.handled) return prTruth.emitted;
@@ -1363,33 +1471,18 @@ function processWaitingLane(state, lane) {
     return false;
   }
   const result = parsedProbe.data;
-  lane.lastProbeAt = new Date().toISOString();
-  lane.lastSignature = result.signature || lane.lastSignature || '';
-  lane.lastRequestState = result.requestState || lane.lastRequestState || '';
-  lane.lastResult = result.state || 'waiting';
-
-  if (result.state === 'head_changed' && result.requestState === 'present-current-head' && result.head) {
-    lane.head = String(result.head);
-    lane.reviewRetryCount = 0;
-    lane.reviewRequestedAt = new Date().toISOString();
-    lane.updatedAt = new Date().toISOString();
-    writeLaneState(state);
-    return false;
-  }
-
-  if (result.state === 'request_missing' || result.state === 'head_changed') {
-    markLaneFailure(state, lane, result.state, {
-      retryable: false,
-      source: 'probe-review-state',
-    });
-    emitBlocked([
-      ['stage', 'waiting_review'],
-      ['lane', lane.id],
-      ['pr', lane.pr],
-      ['reason', result.state],
-    ]);
-    return true;
-  }
+  const previousHead = lane.head || '';
+  const previousSignature = lane.lastSignature || '';
+  const truth = classifyProbe({
+    ...result,
+    pr: lane.pr,
+    head: result.state === 'head_changed' ? (result.head || lane.head) : lane.head,
+  }, {
+    previousHead,
+    previousSignature,
+  });
+  applyReviewTruthToLane(lane, mergeReviewTruth(laneReviewTruth(lane), truth));
+  lane.lastProbeAt = lane.restFreshAt;
 
   if (result.retryExpired === true) {
     markLaneFailure(state, lane, 'review retry window expired without current-head clean review', {
@@ -1441,77 +1534,58 @@ function processWaitingLane(state, lane) {
     return false;
   }
 
-  if (result.state === 'changed' || result.state === 'review_returned') {
-    const resumed = resumeLaneOrFail(state, lane, 'resume-lane');
-    if (!resumed.ok) {
-      if (resumed.handoff === 'review_fix') {
-        emitReviewFixHandoff(lane, resumed.reason);
-      } else {
-        emitBlocked([
-          ['stage', 'resume-lane'],
-          ['lane', lane.id],
-          ['reason', lane.blockedReason],
-        ]);
-      }
-      return true;
+  const decision = decideLaneAction({ lane, reviewTruth: laneReviewTruth(lane) });
+  if (decision.action === 'keep-waiting') {
+    if (truth.probeState === 'head_changed' && truth.requestState === 'present-current-head') {
+      lane.reviewRetryCount = 0;
+      lane.reviewRequestedAt = new Date().toISOString();
     }
-    const check = checkLaneReview(lane);
-    if (check.status === 0) {
-      lane.stage = 'merge_ready';
-      lane.updatedAt = new Date().toISOString();
-      writeLaneState(state);
-      emitHandoff([
-        ['stage', 'merge-ready'],
+    writeLaneState(state);
+    return false;
+  }
+  if (decision.action === 'enter-merge-ready') return enterMergeReady(state, lane);
+  if (decision.action === 'enter-review-fix') return enterReviewFix(state, lane);
+  if (decision.action === 'request-current-head-review') {
+    const requestedAt = new Date().toISOString();
+    const action = runLaneAction(state, lane, {
+      command: path.join(coreScriptDir, 'request-pr-review.sh'),
+      args: [String(lane.pr), '--force'],
+      patch: {
+        stage: 'waiting_review',
+        reviewRequestedAt: requestedAt,
+        lastRequestState: 'present-current-head',
+        lastResult: 'request-current-head-review',
+      },
+    }, { coreScriptDir, refreshTruth: false });
+    if (action.status !== 'ok') {
+      markLaneFailure(state, lane, action.reason || 'request-pr-review.sh failed', {
+        retryable: isTransientFailure(action.reason),
+        source: 'request-current-head-review',
+      });
+      emitBlocked([
+        ['stage', 'request-current-head-review'],
         ['lane', lane.id],
         ['issue', lane.issue],
         ['pr', lane.pr],
-        ['required_action', 'Run the auto driver on this lane to continue merge and achievement gates.'],
-      ], check.stdout);
+        ['reason', lane.blockedReason],
+      ]);
       return true;
     }
-    if (check.status === 1) {
-      lane.stage = 'waiting_review';
-      lane.updatedAt = new Date().toISOString();
-      writeLaneState(state);
-      return false;
-    }
-    if (check.status === 3) {
-      const statusResult = markIssueInProgress(lane.issue);
-      if (statusResult.status !== 0) {
-        const reason = statusResult.stderr || statusResult.stdout || 'mark-in-progress.sh failed before review fix';
-        markLaneFailure(state, lane, reason, {
-          retryable: isTransientFailure(reason),
-          source: 'mark-in-progress',
-        });
-        emitBlocked([
-          ['stage', 'mark-in-progress'],
-          ['lane', lane.id],
-          ['issue', lane.issue],
-          ['pr', lane.pr],
-          ['reason', lane.blockedReason],
-        ]);
-        return true;
-      }
-      lane.stage = 'review_fix';
-      lane.updatedAt = new Date().toISOString();
-      writeLaneState(state);
-      emitHandoff([
-        ['stage', 'review-fix'],
-        ['lane', lane.id],
-        ['issue', lane.issue],
-        ['pr', lane.pr],
-        ['required_action', 'Address actionable review feedback on this lane only.'],
-      ], check.stdout || check.stderr);
-      return true;
-    }
-    const reason = check.stderr || check.stdout || 'check-review-clear-once.sh failed';
-    markLaneFailure(state, lane, reason, {
-      retryable: isTransientFailure(reason),
-      source: 'check-review-clear-once',
+    return false;
+  }
+  if (decision.action === 'deep-check-review') {
+    return runDeepReviewCheck(state, lane, decision.reason);
+  }
+  if (decision.action === 'block') {
+    markLaneFailure(state, lane, decision.reason, {
+      retryable: false,
+      source: 'auto-decision',
     });
     emitBlocked([
-      ['stage', 'check-review-clear-once'],
+      ['stage', 'waiting_review'],
       ['lane', lane.id],
+      ['issue', lane.issue],
+      ['pr', lane.pr],
       ['reason', lane.blockedReason],
     ]);
     return true;
@@ -1677,6 +1751,13 @@ function main() {
   const opts = parseArgs(process.argv.slice(2));
   if (opts.help) {
     console.log('Usage: buddy-auto-lane-driver.mjs [--goal] [--poll-once] [--reconcile] [--release-lane ISSUE [--reason TEXT]]');
+    return;
+  }
+  if (!controllerChildMode()) {
+    emitBlocked([
+      ['stage', 'controller-owned'],
+      ['reason', 'Buddy Auto child drivers are internal. Run buddy-auto.mjs instead.'],
+    ]);
     return;
   }
   runScheduler(opts);

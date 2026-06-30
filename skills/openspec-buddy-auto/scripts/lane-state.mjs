@@ -203,6 +203,7 @@ export function emptyLaneState({ cwd = process.cwd(), maxLanes = normalizeMaxLan
     worktree: worktreeInfo(cwd),
     maxLanes,
     lanes: [],
+    history: [],
   };
 }
 
@@ -222,6 +223,13 @@ export function normalizeLane(lane) {
     lastSignature: String(lane.lastSignature || ''),
     lastRequestState: String(lane.lastRequestState || ''),
     lastResult: String(lane.lastResult || ''),
+    probeState: String(lane.probeState || ''),
+    requestState: String(lane.requestState || ''),
+    actionableState: String(lane.actionableState || ''),
+    threadState: String(lane.threadState || ''),
+    restFreshAt: String(lane.restFreshAt || ''),
+    threadsFreshAt: String(lane.threadsFreshAt || ''),
+    threadsHead: String(lane.threadsHead || ''),
     blockedReason: String(lane.blockedReason || ''),
     retryableStage: String(lane.retryableStage || ''),
     retryableHead: String(lane.retryableHead || ''),
@@ -244,11 +252,21 @@ export function normalizeLane(lane) {
 
 export function normalizeLaneState(state, { cwd = process.cwd(), maxLanes = normalizeMaxLanes() } = {}) {
   const lanes = (state.lanes || []).map(normalizeLane);
+  const history = (state.history || []).map((entry) => ({
+    ...entry,
+    id: String(entry.id || ''),
+    issue: String(entry.issue || ''),
+    pr: String(entry.pr || ''),
+    branch: String(entry.branch || ''),
+    stage: String(entry.stage || ''),
+    archivedAt: String(entry.archivedAt || entry.updatedAt || ''),
+  }));
   return {
     version: 1,
     worktree: state.worktree || worktreeInfo(cwd),
     maxLanes: normalizeMaxLanes(String(state.maxLanes || maxLanes)),
     lanes,
+    history,
   };
 }
 
@@ -262,7 +280,9 @@ export function readLaneState({ cwd = process.cwd(), maxLanes = normalizeMaxLane
 export function writeLaneState(state, { cwd = process.cwd() } = {}) {
   const file = laneStatePath(cwd);
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, `${JSON.stringify(normalizeLaneState(state, { cwd, maxLanes: state.maxLanes }), null, 2)}\n`);
+  const tempFile = `${file}.${process.pid}.${Date.now()}.tmp`;
+  fs.writeFileSync(tempFile, `${JSON.stringify(normalizeLaneState(state, { cwd, maxLanes: state.maxLanes }), null, 2)}\n`);
+  fs.renameSync(tempFile, file);
 }
 
 export function activeLaneIssues(state) {
@@ -299,9 +319,16 @@ export function laneBlocksGoalCompletion(lane) {
 }
 
 export function pruneDoneLanes(state) {
+  const archivedAt = new Date().toISOString();
   return {
     ...state,
     lanes: state.lanes.filter((lane) => lane.stage !== 'done'),
+    history: [
+      ...(state.history || []),
+      ...state.lanes
+        .filter((lane) => lane.stage === 'done')
+        .map((lane) => ({ ...lane, archivedAt })),
+    ],
   };
 }
 

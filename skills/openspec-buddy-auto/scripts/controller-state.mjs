@@ -161,12 +161,16 @@ export function writeInterrupt(state, interrupt, { cwd = process.cwd() } = {}) {
     interrupt: {
       type: String(interrupt.type || ''),
       stage: String(interrupt.stage || ''),
+      lane: String(interrupt.lane || ''),
       issue: String(interrupt.issue || ''),
       pr: String(interrupt.pr || ''),
+      branch: String(interrupt.branch || ''),
+      head: String(interrupt.head || ''),
       allowedWork: String(interrupt.allowedWork || ''),
       resumeAction: String(interrupt.resumeAction || 'rerun-controller'),
       child: String(interrupt.child || ''),
       blockedCode: String(interrupt.blockedCode || ''),
+      reason: String(interrupt.reason || ''),
     },
   }, { cwd });
 }

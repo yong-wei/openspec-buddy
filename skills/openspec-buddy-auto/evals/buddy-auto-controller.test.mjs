@@ -9,8 +9,10 @@ import { pathToFileURL } from 'node:url';
 const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../../..');
 const controllerModule = await import(pathToFileURL(path.join(repoRoot, 'skills/openspec-buddy-auto/scripts/controller-state.mjs')).href);
 const laneStateModule = await import(pathToFileURL(path.join(repoRoot, 'skills/openspec-buddy-auto/scripts/lane-state.mjs')).href);
+const reconcilerModule = await import(pathToFileURL(path.join(repoRoot, 'skills/openspec-buddy-auto/scripts/controller-reconciler.mjs')).href);
 const helper = path.join(repoRoot, 'skills/openspec-buddy-auto/scripts/buddy-auto.mjs');
 const singleDriverHelper = path.join(repoRoot, 'skills/openspec-buddy-auto/scripts/buddy-auto-driver.mjs');
+const laneDriverHelper = path.join(repoRoot, 'skills/openspec-buddy-auto/scripts/buddy-auto-lane-driver.mjs');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'buddy-auto-controller-'));
 
 function makeExecutable(file, body) {
@@ -73,6 +75,11 @@ if (process.env.BUDDY_STUB_STATE_ISSUE) {
 if (process.env.BUDDY_STUB_STATUS === 'BLOCKED') {
   console.log('BLOCKED');
   console.log('stage: ' + (process.env.BUDDY_STUB_BLOCKED_STAGE || 'stub-blocked'));
+  if (process.env.BUDDY_STUB_LANE) console.log('lane: ' + process.env.BUDDY_STUB_LANE);
+  if (process.env.BUDDY_STUB_ISSUE) console.log('issue: ' + process.env.BUDDY_STUB_ISSUE);
+  if (process.env.BUDDY_STUB_PR) console.log('pr: ' + process.env.BUDDY_STUB_PR);
+  if (process.env.BUDDY_STUB_BRANCH) console.log('branch: ' + process.env.BUDDY_STUB_BRANCH);
+  if (process.env.BUDDY_STUB_HEAD) console.log('head: ' + process.env.BUDDY_STUB_HEAD);
   console.log('reason: stub blocker');
   process.exit(Number(process.env.BUDDY_STUB_EXIT || 0));
 } else if (process.env.BUDDY_STUB_DONE_STAGE) {
@@ -296,6 +303,31 @@ console.log('legacy helper completed without protocol');
 }
 
 {
+  const envInfo = makeEnv('child-blocked-preserves-lane-identity');
+  const result = run(envInfo, {
+    BUDDY_STUB_STATUS: 'BLOCKED',
+    BUDDY_STUB_BLOCKED_STAGE: 'request_missing',
+    BUDDY_STUB_LANE: 'issue-743',
+    BUDDY_STUB_ISSUE: '743',
+    BUDDY_STUB_PR: '744',
+    BUDDY_STUB_BRANCH: 'change-743',
+    BUDDY_STUB_HEAD: 'head-743',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^BLOCKED/m);
+  assert.match(result.stdout, /^lane: issue-743$/m);
+  assert.match(result.stdout, /^pr: 744$/m);
+  const state = readController(envInfo);
+  assert.equal(state.interrupt.stage, 'request_missing');
+  assert.equal(state.interrupt.lane, 'issue-743');
+  assert.equal(state.interrupt.issue, '743');
+  assert.equal(state.interrupt.pr, '744');
+  assert.equal(state.interrupt.branch, 'change-743');
+  assert.equal(state.interrupt.head, 'head-743');
+  assert.equal(state.interrupt.reason, 'stub blocker');
+}
+
+{
   const envInfo = makeEnv('achieved-clears-target');
   let result = run(envInfo, {
     BUDDY_STUB_STATE_ISSUE: '675',
@@ -344,6 +376,92 @@ console.log('legacy helper completed without protocol');
   const state = readController(envInfo);
   assert.equal(state.mode, 'multi');
   assert.equal(state.maxLanes, 3);
+}
+
+{
+  const envInfo = makeEnv('controller-merge-ready-runs-internal-single-driver');
+  const coreDir = path.join(envInfo.root, 'core');
+  const branchFile = path.join(envInfo.root, 'branch.txt');
+  fs.mkdirSync(coreDir, { recursive: true });
+  fs.writeFileSync(branchFile, 'dev1\n');
+  makeExecutable(path.join(envInfo.binDir, 'git'), `#!/bin/bash
+set -euo pipefail
+branch_file=${JSON.stringify(branchFile)}
+current_branch="$(cat "$branch_file")"
+case "\${1:-}" in
+  rev-parse)
+    if [[ "\${2:-}" == "--show-toplevel" ]]; then printf '%s\\n' ${JSON.stringify(envInfo.repoDir)}; exit 0; fi
+    if [[ "\${2:-}" == "HEAD" ]]; then printf 'head-1\\n'; exit 0; fi
+    ;;
+  config)
+    if [[ "\${2:-}" == "--worktree" ]]; then
+      case "\${3:-}" in
+        buddy.worktreeAlias) printf 'dev1\\n'; exit 0 ;;
+        buddy.boundBranch) printf 'dev1\\n'; exit 0 ;;
+        buddy.boundBase) printf 'origin/integration\\n'; exit 0 ;;
+      esac
+    fi
+    ;;
+  status)
+    if [[ "\${2:-}" == "--porcelain" ]]; then exit 0; fi
+    ;;
+  branch)
+    if [[ "\${2:-}" == "--show-current" ]]; then printf '%s\\n' "$current_branch"; exit 0; fi
+    ;;
+  switch)
+    printf '%s\\n' "\${2:-}" > "$branch_file"
+    echo "switch \${2:-}" >> ${JSON.stringify(envInfo.logFile)}
+    exit 0
+    ;;
+  ls-remote)
+    printf 'head-1\\trefs/heads/change-675\\n'
+    exit 0
+    ;;
+esac
+echo "unexpected git invocation: $*" >&2
+exit 99
+`);
+  makeExecutable(path.join(envInfo.binDir, 'gh'), `#!/bin/bash
+set -euo pipefail
+if [[ "\${1:-}" == "pr" && "\${2:-}" == "view" && "\${3:-}" == "707" ]]; then
+  printf '%s\\n' '{"number":707,"state":"OPEN","headRefName":"change-675","headRefOid":"head-1"}'
+  exit 0
+fi
+echo "unexpected gh invocation: $*" >&2
+exit 99
+`);
+  makeExecutable(path.join(coreDir, 'verify-claim-worktree.sh'), `#!/usr/bin/env bash\necho "verify-claim $*" >> ${JSON.stringify(envInfo.logFile)}\n`);
+  makeExecutable(path.join(coreDir, 'verify-current-head-review-request.sh'), `#!/usr/bin/env bash\necho "verify-request $*" >> ${JSON.stringify(envInfo.logFile)}\n`);
+  makeExecutable(path.join(coreDir, 'mark-review.sh'), `#!/usr/bin/env bash\necho "mark-review $*" >> ${JSON.stringify(envInfo.logFile)}\n`);
+  makeExecutable(path.join(coreDir, 'verify-review-clear.sh'), `#!/usr/bin/env bash\necho "verify-review $*" >> ${JSON.stringify(envInfo.logFile)}\n`);
+  makeExecutable(path.join(coreDir, 'verify-achieved-truth.mjs'), `#!/usr/bin/env node
+import fs from 'node:fs';
+fs.appendFileSync(${JSON.stringify(envInfo.logFile)}, 'achieved-truth ' + process.argv.slice(2).join(' ') + '\\n');
+console.log(JSON.stringify({ achieved: false, next: 'merge-pr', reason: 'PR is not merged' }));
+`);
+  process.env.PATH = `${envInfo.binDir}:${process.env.PATH}`;
+  process.env.OPENSPEC_BUDDY_AUTO_LANE_STATE_DIR = envInfo.laneDir;
+  const laneState = laneStateModule.emptyLaneState({ cwd: envInfo.repoDir, maxLanes: 1 });
+  laneState.lanes.push({ id: 'issue-675', issue: '675', pr: '707', branch: 'change-675', head: 'head-1', stage: 'merge_ready' });
+  laneStateModule.writeLaneState(laneState, { cwd: envInfo.repoDir });
+  delete process.env.OPENSPEC_BUDDY_AUTO_LANE_STATE_DIR;
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_MODE: 'multi',
+    OPENSPEC_BUDDY_AUTO_LANES: '1',
+    OPENSPEC_BUDDY_AUTO_LANE_DRIVER: laneDriverHelper,
+    OPENSPEC_BUDDY_AUTO_SINGLE_DRIVER: singleDriverHelper,
+    OPENSPEC_BUDDY_AUTO_STATE_DIR: path.join(envInfo.root, 'auto-state'),
+    OPENSPEC_BUDDY_CORE_SCRIPT_DIR: coreDir,
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^HANDOFF/m);
+  assert.match(result.stdout, /^stage: merge-pr$/m);
+  assert.doesNotMatch(result.stdout, /^stage: review_clear$/m);
+  const log = fs.readFileSync(envInfo.logFile, 'utf8');
+  assert.match(log, /verify-claim --issue 675 --pr 707/);
+  assert.match(log, /mark-review 675 707/);
+  assert.match(log, /verify-review 707/);
+  assert.match(log, /achieved-truth 675 707/);
 }
 
 {
@@ -407,6 +525,121 @@ console.log('legacy helper completed without protocol');
 }
 
 {
+  const envInfo = makeEnv('reconciler-clears-stale-review-wait');
+  const state = {
+    version: 1,
+    worktree: {},
+    mode: 'multi',
+    goal: true,
+    maxLanes: 2,
+    target: { issue: '743', pr: '743', change: '' },
+    reviewFix: { pending: true, pr: '743', head: 'head-1', evidence: 'response-gate-required' },
+    interrupt: { type: 'blocked', stage: 'request_missing', pr: '743', head: 'head-1', blockedCode: 'request_missing' },
+  };
+  const laneState = {
+    lanes: [
+      {
+        id: 'issue-743',
+        issue: '743',
+        pr: '743',
+        head: 'head-1',
+        stage: 'waiting_review',
+        probeState: 'changed',
+        requestState: 'present-current-head',
+        lastResult: 'changed',
+        lastRequestState: 'present-current-head',
+        lastSignature: 'sig-1',
+        restFreshAt: '2026-06-30T00:00:00.000Z',
+        threadState: 'clear',
+        actionableState: 'clear',
+        threadsHead: 'head-1',
+        threadsFreshAt: '2026-06-30T00:00:00.000Z',
+      },
+    ],
+  };
+  let written = null;
+  const result = reconcilerModule.reconcileControllerState(state, {
+    cwd: envInfo.repoDir,
+    laneState,
+    dirty: false,
+    writeState: (next) => {
+      written = next;
+      return next;
+    },
+  });
+  assert.equal(result.changed, true);
+  assert.equal(written.reviewFix.pending, false);
+  assert.equal(written.interrupt, null);
+}
+
+{
+  const baseState = {
+    version: 1,
+    mode: 'multi',
+    goal: true,
+    maxLanes: 2,
+    target: { issue: '743', pr: '743', change: '' },
+    reviewFix: { pending: true, pr: '743', head: 'head-1', evidence: 'response-gate-required' },
+    interrupt: { type: 'blocked', stage: 'request_missing', pr: '743', head: 'head-1', blockedCode: 'request_missing' },
+  };
+  const baseLane = {
+    id: 'issue-743',
+    issue: '743',
+    pr: '743',
+    head: 'head-1',
+    stage: 'waiting_review',
+    probeState: 'waiting',
+    requestState: 'present-current-head',
+    lastResult: 'waiting',
+    lastRequestState: 'present-current-head',
+    lastSignature: 'sig-1',
+    restFreshAt: '2026-06-30T00:00:00.000Z',
+  };
+  assert.equal(reconcilerModule.reconcileControllerState(baseState, {
+    laneState: { lanes: [{ ...baseLane, head: 'head-2' }] },
+    dirty: false,
+    writeState: (next) => next,
+  }).changed, false);
+  assert.equal(reconcilerModule.reconcileControllerState(baseState, {
+    laneState: { lanes: [{ ...baseLane, probeState: 'changed', threadState: 'unknown' }] },
+    dirty: false,
+    writeState: (next) => next,
+  }).changed, false);
+  assert.equal(reconcilerModule.reconcileControllerState(baseState, {
+    laneState: { lanes: [{ ...baseLane, threadState: 'actionable', actionableState: 'actionable', threadsHead: 'head-1', threadsFreshAt: '2026-06-30T00:00:00.000Z' }] },
+    dirty: false,
+    writeState: (next) => next,
+  }).changed, false);
+  assert.equal(reconcilerModule.reconcileControllerState(baseState, {
+    laneState: { lanes: [{ ...baseLane }] },
+    dirty: false,
+    writeState: (next) => next,
+  }).changed, false);
+  assert.equal(reconcilerModule.reconcileControllerState(baseState, {
+    laneState: { lanes: [{ ...baseLane }] },
+    allowCachedRestTruth: true,
+    dirty: false,
+    writeState: (next) => next,
+  }).changed, true);
+  assert.equal(reconcilerModule.reconcileControllerState({ ...baseState, interrupt: { type: 'blocked', stage: 'request_missing', blockedCode: 'request_missing' }, reviewFix: { pending: false, pr: '', head: '', evidence: '' }, target: { issue: '', pr: '', change: '' } }, {
+    laneState: { lanes: [{ ...baseLane, id: 'issue-111', issue: '111', pr: '111' }, { ...baseLane, id: 'issue-222', issue: '222', pr: '222' }] },
+    allowCachedRestTruth: true,
+    dirty: false,
+    writeState: (next) => next,
+  }).changed, false);
+  assert.equal(reconcilerModule.reconcileControllerState(baseState, {
+    laneState: { lanes: [{ ...baseLane, probeState: 'changed', threadState: 'clear', actionableState: 'clear', threadsHead: 'head-1', threadsFreshAt: '2026-06-30T00:00:00.000Z' }] },
+    dirty: true,
+    writeState: (next) => next,
+  }).changed, false);
+  assert.equal(reconcilerModule.reconcileControllerState(baseState, {
+    laneState: { lanes: [{ ...baseLane, probeState: 'changed', threadState: 'clear', actionableState: 'clear', threadsHead: 'head-1', threadsFreshAt: '2026-06-30T00:00:00.000Z' }] },
+    dirty: false,
+    writeState: (next) => next,
+  }).changed, true);
+}
+
+{
   const envInfo = makeEnv('reset-controller');
   let result = run(envInfo, { OPENSPEC_BUDDY_AUTO_TARGET_ISSUE: '1' });
   assert.equal(result.status, 0, result.stderr);
@@ -467,6 +700,82 @@ console.log('legacy helper completed without protocol');
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /^BLOCKED/m);
   assert.match(result.stdout, /controller-owned/);
+
+  result = spawnSync(process.execPath, [laneDriverHelper, '--poll-once'], {
+    cwd: envInfo.repoDir,
+    env: {
+      ...process.env,
+      PATH: `${envInfo.binDir}:${process.env.PATH}`,
+      OPENSPEC_BUDDY_AUTO_CONTROLLER_STATE_DIR: envInfo.stateDir,
+      OPENSPEC_BUDDY_AUTO_LANE_STATE_DIR: envInfo.laneDir,
+      OPENSPEC_BUDDY_CORE_SCRIPT_DIR: envInfo.root,
+    },
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^BLOCKED/m);
+  assert.match(result.stdout, /controller-owned/);
+}
+
+{
+  const envInfo = makeEnv('direct-driver-guard-fresh-state');
+  let result = spawnSync(process.execPath, [singleDriverHelper, '--goal'], {
+    cwd: envInfo.repoDir,
+    env: {
+      ...process.env,
+      PATH: `${envInfo.binDir}:${process.env.PATH}`,
+      OPENSPEC_BUDDY_AUTO_CONTROLLER_STATE_DIR: envInfo.stateDir,
+      OPENSPEC_BUDDY_AUTO_LANE_STATE_DIR: envInfo.laneDir,
+      OPENSPEC_BUDDY_CORE_SCRIPT_DIR: envInfo.root,
+    },
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^BLOCKED/m);
+  assert.match(result.stdout, /controller-owned/);
+
+  result = spawnSync(process.execPath, [laneDriverHelper, '--poll-once'], {
+    cwd: envInfo.repoDir,
+    env: {
+      ...process.env,
+      PATH: `${envInfo.binDir}:${process.env.PATH}`,
+      OPENSPEC_BUDDY_AUTO_CONTROLLER_STATE_DIR: envInfo.stateDir,
+      OPENSPEC_BUDDY_AUTO_LANE_STATE_DIR: envInfo.laneDir,
+      OPENSPEC_BUDDY_CORE_SCRIPT_DIR: envInfo.root,
+    },
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^BLOCKED/m);
+  assert.match(result.stdout, /controller-owned/);
+
+  result = spawnSync(process.execPath, [singleDriverHelper, '--help'], {
+    cwd: envInfo.repoDir,
+    env: {
+      ...process.env,
+      PATH: `${envInfo.binDir}:${process.env.PATH}`,
+      OPENSPEC_BUDDY_AUTO_CONTROLLER_STATE_DIR: envInfo.stateDir,
+      OPENSPEC_BUDDY_AUTO_LANE_STATE_DIR: envInfo.laneDir,
+      OPENSPEC_BUDDY_CORE_SCRIPT_DIR: envInfo.root,
+    },
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Usage: buddy-auto-driver/);
+
+  result = spawnSync(process.execPath, [laneDriverHelper, '--help'], {
+    cwd: envInfo.repoDir,
+    env: {
+      ...process.env,
+      PATH: `${envInfo.binDir}:${process.env.PATH}`,
+      OPENSPEC_BUDDY_AUTO_CONTROLLER_STATE_DIR: envInfo.stateDir,
+      OPENSPEC_BUDDY_AUTO_LANE_STATE_DIR: envInfo.laneDir,
+      OPENSPEC_BUDDY_CORE_SCRIPT_DIR: envInfo.root,
+    },
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Usage: buddy-auto-lane-driver/);
 }
 
 {

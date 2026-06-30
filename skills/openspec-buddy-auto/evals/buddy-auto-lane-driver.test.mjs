@@ -252,6 +252,7 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
       OPENSPEC_BUDDY_CORE_SCRIPT_DIR: envInfo.coreDir,
       OPENSPEC_BUDDY_AUTO_LANE_STATE_DIR: envInfo.stateDir,
       OPENSPEC_BUDDY_AUTO_SINGLE_DRIVER: envInfo.singleDriver,
+      OPENSPEC_BUDDY_AUTO_CONTROLLER_CHILD: '1',
       OPENSPEC_BUDDY_COMMAND_TIMEOUT_MS: '10000',
       ...extraEnv,
     },
@@ -507,6 +508,79 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
   const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
   assert.equal(state.lanes[0].stage, 'blocked');
   assert.equal(state.lanes[0].retryAttempts || 0, 0);
+}
+
+{
+  const envInfo = makeEnv('request-missing-unknown-thread-truth-deep-checks');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 1,
+    lanes: [
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0, lastRequestState: 'present-current-head' },
+    ],
+  }));
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '1',
+    CURRENT_BRANCH: 'dev1',
+    PROBE_STATE_707: 'request_missing',
+    PROBE_REQUEST_STATE_707: 'missing-current-head',
+    CHECK_REVIEW_STATUS: '1',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^DONE/m);
+  const log = fs.readFileSync(envInfo.logFile, 'utf8');
+  assert.match(log, /check 707/);
+  assert.doesNotMatch(log, /^request 707/m);
+  const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  assert.equal(state.lanes[0].stage, 'waiting_review');
+}
+
+{
+  const envInfo = makeEnv('request-missing-clear-thread-truth-requests-review');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 1,
+    lanes: [
+      {
+        id: 'issue-675',
+        issue: '675',
+        change: 'change-675',
+        branch: 'change-675',
+        pr: '707',
+        head: 'head-1',
+        stage: 'waiting_review',
+        reviewRetryCount: 0,
+        lastRequestState: 'present-current-head',
+        threadState: 'clear',
+        actionableState: 'clear',
+        threadsHead: 'head-1',
+        threadsFreshAt: '2026-06-30T00:00:00.000Z',
+      },
+    ],
+  }));
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '1',
+    CURRENT_BRANCH: 'dev1',
+    PROBE_STATE_707: 'request_missing',
+    PROBE_REQUEST_STATE_707: 'missing-current-head',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^DONE/m);
+  const log = fs.readFileSync(envInfo.logFile, 'utf8');
+  assert.match(log, /switch change-675/);
+  assert.match(log, /verify-claim --issue 675 --pr 707/);
+  assert.match(log, /request 707 --force/);
+  assert.doesNotMatch(log, /check 707/);
+  const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  assert.equal(state.lanes[0].stage, 'waiting_review');
+  assert.equal(state.lanes[0].lastRequestState, 'present-current-head');
+  assert.match(state.lanes[0].reviewRequestedAt, /^\d{4}-\d{2}-\d{2}T/);
 }
 
 {
@@ -849,19 +923,19 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
     PROBE_HEAD_707: 'new-head',
     PROBE_SIGNATURE_707: 'new-sig',
     PROBE_REQUEST_STATE_707: 'present-current-head',
+    LOCAL_HEAD_675: 'new-head',
+    PR_707_HEAD: 'new-head',
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /^DONE/m);
+  assert.match(result.stdout, /^HANDOFF/m);
+  assert.match(result.stdout, /^stage: merge-ready$/m);
   assert.doesNotMatch(result.stdout, /^BLOCKED/m);
   const log = fs.readFileSync(envInfo.logFile, 'utf8');
-  assert.doesNotMatch(log, /check 707/);
+  assert.match(log, /check 707/);
   const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
-  assert.equal(state.lanes[0].stage, 'waiting_review');
+  assert.equal(state.lanes[0].stage, 'merge_ready');
   assert.equal(state.lanes[0].head, 'new-head');
   assert.equal(state.lanes[0].lastSignature, 'new-sig');
-  assert.equal(state.lanes[0].reviewRetryCount, 0);
-  assert.match(state.lanes[0].reviewRequestedAt, /^\d{4}-\d{2}-\d{2}T/);
-  assert.notEqual(state.lanes[0].reviewRequestedAt, '2026-06-27T00:00:00.000Z');
 }
 
 {
@@ -1284,7 +1358,7 @@ console.log('stage: review-fix');
 }
 
 {
-  const envInfo = makeEnv('merge-ready-handoff-without-fake-done');
+  const envInfo = makeEnv('merge-ready-open-pr-runs-single-driver');
   fs.mkdirSync(envInfo.stateDir, { recursive: true });
   fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
     version: 1,
@@ -1294,9 +1368,13 @@ console.log('stage: review-fix');
       { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'merge_ready', reviewRetryCount: 0 },
     ],
   }));
-  const fakeDriver = path.join(envInfo.root, 'fake-should-not-run-driver.mjs');
+  const fakeDriver = path.join(envInfo.root, 'fake-merge-ready-driver.mjs');
   fs.writeFileSync(fakeDriver, `#!/usr/bin/env node
-throw new Error('merge_ready should hand off instead of running fake single driver');
+import fs from 'node:fs';
+fs.appendFileSync(${JSON.stringify(envInfo.logFile)}, 'single-driver-merge-ready ' + (process.env.OPENSPEC_BUDDY_AUTO_REVIEW_WAIT_MODE || '') + '\\n');
+console.log('HANDOFF');
+console.log('stage: merge-pr');
+console.log('required_action: merge PR through controller-owned gate');
 `, { mode: 0o755 });
   const result = run(envInfo, {
     OPENSPEC_BUDDY_AUTO_GOAL: '1',
@@ -1306,10 +1384,10 @@ throw new Error('merge_ready should hand off instead of running fake single driv
   });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /^HANDOFF/m);
-  assert.match(result.stdout, /^stage: merge_ready$/m);
-  assert.match(result.stdout, /Continue merge gates through buddy-auto-driver/);
+  assert.match(result.stdout, /^stage: merge-pr$/m);
   const log = fs.readFileSync(envInfo.logFile, 'utf8');
   assert.match(log, /verify-claim --issue 675 --pr 707/);
+  assert.match(log, /single-driver-merge-ready verify-once/);
   const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
   assert.equal(state.lanes[0].stage, 'merge_ready');
 }

@@ -143,14 +143,11 @@ function controllerChildMode() {
 function directRunBlockedByController() {
   if (controllerChildMode()) return '';
   try {
-    const controller = readControllerState();
-    if (controller.mode === 'multi') {
-      return 'Buddy Auto controller state is multi-lane; run buddy-auto.mjs instead of the single-lane driver.';
-    }
+    readControllerState();
   } catch {
-    return '';
+    // Child drivers are controller-owned even before a state file exists.
   }
-  return '';
+  return 'Buddy Auto child drivers are internal. Run buddy-auto.mjs instead.';
 }
 
 function outputBlock(title, entries = []) {
@@ -485,6 +482,14 @@ function commandFor(opts, state) {
         reason: 'Current PR has passed mark-review and has a current-head review request. Multi-lane scheduler may park this lane instead of entering the blocking review wait.',
       };
     }
+    if (process.env.OPENSPEC_BUDDY_AUTO_REVIEW_WAIT_MODE === 'verify-once') {
+      return {
+        stage: 'wait-review',
+        command: [path.join(coreScriptDir, 'verify-review-clear.sh'), opts.pr],
+        reason: 'Multi-lane merge-ready recovery verifies current-head review clearance once without entering the blocking foreground wait.',
+        records: ['review_clear'],
+      };
+    }
     return {
       stage: 'wait-review',
       command: [path.join(coreScriptDir, 'wait-for-review-clear.sh'), opts.pr],
@@ -753,6 +758,16 @@ function runDriver(opts) {
 
     for (const stage of next.records || []) {
       recordStage(opts, stage, next.command);
+    }
+
+    if (next.stage === 'wait-review' && process.env.OPENSPEC_BUDDY_AUTO_REVIEW_WAIT_MODE === 'verify-once') {
+      emitDone({
+        stage: 'review_clear',
+        command: next.command,
+        state: opts,
+        next: { stage: 'merge-gates', reason: 'verify-once recorded review_clear without running merge gates.', command: [] },
+      });
+      return;
     }
 
     if (deterministicStages.has(next.stage)) continue;
