@@ -1432,10 +1432,16 @@ function runDeepReviewCheck(state, lane, source = 'deep-check-review', { resetWa
   }
   if (check.status === 3) return enterReviewFix(state, lane, check.stdout || check.stderr);
   const reason = check.stderr || check.stdout || 'check-review-clear-once.sh failed';
+  const retryable = isTransientFailure(reason);
+  if (resetWait && retryable) {
+    lane.reviewRetryCount = 0;
+    lane.reviewRequestedAt = new Date().toISOString();
+  }
   markLaneFailure(state, lane, reason, {
-    retryable: isTransientFailure(reason),
+    retryable,
     source: 'check-review-clear-once',
   });
+  if (retryable) return false;
   emitBlocked([
     ['stage', 'check-review-clear-once'],
     ['lane', lane.id],
