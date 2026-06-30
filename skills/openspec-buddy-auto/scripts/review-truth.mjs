@@ -75,7 +75,7 @@ export function classifyProbe(probe = {}, { previousHead = '', previousSignature
     probeState = 'request_missing';
   }
 
-  if (probe.retryExpired === true) probeState = 'retry_expired';
+  if (probe.retryExpired === true && probeState === 'waiting') probeState = 'retry_expired';
   else if (probe.retryDue === true && probeState === 'waiting') probeState = 'retry_due';
 
   return normalizeReviewTruth({

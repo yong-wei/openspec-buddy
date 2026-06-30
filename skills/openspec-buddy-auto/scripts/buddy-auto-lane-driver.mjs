@@ -1403,7 +1403,7 @@ function enterMergeReady(state, lane, output = '') {
   return true;
 }
 
-function runDeepReviewCheck(state, lane, source = 'deep-check-review') {
+function runDeepReviewCheck(state, lane, source = 'deep-check-review', { resetWait = false } = {}) {
   const resumed = resumeLaneOrFail(state, lane, 'resume-lane');
   if (!resumed.ok) {
     if (resumed.handoff === 'review_fix') {
@@ -1421,6 +1421,10 @@ function runDeepReviewCheck(state, lane, source = 'deep-check-review') {
   if (check.status === 0) return enterMergeReady(state, lane, check.stdout);
   if (check.status === 1) {
     lane.stage = 'waiting_review';
+    if (resetWait) {
+      lane.reviewRetryCount = 0;
+      lane.reviewRequestedAt = new Date().toISOString();
+    }
     lane.updatedAt = new Date().toISOString();
     lane.lastResult = source;
     writeLaneState(state);
@@ -1428,16 +1432,28 @@ function runDeepReviewCheck(state, lane, source = 'deep-check-review') {
   }
   if (check.status === 3) return enterReviewFix(state, lane, check.stdout || check.stderr);
   const reason = check.stderr || check.stdout || 'check-review-clear-once.sh failed';
+  const retryable = isTransientFailure(reason);
+  if (resetWait && retryable) {
+    lane.reviewRetryCount = 0;
+    lane.reviewRequestedAt = new Date().toISOString();
+  }
   markLaneFailure(state, lane, reason, {
-    retryable: isTransientFailure(reason),
+    retryable,
     source: 'check-review-clear-once',
   });
+  if (retryable) return false;
   emitBlocked([
     ['stage', 'check-review-clear-once'],
     ['lane', lane.id],
     ['reason', lane.blockedReason],
   ]);
   return true;
+}
+
+function shouldResetReviewWaitAfterProbe(truth, result) {
+  if (truth.probeState === 'head_changed' || truth.probeState === 'review_returned') return true;
+  if (truth.probeState !== 'changed') return false;
+  return result.retryDue === true || result.retryExpired === true;
 }
 
 function processWaitingLane(state, lane) {
@@ -1484,7 +1500,7 @@ function processWaitingLane(state, lane) {
   applyReviewTruthToLane(lane, mergeReviewTruth(laneReviewTruth(lane), truth));
   lane.lastProbeAt = lane.restFreshAt;
 
-  if (result.retryExpired === true) {
+  if (truth.probeState === 'retry_expired') {
     markLaneFailure(state, lane, 'review retry window expired without current-head clean review', {
       retryable: false,
       source: 'review-retry-expired',
@@ -1492,7 +1508,7 @@ function processWaitingLane(state, lane) {
     return false;
   }
 
-  if (result.retryDue === true && Number(lane.reviewRetryCount || 0) === 0) {
+  if (truth.probeState === 'retry_due' && Number(lane.reviewRetryCount || 0) === 0) {
     const resumed = resumeLaneOrFail(state, lane, 'resume-review-retry');
     if (!resumed.ok) {
       if (resumed.handoff === 'review_fix') {
@@ -1574,7 +1590,9 @@ function processWaitingLane(state, lane) {
     return false;
   }
   if (decision.action === 'deep-check-review') {
-    return runDeepReviewCheck(state, lane, decision.reason);
+    return runDeepReviewCheck(state, lane, decision.reason, {
+      resetWait: shouldResetReviewWaitAfterProbe(truth, result),
+    });
   }
   if (decision.action === 'block') {
     markLaneFailure(state, lane, decision.reason, {
