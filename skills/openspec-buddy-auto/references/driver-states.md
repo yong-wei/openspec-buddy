@@ -100,6 +100,24 @@ blocked
 retryable_blocked
 ```
 
+Review wait lanes additionally record minimal truth freshness:
+
+```text
+probeState
+requestState
+actionableState
+threadState
+restFreshAt
+threadsFreshAt
+threadsHead
+lastSignature
+```
+
+`probeState` and `requestState` come from lightweight REST probing. They may
+keep a lane waiting or trigger a deeper check, but they do not prove review
+clearance. `threadState` and `actionableState` come from the review-thread truth
+path and are valid only for the matching `threadsHead`.
+
 The scheduler remains single-writer. It may park a clean lane only after commit,
 push, current-head review request, matching PR head, clean worktree, and
 claim-worktree guard pass.
@@ -121,6 +139,10 @@ answers the current phase:
 
 Do not add repository-wide issue, PR, Project, or review-thread scans to the
 auto controller.
+
+`request_missing` is controller-owned recovery. It may request a new current-head
+review only after same-head thread truth is already clear; otherwise it must run
+the controlled deep review check first.
 
 ## Receipts
 

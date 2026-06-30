@@ -14,6 +14,7 @@ import {
   writeControllerState,
   writeInterrupt,
 } from './controller-state.mjs';
+import { reconcileControllerState } from './controller-reconciler.mjs';
 
 const autoScriptDir = path.dirname(fileURLToPath(import.meta.url));
 const singleDriver = process.env.OPENSPEC_BUDDY_AUTO_SINGLE_DRIVER || path.join(autoScriptDir, 'buddy-auto-driver.mjs');
@@ -262,12 +263,23 @@ function handleChildResult(state, result) {
     const next = writeInterrupt(state, {
       type: 'blocked',
       stage,
+      lane: parsed.fields.lane || '',
+      issue: parsed.fields.issue || state.target.issue,
+      pr: parsed.fields.pr || state.target.pr,
+      branch: parsed.fields.branch || '',
+      head: parsed.fields.head || state.reviewFix.head || '',
       blockedCode: stage || parsed.fields.reason || 'blocked',
+      reason: parsed.fields.reason || '',
       allowedWork: 'Fix only this blocker, then rerun buddy-auto.mjs.',
       child: state.mode,
     });
     emit('BLOCKED', [
       ['stage', stage],
+      ['lane', next.interrupt.lane],
+      ['issue', next.interrupt.issue],
+      ['pr', next.interrupt.pr],
+      ['branch', next.interrupt.branch],
+      ['head', next.interrupt.head],
       ['state_file', controllerStatePath()],
       ['allowed_work', next.interrupt.allowedWork],
       ['resume_action', 'rerun buddy-auto.mjs'],
@@ -328,6 +340,7 @@ function main() {
     throw error;
   }
 
+  state = reconcileControllerState(state).state;
   handleChildResult(state, runChild(state));
 }
 

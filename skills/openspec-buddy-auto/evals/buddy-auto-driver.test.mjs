@@ -20,7 +20,7 @@ function run(args, options = {}) {
   }
   return spawnSync('node', [helper, ...args], {
     cwd: options.cwd || repoRoot,
-    env: { ...env, ...options.env },
+    env: { ...env, OPENSPEC_BUDDY_AUTO_CONTROLLER_CHILD: '1', ...options.env },
     encoding: 'utf8',
   });
 }
@@ -295,6 +295,39 @@ const env = {
 }
 
 {
+  const verifyOnceStateDir = path.join(tmp, 'state-review-verify-once');
+  const verifyOnceCoreDir = path.join(tmp, 'core-review-verify-once');
+  const verifyOnceLogFile = path.join(tmp, 'commands-review-verify-once.log');
+  fs.mkdirSync(verifyOnceCoreDir, { recursive: true });
+  makeExecutable(path.join(verifyOnceCoreDir, 'claim-issue.sh'), `#!/usr/bin/env bash\necho "claim $*" >> ${JSON.stringify(verifyOnceLogFile)}\n`);
+  makeExecutable(path.join(verifyOnceCoreDir, 'find-issue-pr.sh'), `#!/usr/bin/env bash\necho "find-pr $*" >> ${JSON.stringify(verifyOnceLogFile)}\nprintf '%s\\n' '{"issue":675,"pr":707,"head":"exact-head","state":"OPEN","headRefName":"audit-remediation-arena-publication-context"}'\n`);
+  makeExecutable(path.join(verifyOnceCoreDir, 'mark-review.sh'), `#!/usr/bin/env bash\necho "mark-review $*" >> ${JSON.stringify(verifyOnceLogFile)}\n`);
+  makeExecutable(path.join(verifyOnceCoreDir, 'wait-for-review-clear.sh'), `#!/usr/bin/env bash\necho "wait-review $*" >> ${JSON.stringify(verifyOnceLogFile)}\n`);
+  makeExecutable(path.join(verifyOnceCoreDir, 'verify-review-clear.sh'), `#!/usr/bin/env bash\necho "verify-review $*" >> ${JSON.stringify(verifyOnceLogFile)}\n`);
+  makeExecutable(path.join(verifyOnceCoreDir, 'verify-achieved-truth.mjs'), `#!/usr/bin/env node\nconsole.log(JSON.stringify({achieved:false,next:'merge-pr',reason:'PR is not merged'}));\n`);
+  const result = run([], {
+    env: {
+      OPENSPEC_BUDDY_AUTO_STATE_DIR: verifyOnceStateDir,
+      OPENSPEC_BUDDY_CORE_SCRIPT_DIR: verifyOnceCoreDir,
+      OPENSPEC_BUDDY_AUTO_TARGET_ISSUE: '675',
+      OPENSPEC_BUDDY_AUTO_REVIEW_WAIT_MODE: 'verify-once',
+    },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^DONE/m);
+  assert.match(result.stdout, /stage: review_clear/);
+  assert.equal(fs.readFileSync(verifyOnceLogFile, 'utf8').trim(), [
+    'claim 675',
+    'find-pr 675',
+    'mark-review 675 707',
+    'verify-review 707',
+  ].join('\n'));
+  const state = JSON.parse(fs.readFileSync(path.join(verifyOnceStateDir, 'pr-707.json'), 'utf8'));
+  assert.ok(state.stages.review_clear);
+  assert.equal(state.stages.merge_gates_passed, undefined);
+}
+
+{
   const mergedBridgeStateDir = path.join(tmp, 'state-merged-bridge');
   const mergedBridgeCoreDir = path.join(tmp, 'core-merged-bridge');
   const mergedBridgeLogFile = path.join(tmp, 'commands-merged-bridge.log');
@@ -515,7 +548,7 @@ const env = {
   const result = run(['--dry-run', '--issue', '12', '--pr', '34'], { env });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /stage: mark-review/);
-  assert.match(result.stdout, /mark-review\.sh 12 34/);
+  assert.match(result.stdout, /driver_internal: true/);
 }
 
 {

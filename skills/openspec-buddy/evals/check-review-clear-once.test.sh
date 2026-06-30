@@ -135,4 +135,39 @@ if [[ "$status" != "1" ]]; then
   exit 1
 fi
 
+cat > "$tmp_dir/verify-actionable.sh" <<'VERIFY'
+#!/bin/bash
+set -euo pipefail
+echo "unresolved review thread: PRRT_123 contains P1"
+exit 1
+VERIFY
+chmod +x "$tmp_dir/verify-actionable.sh"
+export OPENSPEC_BUDDY_VERIFY_REVIEW_CLEAR_HELPER="$tmp_dir/verify-actionable.sh"
+set +e
+bash "$helper" 123 >/tmp/check-review-clear-once-actionable.out 2>/tmp/check-review-clear-once-actionable.err
+status="$?"
+set -e
+if [[ "$status" != "3" ]]; then
+  echo "check-review-clear-once.sh should map actionable verifier failures to exit 3 (got $status)" >&2
+  exit 1
+fi
+
+cat > "$tmp_dir/verify-mixed-actionable.sh" <<'VERIFY'
+#!/bin/bash
+set -euo pipefail
+echo "Latest review targets old-head, not current head head-1."
+echo "unresolved review thread: PRRT_123 contains P1"
+exit 1
+VERIFY
+chmod +x "$tmp_dir/verify-mixed-actionable.sh"
+export OPENSPEC_BUDDY_VERIFY_REVIEW_CLEAR_HELPER="$tmp_dir/verify-mixed-actionable.sh"
+set +e
+bash "$helper" 123 >/tmp/check-review-clear-once-mixed.out 2>/tmp/check-review-clear-once-mixed.err
+status="$?"
+set -e
+if [[ "$status" != "3" ]]; then
+  echo "check-review-clear-once.sh should prefer actionable over stale-head waitable text (got $status)" >&2
+  exit 1
+fi
+
 echo "check-review-clear-once tests passed"
