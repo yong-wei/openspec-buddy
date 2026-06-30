@@ -1657,7 +1657,8 @@ console.log('stage: achieved');
   assert.match(log, /check 707/);
   const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
   assert.equal(state.lanes[0].stage, 'waiting_review');
-  assert.equal(state.lanes[0].reviewRetryCount, 1);
+  assert.equal(state.lanes[0].reviewRetryCount, 0);
+  assert.notEqual(state.lanes[0].reviewRequestedAt, '2000-01-01T00:00:00.000Z');
   assert.equal(state.lanes[0].lastSignature, 'new-sig');
 }
 

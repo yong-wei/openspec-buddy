@@ -1403,7 +1403,7 @@ function enterMergeReady(state, lane, output = '') {
   return true;
 }
 
-function runDeepReviewCheck(state, lane, source = 'deep-check-review') {
+function runDeepReviewCheck(state, lane, source = 'deep-check-review', { resetWait = false } = {}) {
   const resumed = resumeLaneOrFail(state, lane, 'resume-lane');
   if (!resumed.ok) {
     if (resumed.handoff === 'review_fix') {
@@ -1421,6 +1421,10 @@ function runDeepReviewCheck(state, lane, source = 'deep-check-review') {
   if (check.status === 0) return enterMergeReady(state, lane, check.stdout);
   if (check.status === 1) {
     lane.stage = 'waiting_review';
+    if (resetWait) {
+      lane.reviewRetryCount = 0;
+      lane.reviewRequestedAt = new Date().toISOString();
+    }
     lane.updatedAt = new Date().toISOString();
     lane.lastResult = source;
     writeLaneState(state);
@@ -1574,7 +1578,9 @@ function processWaitingLane(state, lane) {
     return false;
   }
   if (decision.action === 'deep-check-review') {
-    return runDeepReviewCheck(state, lane, decision.reason);
+    return runDeepReviewCheck(state, lane, decision.reason, {
+      resetWait: ['changed', 'review_returned', 'head_changed'].includes(truth.probeState),
+    });
   }
   if (decision.action === 'block') {
     markLaneFailure(state, lane, decision.reason, {
