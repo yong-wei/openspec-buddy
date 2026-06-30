@@ -1624,6 +1624,97 @@ console.log('stage: achieved');
 }
 
 {
+  const envInfo = makeEnv('changed-signature-before-retry-due-deep-checks');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 1,
+    lanes: [
+      {
+        id: 'issue-675',
+        issue: '675',
+        change: 'change-675',
+        branch: 'change-675',
+        pr: '707',
+        head: 'head-1',
+        stage: 'waiting_review',
+        reviewRetryCount: 0,
+        reviewRequestedAt: '2000-01-01T00:00:00.000Z',
+        lastSignature: 'old-sig',
+        lastRequestState: 'present-current-head',
+      },
+    ],
+  }));
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '1',
+    OPENSPEC_BUDDY_REVIEW_RETRY_SECONDS: '1',
+    CURRENT_BRANCH: 'change-675',
+    CHECK_REVIEW_STATUS: '1',
+    PROBE_STATE_707: 'changed',
+    PROBE_SIGNATURE_707: 'new-sig',
+    PROBE_AGE_707: '901',
+    PROBE_RETRY_DUE_707: 'true',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.doesNotMatch(result.stdout, /^BLOCKED/m);
+  const log = fs.readFileSync(envInfo.logFile, 'utf8');
+  assert.match(log, /check 707/);
+  assert.doesNotMatch(log, /^request 707/m);
+  const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  assert.equal(state.lanes[0].stage, 'waiting_review');
+  assert.equal(state.lanes[0].reviewRetryCount, 0);
+  assert.notEqual(state.lanes[0].reviewRequestedAt, '2000-01-01T00:00:00.000Z');
+  assert.equal(state.lanes[0].lastSignature, 'new-sig');
+}
+
+{
+  const envInfo = makeEnv('own-retry-signature-change-does-not-reset-wait');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 1,
+    lanes: [
+      {
+        id: 'issue-675',
+        issue: '675',
+        change: 'change-675',
+        branch: 'change-675',
+        pr: '707',
+        head: 'head-1',
+        stage: 'waiting_review',
+        reviewRetryCount: 1,
+        reviewRequestedAt: '2026-06-28T00:00:00Z',
+        lastSignature: 'old-sig',
+        lastRequestState: 'present-current-head',
+      },
+    ],
+  }));
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '1',
+    OPENSPEC_BUDDY_REVIEW_RETRY_SECONDS: '900',
+    CURRENT_BRANCH: 'change-675',
+    CHECK_REVIEW_STATUS: '1',
+    PROBE_STATE_707: 'changed',
+    PROBE_SIGNATURE_707: 'new-sig',
+    PROBE_AGE_707: '60',
+    PROBE_RETRY_DUE_707: 'false',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.doesNotMatch(result.stdout, /^BLOCKED/m);
+  const log = fs.readFileSync(envInfo.logFile, 'utf8');
+  assert.match(log, /check 707/);
+  const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  assert.equal(state.lanes[0].stage, 'waiting_review');
+  assert.equal(state.lanes[0].reviewRetryCount, 1);
+  assert.equal(state.lanes[0].reviewRequestedAt, '2026-06-28T00:00:00Z');
+  assert.equal(state.lanes[0].lastSignature, 'new-sig');
+}
+
+{
   const envInfo = makeEnv('changed-signature-before-retry-expired-deep-checks');
   fs.mkdirSync(envInfo.stateDir, { recursive: true });
   fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({

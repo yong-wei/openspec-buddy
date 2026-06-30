@@ -1450,6 +1450,12 @@ function runDeepReviewCheck(state, lane, source = 'deep-check-review', { resetWa
   return true;
 }
 
+function shouldResetReviewWaitAfterProbe(truth, result) {
+  if (truth.probeState === 'head_changed' || truth.probeState === 'review_returned') return true;
+  if (truth.probeState !== 'changed') return false;
+  return result.retryDue === true || result.retryExpired === true;
+}
+
 function processWaitingLane(state, lane) {
   const prTruth = refreshWaitingLanePrTruth(state, lane);
   if (prTruth.handled) return prTruth.emitted;
@@ -1502,7 +1508,7 @@ function processWaitingLane(state, lane) {
     return false;
   }
 
-  if (result.retryDue === true && Number(lane.reviewRetryCount || 0) === 0) {
+  if (truth.probeState === 'retry_due' && Number(lane.reviewRetryCount || 0) === 0) {
     const resumed = resumeLaneOrFail(state, lane, 'resume-review-retry');
     if (!resumed.ok) {
       if (resumed.handoff === 'review_fix') {
@@ -1585,7 +1591,7 @@ function processWaitingLane(state, lane) {
   }
   if (decision.action === 'deep-check-review') {
     return runDeepReviewCheck(state, lane, decision.reason, {
-      resetWait: ['changed', 'review_returned', 'head_changed'].includes(truth.probeState),
+      resetWait: shouldResetReviewWaitAfterProbe(truth, result),
     });
   }
   if (decision.action === 'block') {
