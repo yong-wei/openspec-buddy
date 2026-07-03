@@ -207,6 +207,139 @@ if ! grep -F -- "本轮是 review wait retry" "$GH_COMMENT_LOG_FILE" >/dev/null;
   exit 1
 fi
 
+cat > "$tmp_dir/comments-clear.json" <<JSON
+[
+  {
+    "body": "$OPENSPEC_BUDDY_PR_REVIEW_REQUEST",
+    "created_at": "2026-01-01T00:03:00Z",
+    "html_url": "https://example.test/pr/123#issuecomment-request"
+  },
+  {
+    "user": { "login": "chatgpt-codex-connector[bot]" },
+    "body": "Codex Review: Didn't find any major issues.",
+    "created_at": "2026-01-01T00:04:00Z",
+    "html_url": "https://example.test/pr/123#issuecomment-clear"
+  }
+]
+JSON
+export GH_COMMENTS_FILE="$tmp_dir/comments-clear.json"
+export GH_COMMENT_LOG_FILE="$tmp_dir/comment-already-clear.log"
+: > "$GH_LOG_FILE"
+rm -f "$GH_COMMENT_LOG_FILE"
+bash "$helper" 123 --force --context-file "$tmp_dir/force-review-context.md" > "$tmp_dir/already-clear.out"
+if [[ -e "$GH_COMMENT_LOG_FILE" ]]; then
+  echo "request-pr-review.sh --force must not post when current head is already clear" >&2
+  exit 1
+fi
+if ! grep -F 'PR review already clear' "$tmp_dir/already-clear.out" >/dev/null; then
+  echo "request-pr-review.sh did not report already-clear gate" >&2
+  cat "$tmp_dir/already-clear.out" >&2
+  exit 1
+fi
+if ! grep -F 'api graphql' "$GH_LOG_FILE" >/dev/null; then
+  echo "request-pr-review.sh should verify reviewThreads before accepting a clear comment" >&2
+  exit 1
+fi
+
+cat > "$tmp_dir/reviews-clear.json" <<JSON
+[
+  {
+    "user": { "login": "chatgpt-codex-connector[bot]" },
+    "state": "COMMENTED",
+    "body": "Codex Review: Didn't find any major issues.",
+    "commit_id": "head-1",
+    "submitted_at": "2026-01-01T00:04:00Z"
+  }
+]
+JSON
+export GH_COMMENTS_FILE="$tmp_dir/comments-present.json"
+export GH_REVIEWS_FILE="$tmp_dir/reviews-clear.json"
+export GH_COMMENT_LOG_FILE="$tmp_dir/comment-already-clear-review.log"
+: > "$GH_LOG_FILE"
+rm -f "$GH_COMMENT_LOG_FILE"
+bash "$helper" 123 --force --context-file "$tmp_dir/force-review-context.md" > "$tmp_dir/already-clear-review.out"
+if [[ -e "$GH_COMMENT_LOG_FILE" ]]; then
+  echo "request-pr-review.sh --force must not post when current head already has a clear review" >&2
+  exit 1
+fi
+if ! grep -F 'PR review already clear' "$tmp_dir/already-clear-review.out" >/dev/null; then
+  echo "request-pr-review.sh did not report already-clear review gate" >&2
+  cat "$tmp_dir/already-clear-review.out" >&2
+  exit 1
+fi
+if ! grep -F 'api graphql' "$GH_LOG_FILE" >/dev/null; then
+  echo "request-pr-review.sh should verify reviewThreads before accepting a clear review" >&2
+  exit 1
+fi
+
+cat > "$tmp_dir/reviews-approved.json" <<JSON
+[
+  {
+    "user": { "login": "chatgpt-codex-connector[bot]" },
+    "state": "APPROVED",
+    "body": "",
+    "commit_id": "head-1",
+    "submitted_at": "2026-01-01T00:04:00Z"
+  }
+]
+JSON
+export GH_COMMENTS_FILE="$tmp_dir/comments-present.json"
+export GH_REVIEWS_FILE="$tmp_dir/reviews-approved.json"
+export GH_COMMENT_LOG_FILE="$tmp_dir/comment-approved-clear-review.log"
+: > "$GH_LOG_FILE"
+rm -f "$GH_COMMENT_LOG_FILE"
+bash "$helper" 123 --force --context-file "$tmp_dir/force-review-context.md" > "$tmp_dir/approved-clear-review.out"
+if [[ -e "$GH_COMMENT_LOG_FILE" ]]; then
+  echo "request-pr-review.sh --force must not post when current head already has an approved review" >&2
+  exit 1
+fi
+if ! grep -F 'PR review already clear' "$tmp_dir/approved-clear-review.out" >/dev/null; then
+  echo "request-pr-review.sh did not report already-clear approved review gate" >&2
+  cat "$tmp_dir/approved-clear-review.out" >&2
+  exit 1
+fi
+if ! grep -F 'api graphql' "$GH_LOG_FILE" >/dev/null; then
+  echo "request-pr-review.sh should verify reviewThreads before accepting an approved review" >&2
+  exit 1
+fi
+
+cat > "$tmp_dir/comments-newer-request.json" <<JSON
+[
+  {
+    "body": "$OPENSPEC_BUDDY_PR_REVIEW_REQUEST",
+    "created_at": "2026-01-01T00:05:00Z",
+    "html_url": "https://example.test/pr/123#issuecomment-newer-request"
+  }
+]
+JSON
+cat > "$tmp_dir/reviews-stale-clear.json" <<JSON
+[
+  {
+    "user": { "login": "chatgpt-codex-connector[bot]" },
+    "state": "COMMENTED",
+    "body": "Codex Review: Didn't find any major issues.",
+    "commit_id": "head-1",
+    "submitted_at": "2026-01-01T00:03:00Z"
+  }
+]
+JSON
+export GH_COMMENTS_FILE="$tmp_dir/comments-newer-request.json"
+export GH_REVIEWS_FILE="$tmp_dir/reviews-stale-clear.json"
+export GH_COMMENT_LOG_FILE="$tmp_dir/comment-stale-clear-review.log"
+: > "$GH_LOG_FILE"
+rm -f "$GH_COMMENT_LOG_FILE"
+bash "$helper" 123 --force --context-file "$tmp_dir/force-review-context.md" > "$tmp_dir/stale-clear-review.out"
+if ! grep -F -- "$OPENSPEC_BUDDY_PR_REVIEW_REQUEST" "$GH_COMMENT_LOG_FILE" >/dev/null; then
+  echo "request-pr-review.sh must request review when the clear review is older than the latest request" >&2
+  cat "$tmp_dir/stale-clear-review.out" >&2
+  exit 1
+fi
+if grep -F 'api graphql' "$GH_LOG_FILE" >/dev/null; then
+  echo "request-pr-review.sh must not run reviewThreads GraphQL for a stale clear review candidate" >&2
+  exit 1
+fi
+export GH_REVIEWS_FILE="$tmp_dir/reviews-empty.json"
+
 cat > "$tmp_dir/comments-missing.json" <<JSON
 []
 JSON

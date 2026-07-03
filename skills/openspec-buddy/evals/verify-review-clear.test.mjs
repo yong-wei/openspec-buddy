@@ -106,6 +106,17 @@ try {
   assert.equal(cleanBotReview.status, 0, cleanBotReview.stderr || cleanBotReview.stdout);
   assert.match(cleanBotReview.stdout, /Clearance source: latest review state COMMENTED/);
 
+  const cleanChineseBotReview = runVerify({
+    pr: basePr({
+      author: { login: `${reviewer}[bot]` },
+      state: 'COMMENTED',
+      body: '没有重大问题。',
+      commit: { oid: 'abc123' },
+    }),
+  });
+  assert.equal(cleanChineseBotReview.status, 0, cleanChineseBotReview.stderr || cleanChineseBotReview.stdout);
+  assert.match(cleanChineseBotReview.stdout, /Clearance source: latest review state COMMENTED/);
+
   const staleReviewWithUnrequestedClearComment = runVerify({
     pr: basePr(
       {

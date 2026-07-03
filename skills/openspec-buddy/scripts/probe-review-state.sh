@@ -63,11 +63,13 @@ head_sha="$(node -e 'const s=JSON.parse(process.argv[1]); process.stdout.write(s
 last_head_sha="${OPENSPEC_BUDDY_REVIEW_LAST_HEAD:-}"
 previous_request_state="${OPENSPEC_BUDDY_REVIEW_PREVIOUS_REQUEST_STATE:-}"
 request_state="$previous_request_state"
+clear_candidate='{"hasCandidate":false}'
 
 if [[ "$force_request_state" == "1" || "$signature" != "$last_signature" || -z "$request_state" ]]; then
   pr_file="$cache_dir/probe-pr-${pr_number}.json"
   commits_file="$cache_dir/probe-commits-${pr_number}.json"
   comments_file="$cache_dir/probe-issue-comments-${pr_number}.json"
+  reviews_file="$cache_dir/probe-reviews-${pr_number}.json"
   node -e '
 const fs = require("node:fs");
 const signature = JSON.parse(process.argv[1]);
@@ -75,7 +77,9 @@ process.stdout.write(`${JSON.stringify({ head: { sha: signature.head || "" } })}
 ' "$signature" > "$pr_file"
   buddy_gh_api_paginated_array "repos/$repo_nwo/pulls/$pr_number/commits?per_page=100" > "$commits_file"
   buddy_gh_api_paginated_array "repos/$repo_nwo/issues/$pr_number/comments?per_page=100" > "$comments_file"
+  buddy_gh_api_paginated_array "repos/$repo_nwo/pulls/$pr_number/reviews?per_page=100" > "$reviews_file"
   request_state="$(node "$script_dir/review-request-state.mjs" "$OPENSPEC_BUDDY_PR_REVIEW_REQUEST" "$pr_file" "$commits_file" "$comments_file")"
+  clear_candidate="$(node "$script_dir/current-head-clear-comment-candidate.mjs" "$OPENSPEC_BUDDY_PR_REVIEW_REQUEST" "$pr_file" "$commits_file" "$comments_file" "$reviews_file" "${OPENSPEC_BUDDY_PR_REVIEW_AUTHOR:-chatgpt-codex-connector}")"
 fi
 
 requested_at="${OPENSPEC_BUDDY_REVIEW_REQUESTED_AT:-}"
@@ -95,6 +99,10 @@ const retryAfter = Number(process.argv[5] || 900);
 const retryCount = Number(process.argv[6] || 0);
 const lastHead = process.argv[7] || "";
 const pr = process.argv[8] || "";
+let clearCandidate = {};
+try {
+  clearCandidate = JSON.parse(process.argv[9] || "{}");
+} catch {}
 const head = signature.head || "";
 let requestAgeSeconds = 0;
 const requestedTime = Date.parse(requestedAt);
@@ -118,5 +126,7 @@ process.stdout.write(`${JSON.stringify({
   requestAgeSeconds,
   retryDue: requestAgeSeconds >= retryAfter && retryCount === 0,
   retryExpired: requestAgeSeconds >= retryAfter && retryCount > 0,
+  clearCandidate: Boolean(clearCandidate.hasCandidate),
+  clearCandidateSource: clearCandidate.source || "",
 })}\n`);
-' "$signature" "$last_signature" "$request_state" "$requested_at" "$retry_after" "$retry_count" "$last_head_sha" "$pr_number"
+' "$signature" "$last_signature" "$request_state" "$requested_at" "$retry_after" "$retry_count" "$last_head_sha" "$pr_number" "$clear_candidate"

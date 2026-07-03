@@ -54,6 +54,12 @@ if [[ "$1" == "api" && "${2:-}" == "--paginate" && "${3:-}" == "--slurp" && "${4
   printf ']\n'
   exit 0
 fi
+if [[ "$1" == "api" && "${2:-}" == "--paginate" && "${3:-}" == "--slurp" && "${4:-}" == */pulls/123/reviews* ]]; then
+  printf '['
+  cat "${GH_REVIEWS_FILE:?}"
+  printf ']\n'
+  exit 0
+fi
 if [[ "$1" == "api" && "$2" == "graphql" ]]; then
   echo "probe-review-state.sh must not call GraphQL" >&2
   exit 99
@@ -88,6 +94,8 @@ fs.writeFileSync(process.argv[1], JSON.stringify([{ body: process.env.OPENSPEC_B
 export GH_PR_FILE="$tmp_dir/pr.json"
 export GH_COMMITS_FILE="$tmp_dir/commits.json"
 export GH_COMMENTS_FILE="$tmp_dir/comments.json"
+printf '[]\n' > "$tmp_dir/reviews.json"
+export GH_REVIEWS_FILE="$tmp_dir/reviews.json"
 
 first_output="$(bash "$helper" 123)"
 node -e '
@@ -115,5 +123,128 @@ if grep -E 'commits|issues/123/comments|graphql' "$GH_LOG_FILE" >/dev/null; then
   cat "$GH_LOG_FILE" >&2
   exit 1
 fi
+if grep -E 'pulls/123/reviews' "$GH_LOG_FILE" >/dev/null; then
+  echo "probe-review-state.sh should not fetch reviews when signature is unchanged" >&2
+  cat "$GH_LOG_FILE" >&2
+  exit 1
+fi
+
+: > "$GH_LOG_FILE"
+cat > "$tmp_dir/pr-comment-clear.json" <<'JSON'
+{
+  "number": 123,
+  "state": "open",
+  "updated_at": "2026-01-01T00:02:00Z",
+  "comments": 2,
+  "review_comments": 0,
+  "commits": 1,
+  "head": { "sha": "head-1", "ref": "buddy-test-branch" }
+}
+JSON
+node -e '
+const fs = require("node:fs");
+fs.writeFileSync(process.argv[1], JSON.stringify([
+  { body: process.env.OPENSPEC_BUDDY_PR_REVIEW_REQUEST, created_at: "2026-01-01T00:01:00Z" },
+  { user: { login: "chatgpt-codex-connector[bot]" }, body: "Codex Review: Didn'\''t find any major issues.", created_at: "2026-01-01T00:03:00Z" }
+]));
+' "$tmp_dir/comments-clear.json"
+export GH_PR_FILE="$tmp_dir/pr-comment-clear.json"
+export GH_COMMENTS_FILE="$tmp_dir/comments-clear.json"
+clear_output="$(bash "$helper" 123)"
+node -e '
+const result = JSON.parse(process.argv[1]);
+if (result.state !== "changed") throw new Error(`expected changed, got ${result.state}`);
+if (result.clearCandidate !== true) throw new Error("expected clearCandidate");
+if (result.clearCandidateSource !== "top-level-comment") throw new Error(`wrong source ${result.clearCandidateSource}`);
+' "$clear_output"
+if grep -F 'api graphql' "$GH_LOG_FILE" >/dev/null; then
+  echo "probe-review-state.sh must not call GraphQL for clear candidate detection" >&2
+  cat "$GH_LOG_FILE" >&2
+  exit 1
+fi
+
+: > "$GH_LOG_FILE"
+cat > "$tmp_dir/comments-request-only.json" <<JSON
+[
+  { "body": "$OPENSPEC_BUDDY_PR_REVIEW_REQUEST", "created_at": "2026-01-01T00:01:00Z" }
+]
+JSON
+cat > "$tmp_dir/reviews-approved.json" <<'JSON'
+[
+  {
+    "user": { "login": "chatgpt-codex-connector[bot]" },
+    "state": "APPROVED",
+    "body": "",
+    "commit_id": "head-1",
+    "submitted_at": "2026-01-01T00:03:00Z"
+  }
+]
+JSON
+export GH_COMMENTS_FILE="$tmp_dir/comments-request-only.json"
+export GH_REVIEWS_FILE="$tmp_dir/reviews-approved.json"
+approved_output="$(bash "$helper" 123)"
+node -e '
+const result = JSON.parse(process.argv[1]);
+if (result.clearCandidate !== true) throw new Error("expected approved review candidate");
+if (result.clearCandidateSource !== "review") throw new Error(`wrong source ${result.clearCandidateSource}`);
+' "$approved_output"
+
+: > "$GH_LOG_FILE"
+cat > "$tmp_dir/comments-chinese-clear.json" <<JSON
+[
+  { "body": "$OPENSPEC_BUDDY_PR_REVIEW_REQUEST", "created_at": "2026-01-01T00:01:00Z" },
+  { "user": { "login": "chatgpt-codex-connector[bot]" }, "body": "Codex Review: 没有重大问题。", "created_at": "2026-01-01T00:03:00Z" }
+]
+JSON
+printf '[]\n' > "$tmp_dir/reviews-empty-chinese.json"
+export GH_COMMENTS_FILE="$tmp_dir/comments-chinese-clear.json"
+export GH_REVIEWS_FILE="$tmp_dir/reviews-empty-chinese.json"
+chinese_output="$(bash "$helper" 123)"
+node -e '
+const result = JSON.parse(process.argv[1]);
+if (result.clearCandidate !== true) throw new Error("expected Chinese clear comment candidate");
+if (result.clearCandidateSource !== "top-level-comment") throw new Error(`wrong source ${result.clearCandidateSource}`);
+' "$chinese_output"
+
+: > "$GH_LOG_FILE"
+cat > "$tmp_dir/comments-stale-clear.json" <<JSON
+[
+  { "user": { "login": "chatgpt-codex-connector[bot]" }, "body": "Codex Review: Didn't find any major issues.", "created_at": "2026-01-01T00:03:00Z" },
+  { "body": "$OPENSPEC_BUDDY_PR_REVIEW_REQUEST", "created_at": "2026-01-01T00:05:00Z" }
+]
+JSON
+printf '[]\n' > "$tmp_dir/reviews-empty-again.json"
+export GH_COMMENTS_FILE="$tmp_dir/comments-stale-clear.json"
+export GH_REVIEWS_FILE="$tmp_dir/reviews-empty-again.json"
+stale_comment_output="$(bash "$helper" 123)"
+node -e '
+const result = JSON.parse(process.argv[1]);
+if (result.clearCandidate !== false) throw new Error("stale top-level clear comment must not be a candidate");
+' "$stale_comment_output"
+
+: > "$GH_LOG_FILE"
+cat > "$tmp_dir/comments-request-newer.json" <<JSON
+[
+  { "body": "$OPENSPEC_BUDDY_PR_REVIEW_REQUEST", "created_at": "2026-01-01T00:05:00Z" }
+]
+JSON
+cat > "$tmp_dir/reviews-stale-clear.json" <<'JSON'
+[
+  {
+    "user": { "login": "chatgpt-codex-connector[bot]" },
+    "state": "COMMENTED",
+    "body": "Codex Review: Didn't find any major issues.",
+    "commit_id": "head-1",
+    "submitted_at": "2026-01-01T00:03:00Z"
+  }
+]
+JSON
+export GH_COMMENTS_FILE="$tmp_dir/comments-request-newer.json"
+export GH_REVIEWS_FILE="$tmp_dir/reviews-stale-clear.json"
+stale_review_output="$(bash "$helper" 123)"
+node -e '
+const result = JSON.parse(process.argv[1]);
+if (result.clearCandidate !== false) throw new Error("stale clear review must not be a candidate");
+' "$stale_review_output"
 
 echo "probe-review-state tests passed"

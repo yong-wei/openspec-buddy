@@ -101,7 +101,7 @@ function priorityMarkers(text) {
 }
 
 function isExplicitlyClear(text) {
-  return /no actionable findings|no significant issues|no major problems|no major issues|did(?:n't| not) find any major issues|no findings|nothing actionable/i.test(String(text || ''));
+  return /no actionable findings|no significant issues|no major problems|no major issues|did(?:n't| not) find any major issues|no findings|nothing actionable|没有重大问题|未发现重大问题|无重大问题|没有发现重大问题/i.test(String(text || ''));
 }
 
 function isReviewRequest(text) {
