@@ -62,7 +62,11 @@ resolve_pr_number() {
 
 is_actionable_review_failure() {
   local output="$1"
-  if grep -E 'unresolved review thread|contains P[0-2]|requested changes|Latest COMMENTED review .*not an explicit' <<<"$output" >/dev/null; then
+  if grep -E 'unresolved review thread|contains P[0-2]|requested changes' <<<"$output" >/dev/null; then
+    return 0
+  fi
+  if grep -E 'Latest COMMENTED review .*not an explicit' <<<"$output" >/dev/null \
+    && ! grep -E 'targets .*,? not current head' <<<"$output" >/dev/null; then
     return 0
   fi
   return 1

@@ -135,6 +135,25 @@ if [[ "$status" != "1" ]]; then
   exit 1
 fi
 
+cat > "$tmp_dir/verify-stale-commented-review.sh" <<'VERIFY'
+#!/bin/bash
+set -euo pipefail
+echo "Review clearance verification failed:"
+echo "- Latest review from chatgpt-codex-connector[bot] targets old-head, not current head head-1."
+echo "- Latest COMMENTED review from chatgpt-codex-connector[bot] is not an explicit no-actionable-findings review."
+exit 1
+VERIFY
+chmod +x "$tmp_dir/verify-stale-commented-review.sh"
+export OPENSPEC_BUDDY_VERIFY_REVIEW_CLEAR_HELPER="$tmp_dir/verify-stale-commented-review.sh"
+set +e
+bash "$helper" 123 >/tmp/check-review-clear-once-stale-commented.out 2>/tmp/check-review-clear-once-stale-commented.err
+status="$?"
+set -e
+if [[ "$status" != "1" ]]; then
+  echo "check-review-clear-once.sh should treat stale-head COMMENTED review output as waitable (got $status)" >&2
+  exit 1
+fi
+
 cat > "$tmp_dir/verify-actionable.sh" <<'VERIFY'
 #!/bin/bash
 set -euo pipefail
