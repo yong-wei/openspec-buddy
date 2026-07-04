@@ -167,18 +167,18 @@ if [[ "\${PROBE_EMPTY_FOR:-}" == "\${1:-}" ]]; then
   exit 0
 fi
 if [[ "\${PROBE_CHANGED_RETRY_EXPIRED_FOR:-}" == "\${1:-}" ]]; then
-  printf '%s\\n' '{"pr":"707","head":"head-1","signature":"new-sig","requestState":"present-current-head","state":"changed","requestAgeSeconds":901,"retryDue":false,"retryExpired":true}'
+  printf '%s\\n' '{"pr":"707","head":"head-1","signature":"new-sig","requestState":"present-current-head","state":"changed","requestAgeSeconds":901,"retryDue":false,"retryExpired":true,"clearCandidate":false}'
   exit 0
 fi
 if [[ "\${PROBE_RETRY_EXPIRED:-0}" == "1" || "\${PROBE_RETRY_EXPIRED_FOR:-}" == "\${1:-}" ]]; then
-  printf '%s\\n' '{"pr":"707","head":"head-1","signature":"sig","requestState":"present-current-head","state":"waiting","requestAgeSeconds":901,"retryDue":false,"retryExpired":true}'
+  printf '%s\\n' '{"pr":"707","head":"head-1","signature":"sig","requestState":"present-current-head","state":"waiting","requestAgeSeconds":901,"retryDue":false,"retryExpired":true,"clearCandidate":false}'
   exit 0
 fi
 	pr="\${1:-707}"
 	if [[ "$pr" == "708" ]]; then
-	  printf '{"pr":"708","head":"%s","signature":"%s","requestState":"%s","state":"%s","requestAgeSeconds":60,"retryDue":false}\\n' "\${PROBE_HEAD_708:-head-2}" "\${PROBE_SIGNATURE_708:-sig-708}" "\${PROBE_REQUEST_STATE_708:-present-current-head}" "\${PROBE_STATE_708:-waiting}"
+	  printf '{"pr":"708","head":"%s","signature":"%s","requestState":"%s","state":"%s","requestAgeSeconds":60,"retryDue":false,"clearCandidate":%s}\\n' "\${PROBE_HEAD_708:-head-2}" "\${PROBE_SIGNATURE_708:-sig-708}" "\${PROBE_REQUEST_STATE_708:-present-current-head}" "\${PROBE_STATE_708:-waiting}" "\${PROBE_CLEAR_CANDIDATE_708:-false}"
 	else
-	  printf '{"pr":"707","head":"%s","signature":"%s","requestState":"%s","state":"%s","requestAgeSeconds":%s,"retryDue":%s}\\n' "\${PROBE_HEAD_707:-head-1}" "\${PROBE_SIGNATURE_707:-sig}" "\${PROBE_REQUEST_STATE_707:-present-current-head}" "\${PROBE_STATE_707:-waiting}" "\${PROBE_AGE_707:-60}" "\${PROBE_RETRY_DUE_707:-false}"
+	  printf '{"pr":"707","head":"%s","signature":"%s","requestState":"%s","state":"%s","requestAgeSeconds":%s,"retryDue":%s,"clearCandidate":%s}\\n' "\${PROBE_HEAD_707:-head-1}" "\${PROBE_SIGNATURE_707:-sig}" "\${PROBE_REQUEST_STATE_707:-present-current-head}" "\${PROBE_STATE_707:-waiting}" "\${PROBE_AGE_707:-60}" "\${PROBE_RETRY_DUE_707:-false}" "\${PROBE_CLEAR_CANDIDATE_707:-false}"
 	fi
 `);
   makeExecutable(path.join(coreDir, 'check-review-clear-once.sh'), `#!/bin/bash
@@ -1530,6 +1530,49 @@ console.log('stage: achieved');
 }
 
 {
+  const envInfo = makeEnv('retry-due-clear-precheck-enters-merge-ready');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 1,
+    lanes: [
+      {
+        id: 'issue-675',
+        issue: '675',
+        change: 'change-675',
+        branch: 'change-675',
+        pr: '707',
+        head: 'head-1',
+        stage: 'waiting_review',
+        reviewRetryCount: 0,
+        reviewRequestedAt: '2000-01-01T00:00:00.000Z',
+        lastRequestState: 'present-current-head',
+      },
+    ],
+  }));
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '1',
+    CURRENT_BRANCH: 'change-676',
+    PROBE_RETRY_DUE_707: 'true',
+    PROBE_AGE_707: '901',
+    PROBE_CLEAR_CANDIDATE_707: 'true',
+    CHECK_REVIEW_STATUS: '0',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^HANDOFF/m);
+  assert.match(result.stdout, /^stage: merge-ready$/m);
+  const log = fs.readFileSync(envInfo.logFile, 'utf8');
+  assert.match(log, /switch change-675/);
+  assert.match(log, /check 707/);
+  assert.doesNotMatch(log, /^request 707/m);
+  const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  assert.equal(state.lanes[0].stage, 'merge_ready');
+  assert.equal(state.lanes[0].reviewRetryCount, 0);
+}
+
+{
   const envInfo = makeEnv('retry-due-resumes-branch-and-dedupes-marker');
   fs.mkdirSync(envInfo.stateDir, { recursive: true });
   fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
@@ -1558,12 +1601,14 @@ console.log('stage: achieved');
     PROBE_RETRY_DUE_707: 'true',
     PROBE_AGE_707: '901',
     RETRY_MARKER_EXISTS: '1',
+    CHECK_REVIEW_STATUS: '1',
   });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /^DONE/m);
   const log = fs.readFileSync(envInfo.logFile, 'utf8');
   assert.match(log, /switch change-675/);
   assert.match(log, /verify-claim --issue 675 --pr 707/);
+  assert.doesNotMatch(log, /check 707/);
   assert.doesNotMatch(log, /request 707 --force/);
   const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
   assert.equal(state.lanes[0].stage, 'waiting_review');

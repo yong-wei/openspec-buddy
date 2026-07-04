@@ -1509,6 +1509,12 @@ function processWaitingLane(state, lane) {
   }
 
   if (truth.probeState === 'retry_due' && Number(lane.reviewRetryCount || 0) === 0) {
+    if (result.clearCandidate === true) {
+      const precheckEmitted = runDeepReviewCheck(state, lane, 'retry-due-clear-precheck');
+      if (precheckEmitted) return true;
+      if (lane.stage !== 'waiting_review') return false;
+    }
+
     const resumed = resumeLaneOrFail(state, lane, 'resume-review-retry');
     if (!resumed.ok) {
       if (resumed.handoff === 'review_fix') {
