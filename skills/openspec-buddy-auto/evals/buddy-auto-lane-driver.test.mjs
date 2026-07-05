@@ -215,6 +215,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 const issue = process.env.OPENSPEC_BUDDY_AUTO_TARGET_ISSUE || process.env.OPENSPEC_BUDDY_AUTO_ISSUE || '';
 const pr = process.env.OPENSPEC_BUDDY_AUTO_PR || '';
+fs.appendFileSync(${JSON.stringify(logFile)}, 'driver-env targetIssue=' + (process.env.OPENSPEC_BUDDY_AUTO_TARGET_ISSUE || '') + ' targetPr=' + (process.env.OPENSPEC_BUDDY_AUTO_TARGET_PR || '') + ' lanePr=' + (process.env.OPENSPEC_BUDDY_AUTO_PR || '') + ' head=' + (process.env.OPENSPEC_BUDDY_AUTO_HEAD || '') + ' change=' + (process.env.OPENSPEC_BUDDY_AUTO_CHANGE || '') + ' changeId=' + (process.env.OPENSPEC_BUDDY_AUTO_CHANGE_ID || '') + ' reviewFix=' + (process.env.OPENSPEC_BUDDY_REVIEW_FIX_CONTEXT || '') + '\\n');
 if (process.env.OPENSPEC_BUDDY_AUTO_TARGET_ISSUE) {
   fs.appendFileSync(${JSON.stringify(logFile)}, 'claim ' + process.env.OPENSPEC_BUDDY_AUTO_TARGET_ISSUE + '\\n');
 }
@@ -295,6 +296,34 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
   assert.match(log, /claim 676/);
   const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
   assert.ok(state.lanes.some((lane) => lane.issue === '676' && lane.stage === 'implementing'));
+}
+
+{
+  const envInfo = makeEnv('claim-next-clears-inherited-target-pr');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 1,
+    lanes: [
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0 },
+    ],
+  }));
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '2',
+    OPENSPEC_BUDDY_AUTO_TARGET_PR: '707',
+    OPENSPEC_BUDDY_AUTO_PR: '707',
+    OPENSPEC_BUDDY_AUTO_HEAD: 'head-1',
+    OPENSPEC_BUDDY_AUTO_CHANGE: 'change-675',
+    OPENSPEC_BUDDY_AUTO_CHANGE_ID: 'change-675',
+    OPENSPEC_BUDDY_REVIEW_FIX_CONTEXT: '1',
+    CURRENT_BRANCH: 'dev1',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const log = fs.readFileSync(envInfo.logFile, 'utf8');
+  assert.match(log, /driver-env targetIssue=676 targetPr= lanePr= head= change= changeId= reviewFix=/);
+  assert.match(log, /claim 676/);
 }
 
 {

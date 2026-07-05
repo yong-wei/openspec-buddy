@@ -169,6 +169,15 @@ function parseSelection(stdout) {
   }
 }
 
+function parseStaleClaimCandidates(stdout) {
+  try {
+    const data = JSON.parse(stdout || '{}');
+    return Array.isArray(data.stale_claim_candidates) ? data.stale_claim_candidates : [];
+  } catch {
+    return [];
+  }
+}
+
 function isTransientFailure(output) {
   return /\b(EOF|timeout|timed out|ECONNRESET|ETIMEDOUT|rate.?limit|secondary rate|abuse detection|502|503|504)\b/i
     .test(String(output || ''));
@@ -237,9 +246,21 @@ function runSingleDriverForIssue(issue) {
     allowFailure: true,
     env: {
       OPENSPEC_BUDDY_AUTO_TARGET_ISSUE: String(issue),
+      OPENSPEC_BUDDY_AUTO_TARGET_PR: '',
+      OPENSPEC_BUDDY_AUTO_ISSUE: '',
+      OPENSPEC_BUDDY_AUTO_PR: '',
+      OPENSPEC_BUDDY_AUTO_HEAD: '',
+      OPENSPEC_BUDDY_AUTO_CHANGE: '',
+      OPENSPEC_BUDDY_AUTO_CHANGE_ID: '',
+      OPENSPEC_BUDDY_REVIEW_FIX_CONTEXT: '',
       OPENSPEC_BUDDY_AUTO_REVIEW_WAIT_MODE: 'yield',
     },
   });
+}
+
+function verifyCurrentWorktreeClaim(issue) {
+  if (!issue) return { status: 1, stdout: '', stderr: 'missing issue' };
+  return run(path.join(coreScriptDir, 'verify-claim-worktree.sh'), ['--issue', String(issue)], { allowFailure: true });
 }
 
 function runSingleDriverForLane(lane) {
@@ -815,6 +836,7 @@ function claimNextIssue(state, opts) {
   }
   const selected = parseSelection(selectionResult.stdout);
   if (!selected) {
+    if (recoverCurrentWorktreeStaleClaim(state, selectionResult.stdout)) return true;
     if (emitBlockedLaneSummaryIfTerminal(state)) return true;
     const unfinishedLanes = state.lanes.filter((lane) => lane.stage !== 'done');
     if (unfinishedLanes.length === 0) {
@@ -834,10 +856,26 @@ function claimNextIssue(state, opts) {
     ], selectionResult.stdout);
     return true;
   }
+  return advanceIssueFromSingleDriver(state, selected, 'claim-next-issue');
+}
+
+function recoverCurrentWorktreeStaleClaim(state, selectorStdout) {
+  const candidates = parseStaleClaimCandidates(selectorStdout)
+    .filter((candidate) => candidate && candidate.number)
+    .sort((left, right) => Number(left.number) - Number(right.number));
+  for (const candidate of candidates) {
+    const verification = verifyCurrentWorktreeClaim(candidate.number);
+    if (verification.status !== 0) continue;
+    return advanceIssueFromSingleDriver(state, candidate, 'recover-stale-claim');
+  }
+  return false;
+}
+
+function advanceIssueFromSingleDriver(state, selected, sourceStage) {
   const driver = runSingleDriverForIssue(selected.number);
   if (driver.status !== 0) {
     emitBlocked([
-      ['stage', 'claim-next-issue'],
+      ['stage', sourceStage],
       ['issue', selected.number],
       ['reason', 'buddy-auto-driver failed'],
     ], driver.stderr || driver.stdout);
@@ -857,7 +895,7 @@ function claimNextIssue(state, opts) {
   const parkResult = parkLaneFromDriverReceipt(state, lane, parsed, driverState);
   if (parkResult.status === 'blocked') {
     emitBlocked([
-      ['stage', 'claim-next-issue'],
+      ['stage', sourceStage],
       ['issue', selected.number],
       ['reason', parkResult.reason],
     ], driver.stdout);
