@@ -15,6 +15,7 @@ import {
   writeInterrupt,
 } from './controller-state.mjs';
 import { reconcileControllerState } from './controller-reconciler.mjs';
+import { readLaneState } from './lane-state.mjs';
 
 const autoScriptDir = path.dirname(fileURLToPath(import.meta.url));
 const singleDriver = process.env.OPENSPEC_BUDDY_AUTO_SINGLE_DRIVER || path.join(autoScriptDir, 'buddy-auto-driver.mjs');
@@ -121,6 +122,43 @@ function runChild(state) {
     encoding: 'utf8',
     stdio: 'pipe',
   });
+}
+
+function laneForIssue(state, issue) {
+  if (!issue) return null;
+  try {
+    const laneState = readLaneState({ maxLanes: state.maxLanes || 1 });
+    return (laneState.lanes || []).find((lane) => String(lane.issue || '') === String(issue)) || null;
+  } catch {
+    return null;
+  }
+}
+
+function syncTargetPrFromIssueLane(state) {
+  const issue = String(state.target?.issue || '');
+  const targetPr = String(state.target?.pr || '');
+  if (!issue || !targetPr) return state;
+  const lane = laneForIssue(state, issue);
+  if (!lane) return state;
+  const lanePr = String(lane.pr || '');
+  if (lanePr === targetPr) return state;
+
+  const nextPr = lanePr || '';
+  const next = {
+    ...state,
+    target: { ...state.target, pr: nextPr },
+  };
+  if (String(next.reviewFix?.pr || '') === targetPr && nextPr !== targetPr) {
+    next.reviewFix = { pending: false, head: '', pr: '', evidence: '' };
+  }
+  if (
+    next.interrupt
+    && String(next.interrupt.issue || '') === issue
+    && String(next.interrupt.pr || '') === targetPr
+  ) {
+    next.interrupt = { ...next.interrupt, pr: nextPr };
+  }
+  return writeControllerState(next);
 }
 
 function isReviewFixStage(stage) {
@@ -341,6 +379,7 @@ function main() {
   }
 
   state = reconcileControllerState(state).state;
+  state = syncTargetPrFromIssueLane(state);
   handleChildResult(state, runChild(state));
 }
 

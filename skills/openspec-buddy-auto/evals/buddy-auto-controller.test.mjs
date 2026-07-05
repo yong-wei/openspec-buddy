@@ -100,6 +100,8 @@ fs.appendFileSync(${JSON.stringify(logFile)}, JSON.stringify({
   child: 'lane',
   goal: process.env.OPENSPEC_BUDDY_AUTO_GOAL || '',
   lanes: process.env.OPENSPEC_BUDDY_AUTO_LANES || '',
+  targetIssue: process.env.OPENSPEC_BUDDY_AUTO_TARGET_ISSUE || '',
+  targetPr: process.env.OPENSPEC_BUDDY_AUTO_TARGET_PR || '',
   controllerChild: process.env.OPENSPEC_BUDDY_AUTO_CONTROLLER_CHILD || ''
 }) + '\\n');
 if (process.env.BUDDY_STUB_STATUS === 'BLOCKED') {
@@ -269,6 +271,154 @@ function controllerPath(envInfo) {
   assert.equal(state.target.issue, '675');
   assert.equal(state.target.change, 'change-675');
   assert.equal(state.interrupt.issue, '675');
+}
+
+{
+  const envInfo = makeEnv('issue-lane-clears-stale-target-pr');
+  process.env.PATH = `${envInfo.binDir}:${process.env.PATH}`;
+  process.env.OPENSPEC_BUDDY_AUTO_CONTROLLER_STATE_DIR = envInfo.stateDir;
+  process.env.OPENSPEC_BUDDY_AUTO_LANE_STATE_DIR = envInfo.laneDir;
+  let controllerState = controllerModule.initializeControllerState({
+    mode: 'multi',
+    goal: true,
+    maxLanes: '2',
+    issue: '822',
+    pr: '842',
+  }, { cwd: envInfo.repoDir });
+  assert.equal(controllerState.target.pr, '842');
+  controllerState = controllerModule.setReviewFix(controllerState, {
+    pending: true,
+    pr: '842',
+    head: 'stale-head',
+    evidence: 'response-gate-required',
+  }, { cwd: envInfo.repoDir });
+  controllerState = controllerModule.writeInterrupt(controllerState, {
+    type: 'handoff',
+    stage: 'implement-or-open-pr',
+    issue: '822',
+    pr: '842',
+    head: 'stale-head',
+    allowedWork: 'continue implementation',
+    child: 'multi',
+  }, { cwd: envInfo.repoDir });
+  assert.equal(controllerState.reviewFix.pr, '842');
+  assert.equal(controllerState.interrupt.pr, '842');
+  const laneState = laneStateModule.emptyLaneState({ cwd: envInfo.repoDir, maxLanes: 2 });
+  laneState.lanes.push({
+    id: 'issue-822',
+    issue: '822',
+    change: 'close-resource-disposition-review-backlog',
+    branch: 'close-resource-disposition-review-backlog',
+    pr: '',
+    head: '',
+    stage: 'implementing',
+  });
+  laneStateModule.writeLaneState(laneState, { cwd: envInfo.repoDir });
+  delete process.env.OPENSPEC_BUDDY_AUTO_CONTROLLER_STATE_DIR;
+  delete process.env.OPENSPEC_BUDDY_AUTO_LANE_STATE_DIR;
+
+  const result = run(envInfo, { BUDDY_STUB_STAGE: 'implement-or-open-pr' });
+  assert.equal(result.status, 0, result.stderr);
+  const log = readLog(envInfo);
+  assert.equal(log[0].child, 'lane');
+  assert.equal(log[0].targetIssue, '822');
+  assert.equal(log[0].targetPr, '');
+  const state = readController(envInfo);
+  assert.equal(state.target.issue, '822');
+  assert.equal(state.target.pr, '');
+  assert.equal(state.reviewFix.pending, false);
+  assert.equal(state.reviewFix.pr, '');
+  assert.equal(state.interrupt.issue, '822');
+  assert.equal(state.interrupt.pr, '');
+}
+
+{
+  const envInfo = makeEnv('issue-lane-keeps-matching-target-pr');
+  process.env.PATH = `${envInfo.binDir}:${process.env.PATH}`;
+  process.env.OPENSPEC_BUDDY_AUTO_CONTROLLER_STATE_DIR = envInfo.stateDir;
+  process.env.OPENSPEC_BUDDY_AUTO_LANE_STATE_DIR = envInfo.laneDir;
+  const controllerState = controllerModule.initializeControllerState({
+    mode: 'multi',
+    goal: true,
+    maxLanes: '2',
+    issue: '822',
+    pr: '842',
+  }, { cwd: envInfo.repoDir });
+  assert.equal(controllerState.target.pr, '842');
+  const laneState = laneStateModule.emptyLaneState({ cwd: envInfo.repoDir, maxLanes: 2 });
+  laneState.lanes.push({
+    id: 'issue-822',
+    issue: '822',
+    change: 'close-resource-disposition-review-backlog',
+    branch: 'close-resource-disposition-review-backlog',
+    pr: '842',
+    head: 'head-842',
+    stage: 'review_requested',
+  });
+  laneStateModule.writeLaneState(laneState, { cwd: envInfo.repoDir });
+  delete process.env.OPENSPEC_BUDDY_AUTO_CONTROLLER_STATE_DIR;
+  delete process.env.OPENSPEC_BUDDY_AUTO_LANE_STATE_DIR;
+
+  const result = run(envInfo, { BUDDY_STUB_STAGE: 'pr-review' });
+  assert.equal(result.status, 0, result.stderr);
+  const log = readLog(envInfo);
+  assert.equal(log[0].targetIssue, '822');
+  assert.equal(log[0].targetPr, '842');
+  const state = readController(envInfo);
+  assert.equal(state.target.issue, '822');
+  assert.equal(state.target.pr, '842');
+}
+
+{
+  const envInfo = makeEnv('issue-lane-preserves-unrelated-review-pr');
+  process.env.PATH = `${envInfo.binDir}:${process.env.PATH}`;
+  process.env.OPENSPEC_BUDDY_AUTO_CONTROLLER_STATE_DIR = envInfo.stateDir;
+  process.env.OPENSPEC_BUDDY_AUTO_LANE_STATE_DIR = envInfo.laneDir;
+  let controllerState = controllerModule.initializeControllerState({
+    mode: 'multi',
+    goal: true,
+    maxLanes: '2',
+    issue: '822',
+    pr: '842',
+  }, { cwd: envInfo.repoDir });
+  controllerState = controllerModule.setReviewFix(controllerState, {
+    pending: true,
+    pr: '999',
+    head: 'other-head',
+    evidence: 'response-gate-required',
+  }, { cwd: envInfo.repoDir });
+  controllerState = controllerModule.writeInterrupt(controllerState, {
+    type: 'handoff',
+    stage: 'fix-pr-review',
+    issue: '999',
+    pr: '999',
+    head: 'other-head',
+    allowedWork: 'fix unrelated review',
+    child: 'multi',
+  }, { cwd: envInfo.repoDir });
+  const laneState = laneStateModule.emptyLaneState({ cwd: envInfo.repoDir, maxLanes: 2 });
+  laneState.lanes.push({
+    id: 'issue-822',
+    issue: '822',
+    change: 'close-resource-disposition-review-backlog',
+    branch: 'close-resource-disposition-review-backlog',
+    pr: '',
+    head: '',
+    stage: 'implementing',
+  });
+  laneStateModule.writeLaneState(laneState, { cwd: envInfo.repoDir });
+  delete process.env.OPENSPEC_BUDDY_AUTO_CONTROLLER_STATE_DIR;
+  delete process.env.OPENSPEC_BUDDY_AUTO_LANE_STATE_DIR;
+
+  const result = run(envInfo, { BUDDY_STUB_STAGE: 'implement-or-open-pr' });
+  assert.equal(result.status, 0, result.stderr);
+  const state = readController(envInfo);
+  assert.equal(state.target.issue, '822');
+  assert.equal(state.target.pr, '');
+  assert.equal(state.reviewFix.pending, true);
+  assert.equal(state.reviewFix.pr, '999');
+  assert.equal(state.interrupt.issue, '822');
+  assert.equal(state.interrupt.pr, '');
 }
 
 {
