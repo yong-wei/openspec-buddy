@@ -143,7 +143,13 @@ fi
 printf '{"issue":%s,"pr":null,"reason":"no PR"}\\n' "$1"
 `);
   makeExecutable(path.join(coreDir, 'mark-in-progress.sh'), `#!/bin/bash\necho "mark-in-progress $*" >> ${JSON.stringify(logFile)}\n`);
-  makeExecutable(path.join(coreDir, 'mark-review.sh'), `#!/bin/bash\necho "mark-review $*" >> ${JSON.stringify(logFile)}\n`);
+  makeExecutable(path.join(coreDir, 'mark-review.sh'), `#!/bin/bash
+echo "mark-review $*" >> ${JSON.stringify(logFile)}
+if [[ "\${MARK_REVIEW_FAIL_FOR:-}" == "\${1:-}" ]]; then
+  echo "mark-review failed for \${1:-}" >&2
+  exit 42
+fi
+`);
   makeExecutable(path.join(coreDir, 'verify-claim-worktree.sh'), `#!/bin/bash
 echo "verify-claim $*" >> ${JSON.stringify(logFile)}
 if [[ "\${CLAIM_GUARD_FAIL:-0}" == "1" ]]; then
@@ -277,7 +283,7 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
 }
 
 {
-  const envInfo = makeEnv('claim-next');
+  const envInfo = makeEnv('waiting-review-status-sync-before-claim');
   fs.mkdirSync(envInfo.stateDir, { recursive: true });
   fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
     version: 1,
@@ -289,13 +295,69 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
   }));
   const result = run(envInfo, { OPENSPEC_BUDDY_AUTO_GOAL: '1', OPENSPEC_BUDDY_AUTO_LANES: '2', CURRENT_BRANCH: 'change-675' });
   assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^DONE/m);
+  assert.match(result.stdout, /^stage: mark-review$/m);
+  const log = fs.readFileSync(envInfo.logFile, 'utf8');
+  assert.match(log, /mark-review 675 707/);
+  assert.doesNotMatch(log, /select excludes=/);
+  assert.doesNotMatch(log, /claim 676/);
+  const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  const lane = state.lanes.find((candidate) => candidate.issue === '675');
+  assert.match(lane.reviewStatusSyncedAt, /^\d{4}-\d{2}-\d{2}T/);
+}
+
+{
+  const envInfo = makeEnv('claim-next');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 1,
+    lanes: [
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0, reviewStatusSyncedAt: '2026-06-28T00:00:00.000Z' },
+    ],
+  }));
+  const result = run(envInfo, { OPENSPEC_BUDDY_AUTO_GOAL: '1', OPENSPEC_BUDDY_AUTO_LANES: '2', CURRENT_BRANCH: 'change-675' });
+  assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /^HANDOFF/m);
   assert.match(result.stdout, /issue: 676/);
   const log = fs.readFileSync(envInfo.logFile, 'utf8');
   assert.match(log, /select excludes=\[\"675\"\]/);
+  assert.doesNotMatch(log, /mark-review 675 707/);
   assert.match(log, /claim 676/);
   const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
   assert.ok(state.lanes.some((lane) => lane.issue === '676' && lane.stage === 'implementing'));
+}
+
+{
+  const envInfo = makeEnv('waiting-review-mark-review-failure-blocks-new-claim');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 2,
+    lanes: [
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0 },
+    ],
+  }));
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '2',
+    CURRENT_BRANCH: 'dev1',
+    OPENSPEC_BUDDY_AUTO_TARGET_ISSUE: '676',
+    MARK_REVIEW_FAIL_FOR: '675',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^BLOCKED/m);
+  assert.match(result.stdout, /^stage: mark-review$/m);
+  const log = fs.readFileSync(envInfo.logFile, 'utf8');
+  assert.match(log, /mark-review 675 707/);
+  assert.doesNotMatch(log, /select excludes=/);
+  assert.doesNotMatch(log, /claim 676/);
+  const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  const lane = state.lanes.find((candidate) => candidate.issue === '675');
+  assert.equal(lane.stage, 'blocked');
+  assert.match(lane.blockedReason, /mark-review failed/);
 }
 
 {
@@ -306,7 +368,7 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
     worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
     maxLanes: 1,
     lanes: [
-      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0 },
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0, reviewStatusSyncedAt: '2026-06-28T00:00:00.000Z' },
     ],
   }));
   const result = run(envInfo, {
@@ -427,8 +489,8 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
     worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
     maxLanes: 2,
     lanes: [
-      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0, lastRequestState: 'present-current-head' },
-      { id: 'issue-676', issue: '676', change: 'change-676', branch: 'change-676', pr: '708', head: 'head-2', stage: 'blocked', blockedReason: 'needs human', reviewRetryCount: 0 },
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0, reviewStatusSyncedAt: '2026-06-28T00:00:00.000Z', lastRequestState: 'present-current-head' },
+      { id: 'issue-676', issue: '676', change: 'change-676', branch: 'change-676', pr: '708', head: 'head-2', stage: 'blocked', blockedReason: 'needs human', reviewRetryCount: 0, reviewStatusSyncedAt: '2026-06-28T00:00:00.000Z' },
     ],
   }));
   const result = run(envInfo, {
@@ -453,8 +515,8 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
     worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
     maxLanes: 2,
     lanes: [
-      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0, lastRequestState: 'present-current-head' },
-      { id: 'issue-676', issue: '676', change: 'change-676', branch: 'change-676', pr: '708', head: 'head-2', stage: 'blocked', blockedReason: 'GitHub API EOF', reviewRetryCount: 0 },
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0, reviewStatusSyncedAt: '2026-06-28T00:00:00.000Z', lastRequestState: 'present-current-head' },
+      { id: 'issue-676', issue: '676', change: 'change-676', branch: 'change-676', pr: '708', head: 'head-2', stage: 'blocked', blockedReason: 'GitHub API EOF', reviewRetryCount: 0, reviewStatusSyncedAt: '2026-06-28T00:00:00.000Z' },
     ],
   }));
   const result = run(envInfo, {
@@ -479,7 +541,7 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
     worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
     maxLanes: 1,
     lanes: [
-      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0, lastRequestState: 'present-current-head' },
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0, reviewStatusSyncedAt: '2026-06-28T00:00:00.000Z', lastRequestState: 'present-current-head' },
     ],
   }));
   const result = run(envInfo, {
@@ -505,7 +567,7 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
     worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
     maxLanes: 1,
     lanes: [
-      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0, lastRequestState: 'present-current-head' },
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0, reviewStatusSyncedAt: '2026-06-28T00:00:00.000Z', lastRequestState: 'present-current-head' },
     ],
   }));
   const result = run(envInfo, {
@@ -530,7 +592,7 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
     worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
     maxLanes: 1,
     lanes: [
-      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0, lastRequestState: 'present-current-head' },
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0, reviewStatusSyncedAt: '2026-06-28T00:00:00.000Z', lastRequestState: 'present-current-head' },
     ],
   }));
   const result = run(envInfo, {
@@ -555,7 +617,7 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
     worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
     maxLanes: 1,
     lanes: [
-      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0, lastRequestState: 'present-current-head' },
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0, reviewStatusSyncedAt: '2026-06-28T00:00:00.000Z', lastRequestState: 'present-current-head' },
     ],
   }));
   const result = run(envInfo, {
@@ -721,7 +783,7 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
     worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
     maxLanes: 2,
     lanes: [
-      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0, lastRequestState: 'present-current-head' },
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0, reviewStatusSyncedAt: '2026-06-28T00:00:00.000Z', lastRequestState: 'present-current-head' },
     ],
   }));
   const result = run(envInfo, {
@@ -747,7 +809,7 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
     worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
     maxLanes: 1,
     lanes: [
-      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0, lastRequestState: 'present-current-head' },
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0, reviewStatusSyncedAt: '2026-06-28T00:00:00.000Z', lastRequestState: 'present-current-head' },
     ],
   }));
   const result = run(envInfo, {
@@ -773,7 +835,7 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
     worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
     maxLanes: 1,
     lanes: [
-      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0, lastRequestState: 'present-current-head' },
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0, reviewStatusSyncedAt: '2026-06-28T00:00:00.000Z', lastRequestState: 'present-current-head' },
     ],
   }));
   const result = run(envInfo, {
@@ -800,7 +862,7 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
     worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
     maxLanes: 1,
     lanes: [
-      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0, lastRequestState: 'present-current-head' },
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0, reviewStatusSyncedAt: '2026-06-28T00:00:00.000Z', lastRequestState: 'present-current-head' },
     ],
   }));
   const result = run(envInfo, {
@@ -827,7 +889,7 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
     worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
     maxLanes: 1,
     lanes: [
-      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0, lastRequestState: 'present-current-head' },
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0, reviewStatusSyncedAt: '2026-06-28T00:00:00.000Z', lastRequestState: 'present-current-head' },
     ],
   }));
   const result = run(envInfo, {
@@ -983,8 +1045,8 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
     worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
     maxLanes: 2,
     lanes: [
-      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0, lastRequestState: 'present-current-head' },
-      { id: 'issue-676', issue: '676', change: 'change-676', branch: 'change-676', pr: '708', head: 'head-2', stage: 'waiting_review', reviewRetryCount: 0, lastRequestState: 'present-current-head' },
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0, reviewStatusSyncedAt: '2026-06-28T00:00:00.000Z', lastRequestState: 'present-current-head' },
+      { id: 'issue-676', issue: '676', change: 'change-676', branch: 'change-676', pr: '708', head: 'head-2', stage: 'waiting_review', reviewRetryCount: 0, reviewStatusSyncedAt: '2026-06-28T00:00:00.000Z', lastRequestState: 'present-current-head' },
     ],
   }));
   const result = run(envInfo, {
@@ -1067,7 +1129,7 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
     worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
     maxLanes: 2,
     lanes: [
-      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0 },
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0, reviewStatusSyncedAt: '2026-06-28T00:00:00.000Z' },
     ],
   }));
   const first = run(envInfo, { OPENSPEC_BUDDY_AUTO_GOAL: '1', OPENSPEC_BUDDY_AUTO_LANES: '2', CURRENT_BRANCH: 'change-675' });
@@ -1101,7 +1163,7 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
     worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
     maxLanes: 2,
     lanes: [
-      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0 },
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0, reviewStatusSyncedAt: '2026-06-28T00:00:00.000Z' },
     ],
   }));
   const result = run(envInfo, {
@@ -1125,7 +1187,7 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
     worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
     maxLanes: 2,
     lanes: [
-      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0 },
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0, reviewStatusSyncedAt: '2026-06-28T00:00:00.000Z' },
       { id: 'issue-676', issue: '676', change: 'change-676', branch: 'change-676', stage: 'implementing', reviewRetryCount: 0 },
     ],
   }));
@@ -1153,7 +1215,7 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
     worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
     maxLanes: 2,
     lanes: [
-      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0 },
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0, reviewStatusSyncedAt: '2026-06-28T00:00:00.000Z' },
       { id: 'issue-676', issue: '676', change: 'change-676', branch: 'change-676', stage: 'implementing', reviewRetryCount: 0 },
     ],
   }));
@@ -1239,7 +1301,7 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
     worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
     maxLanes: 2,
     lanes: [
-      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0 },
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0, reviewStatusSyncedAt: '2026-06-28T00:00:00.000Z' },
     ],
   }));
   const result = run(envInfo, {
@@ -1268,7 +1330,7 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
     worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
     maxLanes: 2,
     lanes: [
-      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0 },
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0, reviewStatusSyncedAt: '2026-06-28T00:00:00.000Z' },
     ],
   }));
   const result = run(envInfo, {
@@ -1294,7 +1356,7 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
     worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
     maxLanes: 2,
     lanes: [
-      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0 },
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0, reviewStatusSyncedAt: '2026-06-28T00:00:00.000Z' },
     ],
   }));
   const fakeState = path.join(envInfo.root, 'bad-driver-state.json');
@@ -1354,7 +1416,7 @@ console.log('state_file: ${fakeState}');
     worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
     maxLanes: 1,
     lanes: [
-      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0, lastRequestState: 'present-current-head' },
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0, reviewStatusSyncedAt: '2026-06-28T00:00:00.000Z', lastRequestState: 'present-current-head' },
     ],
   }));
   const result = run(envInfo, { OPENSPEC_BUDDY_AUTO_GOAL: '1', OPENSPEC_BUDDY_AUTO_LANES: '1', CURRENT_BRANCH: 'change-675' });
@@ -1632,8 +1694,8 @@ console.log('stage: achieved');
     worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
     maxLanes: 2,
     lanes: [
-      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0, lastRequestState: 'present-current-head' },
-      { id: 'issue-676', issue: '676', change: 'change-676', branch: 'change-676', pr: '708', head: 'head-2', stage: 'waiting_review', reviewRetryCount: 0, lastRequestState: 'present-current-head' },
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0, reviewStatusSyncedAt: '2026-06-28T00:00:00.000Z', lastRequestState: 'present-current-head' },
+      { id: 'issue-676', issue: '676', change: 'change-676', branch: 'change-676', pr: '708', head: 'head-2', stage: 'waiting_review', reviewRetryCount: 0, reviewStatusSyncedAt: '2026-06-28T00:00:00.000Z', lastRequestState: 'present-current-head' },
     ],
   }));
   const result = run(envInfo, { OPENSPEC_BUDDY_AUTO_GOAL: '1', OPENSPEC_BUDDY_AUTO_LANES: '2', CURRENT_BRANCH: 'dev1' });

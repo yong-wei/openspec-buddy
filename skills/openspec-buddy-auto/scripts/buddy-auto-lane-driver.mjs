@@ -881,6 +881,72 @@ function markIssueInReview(issue, pr) {
   return run(path.join(coreScriptDir, 'mark-review.sh'), [String(issue), String(pr)], { allowFailure: true });
 }
 
+function markLaneInReviewOrBlock(state, lane, source = 'mark-review') {
+  if (!lane.issue || !lane.pr) return false;
+  const branch = currentBranch();
+  if (lane.branch && branch && branch !== lane.branch) {
+    const resumed = resumeLane(lane);
+    if (resumed.status !== 0) {
+      const reason = resumed.stderr || resumed.stdout || 'resume lane failed before mark-review';
+      markLaneFailure(state, lane, reason, {
+        retryable: isTransientFailure(reason),
+        source: `${source}:resume-lane`,
+      });
+      emitBlocked([
+        ['stage', 'mark-review'],
+        ['lane', lane.id],
+        ['issue', lane.issue],
+        ['pr', lane.pr],
+        ['reason', lane.blockedReason],
+      ]);
+      return true;
+    }
+  }
+  const statusResult = markIssueInReview(lane.issue, lane.pr);
+  if (statusResult.status === 0) {
+    lane.lastResult = source;
+    lane.reviewStatusSyncedAt = new Date().toISOString();
+    lane.updatedAt = new Date().toISOString();
+    writeLaneState(state);
+    return false;
+  }
+  const persistedLane = state.lanes.find((candidate) => candidate.id === lane.id) || lane;
+  const reason = statusResult.stderr || statusResult.stdout || 'mark-review.sh failed';
+  markLaneFailure(state, persistedLane, reason, {
+    retryable: isTransientFailure(reason),
+    source,
+  });
+  emitBlocked([
+    ['stage', 'mark-review'],
+    ['lane', persistedLane.id],
+    ['issue', persistedLane.issue],
+    ['pr', persistedLane.pr],
+    ['reason', persistedLane.blockedReason],
+  ]);
+  return true;
+}
+
+function syncWaitingReviewStatusBeforeNewClaim(state) {
+  const waiting = state.lanes.filter((lane) => (
+    lane.stage === 'waiting_review'
+    && lane.issue
+    && lane.pr
+    && !lane.reviewStatusSyncedAt
+  ));
+  for (const lane of waiting) {
+    if (markLaneInReviewOrBlock(state, lane, 'mark-review-before-claim')) return true;
+    emitDone([
+      ['stage', 'mark-review'],
+      ['lane', lane.id],
+      ['issue', lane.issue],
+      ['pr', lane.pr],
+      ['reason', 'Waiting review lane status was synchronized before claiming more work; rerun the controller.'],
+    ]);
+    return true;
+  }
+  return false;
+}
+
 function resumeLaneOrFail(state, lane, source) {
   const result = resumeLane(lane);
   if (result.status === 0) return { ok: true };
@@ -911,6 +977,7 @@ function claimNextIssue(state, opts) {
   const activeCount = reservedLaneCount(state);
   if (activeCount >= state.maxLanes) return false;
   ensureBoundBranch();
+  if (syncWaitingReviewStatusBeforeNewClaim(state)) return true;
   const selectionResult = runSelector(state);
   if (selectionResult.status !== 0) {
     emitBlocked([
@@ -988,6 +1055,7 @@ function advanceIssueFromSingleDriver(state, selected, sourceStage) {
     return true;
   }
   if (parkResult.status === 'parked') {
+    if (markLaneInReviewOrBlock(state, parkResult.lane, sourceStage === 'recover-stale-claim' ? 'mark-review-recovered-lane' : 'mark-review-new-lane')) return true;
     emitHandoff([
       ['stage', parsed.stage],
       ['issue', selected.number],
@@ -1038,6 +1106,7 @@ function advanceTargetLaneFromSingleDriver(state, lane) {
     return true;
   }
   if (parkResult.status === 'parked') {
+    if (markLaneInReviewOrBlock(state, parkResult.lane, 'mark-review-target-lane')) return true;
     emitHandoff([
       ['stage', parsed.stage],
       ['issue', lane.issue],
@@ -1155,25 +1224,7 @@ function blockIfForegroundLaneNotParked(state) {
     return true;
   }
   if (parkResult.status === 'parked') {
-    if (lane.stage === 'review_fix') {
-      const statusResult = markIssueInReview(parkResult.lane.issue, parkResult.lane.pr);
-      if (statusResult.status !== 0) {
-        const persistedLane = state.lanes.find((candidate) => candidate.id === parkResult.lane.id) || parkResult.lane;
-        const reason = statusResult.stderr || statusResult.stdout || 'mark-review.sh failed after review fix';
-        markLaneFailure(state, persistedLane, reason, {
-          retryable: isTransientFailure(reason),
-          source: 'mark-review',
-        });
-        emitBlocked([
-          ['stage', 'mark-review'],
-          ['lane', persistedLane.id],
-          ['issue', persistedLane.issue],
-          ['pr', persistedLane.pr],
-          ['reason', persistedLane.blockedReason],
-        ]);
-        return true;
-      }
-    }
+    if (markLaneInReviewOrBlock(state, parkResult.lane, lane.stage === 'review_fix' ? 'mark-review-after-review-fix' : 'mark-review-foreground-lane')) return true;
     emitHandoff([
       ['stage', parsed.stage],
       ['lane', lane.id],
@@ -1350,25 +1401,7 @@ function advanceResumedLane(state, lane) {
     return true;
   }
   if (parkResult.status === 'parked') {
-    if (lane.stage === 'review_fix') {
-      const statusResult = markIssueInReview(parkResult.lane.issue, parkResult.lane.pr);
-      if (statusResult.status !== 0) {
-        const persistedLane = state.lanes.find((candidate) => candidate.id === parkResult.lane.id) || parkResult.lane;
-        const reason = statusResult.stderr || statusResult.stdout || 'mark-review.sh failed after review fix';
-        markLaneFailure(state, persistedLane, reason, {
-          retryable: isTransientFailure(reason),
-          source: 'mark-review',
-        });
-        emitBlocked([
-          ['stage', 'mark-review'],
-          ['lane', persistedLane.id],
-          ['issue', persistedLane.issue],
-          ['pr', persistedLane.pr],
-          ['reason', persistedLane.blockedReason],
-        ]);
-        return true;
-      }
-    }
+    if (markLaneInReviewOrBlock(state, parkResult.lane, lane.stage === 'review_fix' ? 'mark-review-after-review-fix' : 'mark-review-resumed-lane')) return true;
     emitHandoff([
       ['stage', parsed.stage],
       ['lane', lane.id],
@@ -1983,6 +2016,7 @@ function runScheduler(opts) {
       if (emitBlockedLaneSummaryIfTerminal(state)) return;
       if (blockIfForegroundLaneNotParked(state)) return;
       if (opts.goal && verifyCurrentWaitingLaneIfOnBranch(state)) return;
+      if (opts.goal && syncWaitingReviewStatusBeforeNewClaim(state)) return;
       if (opts.goal && recoverTargetIssueLane(state)) return;
       if (claimNextIssue(state, opts)) return;
       if (opts.pollOnce) {

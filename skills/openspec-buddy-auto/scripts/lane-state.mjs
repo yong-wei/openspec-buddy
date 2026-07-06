@@ -230,6 +230,7 @@ export function normalizeLane(lane) {
     restFreshAt: String(lane.restFreshAt || ''),
     threadsFreshAt: String(lane.threadsFreshAt || ''),
     threadsHead: String(lane.threadsHead || ''),
+    reviewStatusSyncedAt: String(lane.reviewStatusSyncedAt || ''),
     blockedReason: String(lane.blockedReason || ''),
     retryableStage: String(lane.retryableStage || ''),
     retryableHead: String(lane.retryableHead || ''),
