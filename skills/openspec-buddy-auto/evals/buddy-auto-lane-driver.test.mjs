@@ -461,6 +461,7 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
     OPENSPEC_BUDDY_AUTO_GOAL: '1',
     OPENSPEC_BUDDY_AUTO_LANES: '2',
     CURRENT_BRANCH: 'dev1',
+    SELECT_NONE: '1',
   });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /^DONE/m);
@@ -1090,6 +1091,93 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
   assert.equal(lane.stage, 'waiting_review');
   assert.equal(lane.pr, '708');
   assert.equal(lane.head, 'head-2');
+}
+
+{
+  const envInfo = makeEnv('waiting-review-poll-once-probes-once');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 2,
+    lanes: [
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0 },
+    ],
+  }));
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '2',
+    CURRENT_BRANCH: 'dev1',
+    SELECT_NONE: '1',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^DONE/m);
+  assert.match(result.stdout, /^stage: waiting_review$/m);
+  const log = fs.readFileSync(envInfo.logFile, 'utf8');
+  assert.equal((log.match(/probe 707/g) || []).length, 1);
+}
+
+{
+  const envInfo = makeEnv('waiting-review-waiting-allows-foreground-implementing');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 2,
+    lanes: [
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0 },
+      { id: 'issue-676', issue: '676', change: 'change-676', branch: 'change-676', stage: 'implementing', reviewRetryCount: 0 },
+    ],
+  }));
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '2',
+    CURRENT_BRANCH: 'change-676',
+    FIND_PR_FOR_676: '1',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^HANDOFF/m);
+  assert.match(result.stdout, /^stage: review-yield$/m);
+  assert.match(result.stdout, /^issue: 676$/m);
+  const log = fs.readFileSync(envInfo.logFile, 'utf8');
+  assert.equal((log.match(/probe 707/g) || []).length, 1);
+  assert.match(log, /find-pr 676/);
+  assert.match(log, /mark-review 676 708/);
+}
+
+{
+  const envInfo = makeEnv('waiting-review-preempts-foreground-implementing');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 2,
+    lanes: [
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0 },
+      { id: 'issue-676', issue: '676', change: 'change-676', branch: 'change-676', stage: 'implementing', reviewRetryCount: 0 },
+    ],
+  }));
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '2',
+    CURRENT_BRANCH: 'change-676',
+    PROBE_STATE_707: 'review_returned',
+    PROBE_SIGNATURE_707: 'reviewed-sig',
+    CHECK_REVIEW_STATUS: '3',
+    FIND_PR_FOR_676: '1',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^HANDOFF/m);
+  assert.match(result.stdout, /^stage: review-fix$/m);
+  assert.match(result.stdout, /^issue: 675$/m);
+  const log = fs.readFileSync(envInfo.logFile, 'utf8');
+  assert.match(log, /probe 707/);
+  assert.match(log, /check 707/);
+  assert.match(log, /mark-in-progress 675/);
+  assert.doesNotMatch(log, /driver-env targetIssue=676/);
+  const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  assert.equal(state.lanes.find((candidate) => candidate.issue === '675').stage, 'review_fix');
+  assert.equal(state.lanes.find((candidate) => candidate.issue === '676').stage, 'implementing');
 }
 
 {

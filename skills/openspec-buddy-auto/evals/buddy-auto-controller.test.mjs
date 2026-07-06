@@ -226,6 +226,36 @@ function controllerPath(envInfo) {
 }
 
 {
+  const envInfo = makeEnv('target-issue-seed-does-not-overwrite-existing-controller-target');
+  let result = run(envInfo, { OPENSPEC_BUDDY_AUTO_TARGET_ISSUE: '123' });
+  assert.equal(result.status, 0, result.stderr);
+  result = run(envInfo, { OPENSPEC_BUDDY_AUTO_TARGET_ISSUE: '456' });
+  assert.equal(result.status, 0, result.stderr);
+  const log = readLog(envInfo);
+  assert.equal(log[0].issue, '123');
+  assert.equal(log[1].issue, '123');
+}
+
+{
+  const envInfo = makeEnv('seed-does-not-overwrite-existing-empty-controller-state');
+  let result = run(envInfo);
+  assert.equal(result.status, 0, result.stderr);
+  result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_TARGET_ISSUE: '456',
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const log = readLog(envInfo);
+  assert.equal(log[0].issue, '');
+  assert.equal(log[0].goal, '');
+  assert.equal(log[1].issue, '');
+  assert.equal(log[1].goal, '');
+  const state = readController(envInfo);
+  assert.equal(state.target.issue, '');
+  assert.equal(state.goal, false);
+}
+
+{
   const envInfo = makeEnv('legacy-env-cleared');
   let result = run(envInfo);
   assert.equal(result.status, 0, result.stderr);

@@ -241,7 +241,14 @@ function upsertLane(state, lanePatch) {
   return nextLane;
 }
 
-function runSingleDriverForIssue(issue) {
+function switchToBranchIfNeeded(branch) {
+  if (!branch || currentBranch() === branch) return;
+  run('git', ['switch', branch]);
+}
+
+function runSingleDriverForIssue(issue, selected = {}) {
+  const claimBranch = selected.claim_branch || selected.branch || selected.change_id || '';
+  if (localBranchExists(claimBranch)) switchToBranchIfNeeded(claimBranch);
   return run(process.execPath, [singleDriver], {
     allowFailure: true,
     env: {
@@ -293,6 +300,85 @@ function runSelector(state) {
   } finally {
     fs.rmSync(excludeFile, { force: true });
   }
+}
+
+function repoNwoFromOrigin() {
+  const result = run('git', ['config', '--get', 'remote.origin.url'], { allowFailure: true });
+  if (result.status !== 0) return '';
+  const remote = result.stdout.trim();
+  const match = remote.match(/github\.com[:/]([^/]+\/[^/.]+)(?:\.git)?$/);
+  return match ? match[1] : '';
+}
+
+function pullRequestRest(pr) {
+  const repo = repoNwoFromOrigin();
+  if (!repo) return { status: 1, reason: 'Could not determine GitHub owner/repo from remote.origin.url' };
+  const result = run('gh', ['api', `repos/${repo}/pulls/${pr}`], { allowFailure: true });
+  if (result.status !== 0) {
+    return {
+      status: result.status || 1,
+      reason: result.stderr || result.stdout || 'gh api pull request lookup failed',
+    };
+  }
+  try {
+    return { status: 0, data: JSON.parse(result.stdout || '{}') };
+  } catch {
+    return { status: 1, reason: 'gh api pull request lookup did not return JSON' };
+  }
+}
+
+function localBranchExists(branch) {
+  if (!branch) return false;
+  return run('git', ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`], { allowFailure: true }).status === 0;
+}
+
+function localBranchHead(branch) {
+  if (!branch) return '';
+  const result = run('git', ['rev-parse', branch], { allowFailure: true });
+  return result.status === 0 ? result.stdout.trim() : '';
+}
+
+function recoverTargetIssueLane(state) {
+  const targetIssue = process.env.OPENSPEC_BUDDY_AUTO_TARGET_ISSUE || '';
+  const targetPr = process.env.OPENSPEC_BUDDY_AUTO_TARGET_PR || '';
+  const targetChange = process.env.OPENSPEC_BUDDY_AUTO_CHANGE || '';
+  if (!targetIssue) return false;
+  if (state.lanes.some((lane) => String(lane.issue || '') === String(targetIssue))) return false;
+  const selected = { number: targetIssue };
+  if (targetPr) {
+    let targetBranch = '';
+    let targetHead = '';
+    const pr = pullRequestRest(targetPr);
+    if (pr.status !== 0) {
+      if (targetChange && localBranchExists(targetChange)) {
+        targetBranch = targetChange;
+        targetHead = localBranchHead(targetBranch);
+      } else {
+        emitBlocked([
+          ['stage', 'target-pr-truth'],
+          ['issue', targetIssue],
+          ['pr', targetPr],
+          ['reason', pr.reason],
+        ]);
+        return true;
+      }
+    } else {
+      targetBranch = pr.data?.head?.ref || '';
+      targetHead = pr.data?.head?.sha || '';
+    }
+    const lane = {
+      id: `issue-${targetIssue}`,
+      issue: String(targetIssue),
+      change: targetChange || targetBranch,
+      branch: targetBranch || targetChange,
+      pr: String(targetPr),
+      head: targetHead || localBranchHead(targetBranch || targetChange),
+      stage: 'implementing',
+    };
+    switchToBranchIfNeeded(lane.branch);
+    return advanceTargetLaneFromSingleDriver(state, lane);
+  }
+  return advanceIssueFromSingleDriver(state, selected, 'recover-target-issue');
 }
 
 function safeYieldCurrentLane(lane) {
@@ -872,7 +958,7 @@ function recoverCurrentWorktreeStaleClaim(state, selectorStdout) {
 }
 
 function advanceIssueFromSingleDriver(state, selected, sourceStage) {
-  const driver = runSingleDriverForIssue(selected.number);
+  const driver = runSingleDriverForIssue(selected.number, selected);
   if (driver.status !== 0) {
     emitBlocked([
       ['stage', sourceStage],
@@ -924,6 +1010,57 @@ function advanceIssueFromSingleDriver(state, selected, sourceStage) {
     ['stage', parsed.stage || 'implement-or-open-pr'],
     ['issue', selected.number],
     ['required_action', 'Continue only the selected lane work returned by buddy-auto-driver.'],
+  ], driver.stdout);
+  return true;
+}
+
+function advanceTargetLaneFromSingleDriver(state, lane) {
+  const driver = runSingleDriverForLane(lane);
+  if (driver.status !== 0) {
+    emitBlocked([
+      ['stage', 'recover-target-issue'],
+      ['issue', lane.issue],
+      ['pr', lane.pr],
+      ['reason', 'buddy-auto-driver failed'],
+    ], driver.stderr || driver.stdout);
+    return true;
+  }
+  const parsed = parseDriverStage(driver.stdout);
+  const driverState = parseDriverState(driver.stdout);
+  const parkResult = parkLaneFromDriverReceipt(state, lane, parsed, driverState);
+  if (parkResult.status === 'blocked') {
+    emitBlocked([
+      ['stage', 'recover-target-issue'],
+      ['issue', lane.issue],
+      ['pr', lane.pr],
+      ['reason', parkResult.reason],
+    ], driver.stdout);
+    return true;
+  }
+  if (parkResult.status === 'parked') {
+    emitHandoff([
+      ['stage', parsed.stage],
+      ['issue', lane.issue],
+      ['pr', parkResult.lane.pr],
+      ['required_action', 'Target lane is now safely parked in waiting_review; rerun the lane driver to poll or schedule another lane.'],
+    ], driver.stdout);
+    return true;
+  }
+  if (parkResult.status === 'review_fix_handoff') {
+    emitReviewFixHandoff(parkResult.lane, parkResult.reason);
+    return true;
+  }
+  upsertLane(state, {
+    ...lane,
+    stage: 'implementing',
+    lastResult: parsed.stage,
+  });
+  writeLaneState(state);
+  emitHandoff([
+    ['stage', parsed.stage || 'target-lane'],
+    ['issue', lane.issue],
+    ['pr', lane.pr],
+    ['required_action', 'Continue only the target lane work returned by buddy-auto-driver.'],
   ], driver.stdout);
   return true;
 }
@@ -1657,6 +1794,33 @@ function processWaitingLane(state, lane) {
   return false;
 }
 
+function processWaitingReviewLanes(state) {
+  const waiting = state.lanes.filter((lane) => lane.stage === 'waiting_review' && lane.pr);
+  for (const lane of waiting) {
+    if (processWaitingLane(state, lane)) return true;
+  }
+  return false;
+}
+
+function waitingReviewRetrySnapshot(state) {
+  return new Map((state.lanes || [])
+    .filter((lane) => lane.stage === 'waiting_review' && lane.pr)
+    .map((lane) => [lane.id, {
+      reviewRetryCount: Number(lane.reviewRetryCount || 0),
+      reviewRequestedAt: String(lane.reviewRequestedAt || ''),
+    }]));
+}
+
+function retrySnapshotChanged(before, state) {
+  for (const lane of state.lanes || []) {
+    if (!before.has(lane.id)) continue;
+    const snapshot = before.get(lane.id);
+    if (Number(lane.reviewRetryCount || 0) !== snapshot.reviewRetryCount) return true;
+    if (String(lane.reviewRequestedAt || '') !== snapshot.reviewRequestedAt) return true;
+  }
+  return false;
+}
+
 function runScheduler(opts) {
   let lock;
   try {
@@ -1767,6 +1931,44 @@ function runScheduler(opts) {
       }
     }
 
+    const beforeEarlyReconcile = JSON.stringify(state.lanes || []);
+    const retryableBlockedBeforeEarlyReconcile = state.lanes.some((lane) => lane.stage === 'retryable_blocked');
+    if (reconcileRecoverableLanes(state)) return;
+    state = readLaneState({ maxLanes });
+    if (retryableBlockedBeforeEarlyReconcile && JSON.stringify(state.lanes || []) !== beforeEarlyReconcile) {
+      if (emitBlockedLaneSummaryIfTerminal(state)) return;
+      const branch = currentBranch();
+      const recoveredCurrentBranchLane = state.lanes.some((lane) => (
+        lane.stage === 'waiting_review'
+        && lane.branch
+        && branch
+        && lane.branch === branch
+      ));
+      if (recoveredCurrentBranchLane) {
+        state = readLaneState({ maxLanes });
+      } else {
+        emitDone([
+          ['stage', 'reconciled'],
+          ['reason', 'Retryable lane state changed; rerun the controller before probing waiting review lanes.'],
+        ]);
+        return;
+      }
+    }
+    if (emitBlockedLaneSummaryIfTerminal(state)) return;
+    const beforeEarlyWaitingRetry = waitingReviewRetrySnapshot(state);
+    if (processWaitingReviewLanes(state)) return;
+    state = readLaneState({ maxLanes });
+    if (retrySnapshotChanged(beforeEarlyWaitingRetry, state)) {
+      if (emitBlockedLaneSummaryIfTerminal(state)) return;
+      emitDone([
+        ['stage', 'waiting_review'],
+        ['reason', 'Waiting review retry state changed; rerun the controller before probing this lane again.'],
+      ]);
+      return;
+    }
+    if (emitBlockedLaneSummaryIfTerminal(state)) return;
+    let skipWaitingProbeOnce = beforeEarlyWaitingRetry.size > 0;
+
     if (blockIfForegroundLaneNotParked(state)) return;
 
     while (true) {
@@ -1774,14 +1976,14 @@ function runScheduler(opts) {
       if (reconcileRecoverableLanes(state)) return;
       state = readLaneState({ maxLanes });
       if (emitBlockedLaneSummaryIfTerminal(state)) return;
-      const waiting = state.lanes.filter((lane) => lane.stage === 'waiting_review' && lane.pr);
-      for (const lane of waiting) {
-        if (processWaitingLane(state, lane)) return;
-      }
+      if (skipWaitingProbeOnce) {
+        skipWaitingProbeOnce = false;
+      } else if (processWaitingReviewLanes(state)) return;
       state = readLaneState({ maxLanes });
       if (emitBlockedLaneSummaryIfTerminal(state)) return;
       if (blockIfForegroundLaneNotParked(state)) return;
       if (opts.goal && verifyCurrentWaitingLaneIfOnBranch(state)) return;
+      if (opts.goal && recoverTargetIssueLane(state)) return;
       if (claimNextIssue(state, opts)) return;
       if (opts.pollOnce) {
         emitDone([

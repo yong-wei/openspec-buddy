@@ -342,6 +342,7 @@ function handleChildResult(state, result) {
 
 function main() {
   const opts = parseArgs(process.argv.slice(2));
+  const seed = seedFromEnv();
   if (opts.help) {
     console.log('Usage: buddy-auto.mjs [--reset-controller-state] [--reset-lane-state --reason <why>]');
     return;
@@ -363,7 +364,7 @@ function main() {
 
   let state;
   try {
-    state = initializeControllerState(seedFromEnv());
+    state = initializeControllerState(seed);
   } catch (error) {
     if (error.code === 'LEGACY_LANE_STATE') {
       emit('BLOCKED', [
