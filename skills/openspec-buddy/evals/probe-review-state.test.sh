@@ -110,7 +110,7 @@ if grep -F 'api graphql' "$GH_LOG_FILE" >/dev/null; then
 fi
 
 : > "$GH_LOG_FILE"
-export OPENSPEC_BUDDY_REVIEW_LAST_SIGNATURE="$(node -e 'const fs=require("node:fs"); const pr=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(JSON.stringify({number:pr.number,state:pr.state,merged:false,head:pr.head.sha,headRefName:pr.head.ref,updatedAt:pr.updated_at,comments:pr.comments,reviewComments:pr.review_comments,commits:pr.commits}));' "$tmp_dir/pr.json")"
+export OPENSPEC_BUDDY_REVIEW_LAST_SIGNATURE="$(node -e 'const fs=require("node:fs"); const pr=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(JSON.stringify({number:pr.number,state:pr.state,merged:false,head:pr.head.sha,headRefName:pr.head.ref,updatedAt:pr.updated_at,comments:pr.comments,reviewComments:pr.review_comments,commits:pr.commits,reviews:0,latestReviewSubmittedAt:""}));' "$tmp_dir/pr.json")"
 export OPENSPEC_BUDDY_REVIEW_PREVIOUS_REQUEST_STATE=present-current-head
 second_output="$(bash "$helper" 123)"
 node -e '
@@ -123,8 +123,29 @@ if grep -E 'commits|issues/123/comments|graphql' "$GH_LOG_FILE" >/dev/null; then
   cat "$GH_LOG_FILE" >&2
   exit 1
 fi
-if grep -E 'pulls/123/reviews' "$GH_LOG_FILE" >/dev/null; then
-  echo "probe-review-state.sh should not fetch reviews when signature is unchanged" >&2
+
+: > "$GH_LOG_FILE"
+cat > "$tmp_dir/reviews-new-only.json" <<'JSON'
+[
+  {
+    "user": { "login": "chatgpt-codex-connector[bot]" },
+    "state": "COMMENTED",
+    "body": "Codex Review: Didn't find any major issues.",
+    "commit_id": "head-1",
+    "submitted_at": "2026-01-01T00:04:00Z"
+  }
+]
+JSON
+export GH_REVIEWS_FILE="$tmp_dir/reviews-new-only.json"
+review_only_output="$(bash "$helper" 123)"
+node -e '
+const result = JSON.parse(process.argv[1]);
+if (result.state !== "changed") throw new Error(`expected review-only change to be detected, got ${result.state}`);
+if (result.clearCandidate !== true) throw new Error("expected review-only clear candidate");
+if (result.clearCandidateSource !== "review") throw new Error(`wrong source ${result.clearCandidateSource}`);
+' "$review_only_output"
+if grep -F 'api graphql' "$GH_LOG_FILE" >/dev/null; then
+  echo "probe-review-state.sh must not call GraphQL for review-only detection" >&2
   cat "$GH_LOG_FILE" >&2
   exit 1
 fi

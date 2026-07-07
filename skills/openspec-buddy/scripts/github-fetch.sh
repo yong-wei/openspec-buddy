@@ -1026,10 +1026,24 @@ buddy_pr_signature_rest() {
   local cache_dir="$3"
   mkdir -p "$cache_dir"
   export BUDDY_PR_SIGNATURE_FILE="$cache_dir/pr-signature-${pr_number}.json"
+  local pr_file="$cache_dir/pr-signature-pr-${pr_number}.json"
+  local reviews_file="$cache_dir/pr-signature-reviews-${pr_number}.json"
 
-  gh api "repos/$repo_nwo/pulls/$pr_number" | node -e '
+  gh api "repos/$repo_nwo/pulls/$pr_number" > "$pr_file"
+  buddy_gh_api_paginated_array "repos/$repo_nwo/pulls/$pr_number/reviews?per_page=100" > "$reviews_file"
+  node -e '
 const fs = require("node:fs");
-const pr = JSON.parse(fs.readFileSync(0, "utf8"));
+const pr = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+let reviews = [];
+try {
+  const parsed = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+  reviews = Array.isArray(parsed) ? parsed : [];
+} catch {}
+const latestReviewSubmittedAt = reviews
+  .map((review) => review.submitted_at || review.submittedAt || "")
+  .filter(Boolean)
+  .sort()
+  .at(-1) || "";
 const signature = {
   number: pr.number,
   state: pr.state || "",
@@ -1040,9 +1054,11 @@ const signature = {
   comments: pr.comments ?? 0,
   reviewComments: pr.review_comments ?? 0,
   commits: pr.commits ?? 0,
+  reviews: reviews.length,
+  latestReviewSubmittedAt,
 };
 process.stdout.write(`${JSON.stringify(signature)}\n`);
-' > "$BUDDY_PR_SIGNATURE_FILE"
+' "$pr_file" "$reviews_file" > "$BUDDY_PR_SIGNATURE_FILE"
   printf '%s\n' "$BUDDY_PR_SIGNATURE_FILE"
 }
 
