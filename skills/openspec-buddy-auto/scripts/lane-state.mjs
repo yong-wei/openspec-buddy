@@ -139,7 +139,33 @@ export function acquireLaneLock({ cwd = process.cwd(), staleSeconds = process.en
     existing = {};
   }
   const detail = existing.pid ? `pid ${existing.pid}` : 'unknown owner';
-  const lockStat = fs.statSync(lockDir);
+  function lockedError() {
+    const error = new Error(`lane-driver-already-running (${detail})`);
+    error.code = 'LANE_LOCKED';
+    return error;
+  }
+  let lockStat = null;
+  try {
+    lockStat = fs.statSync(lockDir);
+  } catch (error) {
+    if (error.code !== 'ENOENT' || !lockIsSymlink) throw error;
+    try {
+      if (!fs.lstatSync(lockDir).isSymbolicLink() || fs.readlinkSync(lockDir) !== ownerFile) {
+        throw lockedError();
+      }
+      fs.unlinkSync(lockDir);
+    } catch (unlinkError) {
+      if (unlinkError?.code === 'ENOENT') {
+        const recoveredAfterRace = claimFreshLock();
+        if (recoveredAfterRace) return recoveredAfterRace;
+      }
+      if (unlinkError?.code === 'LANE_LOCKED') throw unlinkError;
+      throw lockedError();
+    }
+    const recovered = claimFreshLock();
+    if (recovered) return recovered;
+    throw lockedError();
+  }
   const lockAgeMs = Date.now() - lockStat.mtimeMs;
   if (!existing.pid || !existing.startedAt) {
     if (lockAgeMs > staleMs) {

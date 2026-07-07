@@ -92,6 +92,41 @@ const lock = laneState.acquireLaneLock({ cwd: repoDir, staleSeconds: '7200' });
 assert.throws(() => laneState.acquireLaneLock({ cwd: repoDir, staleSeconds: '7200' }), /lane-driver-already-running/);
 lock.release();
 
+const danglingOwnerFile = `${laneState.laneLockDir(repoDir)}.owner-missing.json`;
+fs.symlinkSync(danglingOwnerFile, laneState.laneLockDir(repoDir));
+const danglingSymlinkRecovered = laneState.acquireLaneLock({ cwd: repoDir, staleSeconds: '7200' });
+danglingSymlinkRecovered.release();
+
+const originalStatSync = fs.statSync;
+const lostRaceOwnerFile = `${laneState.laneLockDir(repoDir)}.owner-lost-race.json`;
+const competingOwnerFile = `${laneState.laneLockDir(repoDir)}.owner-competing.json`;
+fs.writeFileSync(competingOwnerFile, JSON.stringify({
+  pid: process.pid,
+  startedAt: new Date().toISOString(),
+}));
+fs.symlinkSync(lostRaceOwnerFile, laneState.laneLockDir(repoDir));
+fs.statSync = (target, ...args) => {
+  if (target === laneState.laneLockDir(repoDir)) {
+    fs.unlinkSync(target);
+    fs.symlinkSync(competingOwnerFile, target);
+    const error = new Error('ENOENT');
+    error.code = 'ENOENT';
+    throw error;
+  }
+  return originalStatSync(target, ...args);
+};
+try {
+  assert.throws(
+    () => laneState.acquireLaneLock({ cwd: repoDir, staleSeconds: '7200' }),
+    /lane-driver-already-running/,
+  );
+} finally {
+  fs.statSync = originalStatSync;
+}
+assert.equal(fs.readlinkSync(laneState.laneLockDir(repoDir)), competingOwnerFile);
+fs.unlinkSync(laneState.laneLockDir(repoDir));
+fs.rmSync(competingOwnerFile, { force: true });
+
 const staleLockDir = laneState.laneLockDir(repoDir);
 fs.mkdirSync(staleLockDir, { recursive: true });
 fs.writeFileSync(path.join(staleLockDir, 'owner.json'), JSON.stringify({
