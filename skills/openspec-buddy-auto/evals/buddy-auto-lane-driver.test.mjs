@@ -1206,6 +1206,7 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
   assert.doesNotMatch(log, /claim 676/);
   const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
   assert.equal(state.lanes.find((candidate) => candidate.issue === '676').stage, 'waiting_review');
+  assert.match(state.lanes.find((candidate) => candidate.issue === '676').reviewStatusSyncedAt, /^\d{4}-\d{2}-\d{2}T/);
   assert.equal(state.lanes.find((candidate) => candidate.issue === '675').stage, 'implementing');
 }
 
@@ -1293,6 +1294,34 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
   const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
   assert.equal(state.lanes.find((candidate) => candidate.issue === '675').stage, 'review_fix');
   assert.equal(state.lanes.find((candidate) => candidate.issue === '676').stage, 'implementing');
+}
+
+{
+  const envInfo = makeEnv('waiting-review-sync-returns-bound-before-target-recovery');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 2,
+    lanes: [
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0 },
+    ],
+  }));
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '2',
+    CURRENT_BRANCH: 'dev1',
+    OPENSPEC_BUDDY_AUTO_TARGET_ISSUE: '676',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^HANDOFF/m);
+  assert.match(result.stdout, /^stage: implement-or-open-pr$/m);
+  const log = fs.readFileSync(envInfo.logFile, 'utf8');
+  assert.match(log, /switch change-675/);
+  assert.match(log, /mark-review 675 707/);
+  assert.match(log, /switch dev1/);
+  assert.ok(log.indexOf('switch dev1') > log.indexOf('mark-review 675 707'));
+  assert.ok(log.indexOf('driver-env targetIssue=676') > log.indexOf('switch dev1'));
 }
 
 {

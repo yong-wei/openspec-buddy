@@ -904,9 +904,10 @@ function markLaneInReviewOrBlock(state, lane, source = 'mark-review') {
   }
   const statusResult = markIssueInReview(lane.issue, lane.pr);
   if (statusResult.status === 0) {
-    lane.lastResult = source;
-    lane.reviewStatusSyncedAt = new Date().toISOString();
-    lane.updatedAt = new Date().toISOString();
+    const persistedLane = state.lanes.find((candidate) => candidate.id === lane.id) || lane;
+    persistedLane.lastResult = source;
+    persistedLane.reviewStatusSyncedAt = new Date().toISOString();
+    persistedLane.updatedAt = new Date().toISOString();
     writeLaneState(state);
     return false;
   }
@@ -1977,6 +1978,7 @@ function runScheduler(opts) {
       if (blockIfForegroundLaneNotParked(state)) return;
       if (opts.goal && verifyCurrentWaitingLaneIfOnBranch(state)) return;
       if (opts.goal && syncWaitingReviewStatusBeforeNewClaim(state)) return;
+      if (opts.goal) ensureBoundBranch();
       if (opts.goal && recoverTargetIssueLane(state)) return;
       if (claimNextIssue(state, opts)) return;
       if (opts.pollOnce) {
