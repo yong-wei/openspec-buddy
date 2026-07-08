@@ -303,11 +303,7 @@ function runSelector(state) {
 }
 
 function repoNwoFromOrigin() {
-  const result = run('git', ['config', '--get', 'remote.origin.url'], { allowFailure: true });
-  if (result.status !== 0) return '';
-  const remote = result.stdout.trim();
-  const match = remote.match(/github\.com[:/]([^/]+\/[^/.]+)(?:\.git)?$/);
-  return match ? match[1] : '';
+  return repoNwoFromRemote();
 }
 
 function pullRequestRest(pr) {

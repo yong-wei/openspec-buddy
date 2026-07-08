@@ -74,7 +74,7 @@ case "\${1:-}" in
     exit 0
     ;;
   remote)
-    if [[ "\${2:-}" == "get-url" ]]; then printf 'https://github.com/opt-de/major.git\\n'; exit 0; fi
+    if [[ "\${2:-}" == "get-url" ]]; then printf '%s\\n' "\${GIT_REMOTE_URL:-https://github.com/opt-de/major.git}"; exit 0; fi
     ;;
 esac
 echo "unexpected git invocation: $*" >&2
@@ -82,6 +82,16 @@ exit 99
 `);
   makeExecutable(path.join(binDir, 'gh'), `#!/bin/bash
 set -euo pipefail
+if [[ "\${1:-}" == "api" && "\${2:-}" == repos/*/pulls/* ]]; then
+  echo "pull-rest \${2:-}" >> ${JSON.stringify(logFile)}
+  pr="\${2##*/}"
+  if [[ "$pr" == "708" ]]; then
+    printf '{"number":708,"state":"%s","head":{"ref":"%s","sha":"%s"}}\\n' "\${PR_708_STATE:-open}" "\${PR_708_BRANCH:-change-676}" "\${PR_708_HEAD:-head-2}"
+  else
+    printf '{"number":707,"state":"%s","head":{"ref":"%s","sha":"%s"}}\\n' "\${PR_707_STATE:-open}" "\${PR_707_BRANCH:-change-675}" "\${PR_707_HEAD:-head-1}"
+  fi
+  exit 0
+fi
 if [[ "\${1:-}" == "api" && "\${2:-}" == */issues/*/comments* ]]; then
   if [[ "\${RETRY_MARKER_EXISTS:-0}" == "1" ]]; then
     printf '%s\\n' '[{"created_at":"2026-06-28T00:00:00Z","body":"OpenSpec Buddy review retry\\nlane_id: issue-675\\nhead: head-1\\nretry_round: 1"}]'
@@ -410,6 +420,36 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
   const log = fs.readFileSync(envInfo.logFile, 'utf8');
   assert.match(log, /driver-env targetIssue=676 targetPr= lanePr= head= change= changeId= reviewFix=/);
   assert.match(log, /claim 676/);
+}
+
+{
+  const envInfo = makeEnv('target-pr-rest-supports-dotted-repo-name');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 2,
+    lanes: [],
+  }));
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '2',
+    OPENSPEC_BUDDY_AUTO_TARGET_ISSUE: '676',
+    OPENSPEC_BUDDY_AUTO_TARGET_PR: '708',
+    GIT_REMOTE_URL: 'https://github.com/opt-de/foo.bar.git',
+    FIND_PR_FOR_676: '1',
+    CURRENT_BRANCH: 'dev1',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^DONE/m);
+  assert.match(result.stdout, /^stage: waiting_review$/m);
+  const log = fs.readFileSync(envInfo.logFile, 'utf8');
+  assert.match(log, /pull-rest repos\/opt-de\/foo\.bar\/pulls\/708/);
+  assert.match(log, /driver-env targetIssue= targetPr= lanePr=708/);
+  const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  const lane = state.lanes.find((candidate) => candidate.issue === '676');
+  assert.equal(lane.stage, 'waiting_review');
+  assert.equal(lane.pr, '708');
 }
 
 {
