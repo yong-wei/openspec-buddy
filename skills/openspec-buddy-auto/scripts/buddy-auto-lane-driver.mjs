@@ -303,11 +303,7 @@ function runSelector(state) {
 }
 
 function repoNwoFromOrigin() {
-  const result = run('git', ['config', '--get', 'remote.origin.url'], { allowFailure: true });
-  if (result.status !== 0) return '';
-  const remote = result.stdout.trim();
-  const match = remote.match(/github\.com[:/]([^/]+\/[^/.]+)(?:\.git)?$/);
-  return match ? match[1] : '';
+  return repoNwoFromRemote();
 }
 
 function pullRequestRest(pr) {
@@ -904,9 +900,10 @@ function markLaneInReviewOrBlock(state, lane, source = 'mark-review') {
   }
   const statusResult = markIssueInReview(lane.issue, lane.pr);
   if (statusResult.status === 0) {
-    lane.lastResult = source;
-    lane.reviewStatusSyncedAt = new Date().toISOString();
-    lane.updatedAt = new Date().toISOString();
+    const persistedLane = state.lanes.find((candidate) => candidate.id === lane.id) || lane;
+    persistedLane.lastResult = source;
+    persistedLane.reviewStatusSyncedAt = new Date().toISOString();
+    persistedLane.updatedAt = new Date().toISOString();
     writeLaneState(state);
     return false;
   }
@@ -935,14 +932,6 @@ function syncWaitingReviewStatusBeforeNewClaim(state) {
   ));
   for (const lane of waiting) {
     if (markLaneInReviewOrBlock(state, lane, 'mark-review-before-claim')) return true;
-    emitDone([
-      ['stage', 'mark-review'],
-      ['lane', lane.id],
-      ['issue', lane.issue],
-      ['pr', lane.pr],
-      ['reason', 'Waiting review lane status was synchronized before claiming more work; rerun the controller.'],
-    ]);
-    return true;
   }
   return false;
 }
@@ -978,6 +967,7 @@ function claimNextIssue(state, opts) {
   if (activeCount >= state.maxLanes) return false;
   ensureBoundBranch();
   if (syncWaitingReviewStatusBeforeNewClaim(state)) return true;
+  ensureBoundBranch();
   const selectionResult = runSelector(state);
   if (selectionResult.status !== 0) {
     emitBlocked([
@@ -1056,13 +1046,7 @@ function advanceIssueFromSingleDriver(state, selected, sourceStage) {
   }
   if (parkResult.status === 'parked') {
     if (markLaneInReviewOrBlock(state, parkResult.lane, sourceStage === 'recover-stale-claim' ? 'mark-review-recovered-lane' : 'mark-review-new-lane')) return true;
-    emitHandoff([
-      ['stage', parsed.stage],
-      ['issue', selected.number],
-      ['pr', parkResult.lane.pr],
-      ['required_action', 'Lane is now safely parked in waiting_review; rerun the lane driver to poll or schedule another lane.'],
-    ], driver.stdout);
-    return true;
+    return false;
   }
   if (parkResult.status === 'review_fix_handoff') {
     emitReviewFixHandoff(parkResult.lane, parkResult.reason);
@@ -1107,13 +1091,7 @@ function advanceTargetLaneFromSingleDriver(state, lane) {
   }
   if (parkResult.status === 'parked') {
     if (markLaneInReviewOrBlock(state, parkResult.lane, 'mark-review-target-lane')) return true;
-    emitHandoff([
-      ['stage', parsed.stage],
-      ['issue', lane.issue],
-      ['pr', parkResult.lane.pr],
-      ['required_action', 'Target lane is now safely parked in waiting_review; rerun the lane driver to poll or schedule another lane.'],
-    ], driver.stdout);
-    return true;
+    return false;
   }
   if (parkResult.status === 'review_fix_handoff') {
     emitReviewFixHandoff(parkResult.lane, parkResult.reason);
@@ -1225,14 +1203,7 @@ function blockIfForegroundLaneNotParked(state) {
   }
   if (parkResult.status === 'parked') {
     if (markLaneInReviewOrBlock(state, parkResult.lane, lane.stage === 'review_fix' ? 'mark-review-after-review-fix' : 'mark-review-foreground-lane')) return true;
-    emitHandoff([
-      ['stage', parsed.stage],
-      ['lane', lane.id],
-      ['issue', lane.issue],
-      ['pr', parkResult.lane.pr],
-      ['required_action', 'Lane is now safely parked in waiting_review; rerun the lane driver to poll or schedule another lane.'],
-    ], driver.stdout);
-    return true;
+    return false;
   }
   if (parkResult.status === 'review_fix_handoff') {
     emitReviewFixHandoff(parkResult.lane, parkResult.reason);
@@ -1402,14 +1373,7 @@ function advanceResumedLane(state, lane) {
   }
   if (parkResult.status === 'parked') {
     if (markLaneInReviewOrBlock(state, parkResult.lane, lane.stage === 'review_fix' ? 'mark-review-after-review-fix' : 'mark-review-resumed-lane')) return true;
-    emitHandoff([
-      ['stage', parsed.stage],
-      ['lane', lane.id],
-      ['issue', lane.issue],
-      ['pr', parkResult.lane.pr],
-      ['required_action', 'Lane is safely parked in waiting_review; rerun the lane driver to poll or schedule another lane.'],
-    ], driver.stdout);
-    return true;
+    return false;
   }
   if (lane.stage === 'review_fix' && parsed.stage === 'review-fix') {
     const truth = forceRefreshPrTruth(lane.pr);
@@ -1455,14 +1419,7 @@ function advanceResumedLane(state, lane) {
       lane.updatedAt = new Date().toISOString();
       lane.lastResult = 'review-fix-waiting-current-head-review';
       writeLaneState(state);
-      emitHandoff([
-        ['stage', 'review-yield'],
-        ['lane', lane.id],
-        ['issue', lane.issue],
-        ['pr', lane.pr],
-        ['required_action', 'No new actionable thread is present; lane is parked in waiting_review for current-head review.'],
-      ], check.stdout || check.stderr);
-      return true;
+      return false;
     }
     if (check.status !== 3) {
       const reason = check.stderr || check.stdout || 'check-review-clear-once.sh failed after review-fix handoff';
@@ -1959,8 +1916,8 @@ function runScheduler(opts) {
         }
       }
       if (lane.stage === 'merge_ready' || lane.stage === 'review_fix') {
-        advanceResumedLane(state, lane);
-        return;
+        if (advanceResumedLane(state, lane)) return;
+        state = readLaneState({ maxLanes });
       }
     }
 
@@ -2017,6 +1974,7 @@ function runScheduler(opts) {
       if (blockIfForegroundLaneNotParked(state)) return;
       if (opts.goal && verifyCurrentWaitingLaneIfOnBranch(state)) return;
       if (opts.goal && syncWaitingReviewStatusBeforeNewClaim(state)) return;
+      if (opts.goal) ensureBoundBranch();
       if (opts.goal && recoverTargetIssueLane(state)) return;
       if (claimNextIssue(state, opts)) return;
       if (opts.pollOnce) {
