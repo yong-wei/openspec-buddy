@@ -999,6 +999,9 @@ function claimNextIssue(state, opts) {
     ], selectionResult.stdout);
     return true;
   }
+  if (state.lanes.some((lane) => lane.stage !== 'done' && String(lane.issue || '') === String(selected.number))) {
+    return false;
+  }
   return advanceIssueFromSingleDriver(state, selected, 'claim-next-issue');
 }
 
@@ -1976,7 +1979,10 @@ function runScheduler(opts) {
       if (opts.goal && syncWaitingReviewStatusBeforeNewClaim(state)) return;
       if (opts.goal) ensureBoundBranch();
       if (opts.goal && recoverTargetIssueLane(state)) return;
+      const beforeClaim = JSON.stringify(state.lanes || []);
       if (claimNextIssue(state, opts)) return;
+      state = readLaneState({ maxLanes });
+      if (JSON.stringify(state.lanes || []) !== beforeClaim) continue;
       if (opts.pollOnce) {
         emitDone([
           ['stage', 'waiting_review'],

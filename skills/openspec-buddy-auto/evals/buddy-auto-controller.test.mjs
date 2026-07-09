@@ -248,11 +248,93 @@ function controllerPath(envInfo) {
   const log = readLog(envInfo);
   assert.equal(log[0].issue, '');
   assert.equal(log[0].goal, '');
-  assert.equal(log[1].issue, '');
-  assert.equal(log[1].goal, '');
+  assert.equal(log[1].issue, '456');
+  assert.equal(log[1].goal, '1');
   const state = readController(envInfo);
-  assert.equal(state.target.issue, '');
-  assert.equal(state.goal, false);
+  assert.equal(state.target.issue, '456');
+  assert.equal(state.goal, true);
+}
+
+{
+  const envInfo = makeEnv('single-controller-upgrades-to-multi-goal-seed');
+  let result = run(envInfo);
+  assert.equal(result.status, 0, result.stderr);
+  result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_MODE: 'multi',
+    OPENSPEC_BUDDY_AUTO_LANES: '2',
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const log = readLog(envInfo);
+  assert.equal(log[0].child, 'single');
+  assert.equal(log[1].child, 'lane');
+  assert.equal(log[1].goal, '1');
+  assert.equal(log[1].lanes, '2');
+  const state = readController(envInfo);
+  assert.equal(state.mode, 'multi');
+  assert.equal(state.goal, true);
+  assert.equal(state.maxLanes, 2);
+}
+
+{
+  const envInfo = makeEnv('target-controller-upgrades-to-multi-without-overwriting-target');
+  let result = run(envInfo, { OPENSPEC_BUDDY_AUTO_TARGET_ISSUE: '123' });
+  assert.equal(result.status, 0, result.stderr);
+  result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_MODE: 'multi',
+    OPENSPEC_BUDDY_AUTO_LANES: '2',
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_TARGET_ISSUE: '456',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const log = readLog(envInfo);
+  assert.equal(log[0].child, 'single');
+  assert.equal(log[0].issue, '123');
+  assert.equal(log[1].child, 'lane');
+  assert.equal(log[1].targetIssue, '123');
+  const state = readController(envInfo);
+  assert.equal(state.mode, 'multi');
+  assert.equal(state.goal, true);
+}
+
+{
+  const envInfo = makeEnv('interrupt-state-does-not-upgrade-to-multi-seed');
+  let state = withControllerEnv(envInfo, () => controllerModule.initializeControllerState({
+    mode: 'single',
+    goal: false,
+    issue: '123',
+  }, { cwd: envInfo.repoDir }));
+  state = withControllerEnv(envInfo, () => controllerModule.writeInterrupt(state, {
+    type: 'handoff',
+    stage: 'implement-or-open-pr',
+    issue: '123',
+    allowedWork: 'finish current external work',
+  }, { cwd: envInfo.repoDir }));
+  const next = withControllerEnv(envInfo, () => controllerModule.initializeControllerState({
+    mode: 'multi',
+    goal: true,
+    maxLanes: '2',
+  }, { cwd: envInfo.repoDir }));
+  assert.equal(next.mode, 'single');
+  assert.equal(next.goal, false);
+  assert.equal(next.interrupt.stage, 'implement-or-open-pr');
+}
+
+{
+  const envInfo = makeEnv('empty-controller-accepts-change-only-target');
+  let result = run(envInfo);
+  assert.equal(result.status, 0, result.stderr);
+  result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_CHANGE: 'local-change',
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const log = readLog(envInfo);
+  assert.equal(log[1].change, 'local-change');
+  assert.equal(log[1].goal, '1');
+  const state = readController(envInfo);
+  assert.equal(state.target.change, 'local-change');
+  assert.equal(state.goal, true);
 }
 
 {
@@ -264,7 +346,6 @@ function controllerPath(envInfo) {
     OPENSPEC_BUDDY_AUTO_ISSUE: '999',
     OPENSPEC_BUDDY_AUTO_PR: '888',
     OPENSPEC_BUDDY_AUTO_HEAD: 'stale-head',
-    OPENSPEC_BUDDY_AUTO_CHANGE: 'stale-change',
     OPENSPEC_BUDDY_AUTO_CHANGE_ID: 'stale-change-id',
     OPENSPEC_BUDDY_REVIEW_FIX_CONTEXT: '1',
   });

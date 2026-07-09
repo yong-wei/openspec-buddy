@@ -45,9 +45,15 @@ bunx openspec-buddy install --target agents --force
 git clone https://github.com/yong-wei/openspec-buddy.git
 cd openspec-buddy
 npm install
-npm test
+npm run test:fast
 openspec-buddy install --target agents --mode symlink --source ./skills --force
 ```
+
+测试分为三层：
+
+- `npm run test:fast`：语法、纯 Node 单元和关键状态机模拟，适合日常开发。
+- `npm run test:helpers`：在 fast 基础上运行本地 shell/helper 集成测试，但跳过最耗时的全量 lane-driver 回归。
+- `npm run test:full` 或 `npm test`：发布前完整回归。
 
 ## 首次配置
 
