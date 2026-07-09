@@ -1302,7 +1302,7 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
 }
 
 {
-  const envInfo = makeEnv('waiting-review-preempts-foreground-implementing');
+  const envInfo = makeEnv('waiting-review-does-not-preempt-foreground-implementing');
   fs.mkdirSync(envInfo.stateDir, { recursive: true });
   fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
     version: 1,
@@ -1327,13 +1327,17 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
   assert.match(result.stdout, /^stage: review-fix$/m);
   assert.match(result.stdout, /^issue: 675$/m);
   const log = fs.readFileSync(envInfo.logFile, 'utf8');
+  const markIndex = log.indexOf('mark-review 676 708');
+  const probeIndex = log.indexOf('probe 707');
+  assert.notEqual(markIndex, -1, log);
+  assert.notEqual(probeIndex, -1, log);
+  assert.ok(markIndex < probeIndex, log);
   assert.match(log, /probe 707/);
   assert.match(log, /check 707/);
   assert.match(log, /mark-in-progress 675/);
-  assert.doesNotMatch(log, /driver-env targetIssue=676/);
   const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
   assert.equal(state.lanes.find((candidate) => candidate.issue === '675').stage, 'review_fix');
-  assert.equal(state.lanes.find((candidate) => candidate.issue === '676').stage, 'implementing');
+  assert.equal(state.lanes.find((candidate) => candidate.issue === '676').stage, 'waiting_review');
 }
 
 {
