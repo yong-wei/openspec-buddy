@@ -16,8 +16,11 @@
     "LICENSE"
   ],
   "scripts": {
-    "test": "node test/run-all-tests.mjs",
-    "check": "npm test && npm pack --dry-run",
+    "test": "node test/run-all-tests.mjs full",
+    "test:fast": "node test/run-all-tests.mjs fast",
+    "test:helpers": "node test/run-all-tests.mjs helpers",
+    "test:full": "node test/run-all-tests.mjs full",
+    "check": "npm run test:full && npm pack --dry-run",
     "pack:local": "npm pack",
     "publish:public": "npm publish --access public"
   },

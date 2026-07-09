@@ -126,7 +126,44 @@ function legacyLaneState({ cwd = process.cwd() } = {}) {
 
 export function initializeControllerState(seed = {}, { cwd = process.cwd() } = {}) {
   const file = controllerStatePath(cwd);
-  if (fs.existsSync(file)) return readControllerState({ cwd });
+  if (fs.existsSync(file)) {
+    const existing = readControllerState({ cwd });
+    if (existing.interrupt || existing.reviewFix.pending) return existing;
+    const requestedMode = normalizeMode(seed.mode);
+    const next = { ...existing, target: { ...existing.target } };
+    let changed = false;
+
+    if (requestedMode === 'multi' && existing.mode !== 'multi') {
+      next.mode = 'multi';
+      next.maxLanes = normalizeMaxLanes(String(seed.maxLanes || 2));
+      changed = true;
+    } else if (existing.mode === 'multi' && seed.maxLanes) {
+      const requestedMax = normalizeMaxLanes(String(seed.maxLanes));
+      if (requestedMax > existing.maxLanes) {
+        next.maxLanes = requestedMax;
+        changed = true;
+      }
+    }
+
+    if (seed.goal && !existing.goal) {
+      next.goal = true;
+      changed = true;
+    }
+
+    if (!existing.target.issue && !existing.target.pr && !existing.target.change) {
+      const seededTarget = {
+        issue: String(seed.issue || ''),
+        pr: String(seed.pr || ''),
+        change: String(seed.change || ''),
+      };
+      if (seededTarget.issue || seededTarget.pr) {
+        next.target = seededTarget;
+        changed = true;
+      }
+    }
+
+    return changed ? writeControllerState(next, { cwd }) : existing;
+  }
 
   const legacy = legacyLaneState({ cwd });
   if (legacy.malformed) {
