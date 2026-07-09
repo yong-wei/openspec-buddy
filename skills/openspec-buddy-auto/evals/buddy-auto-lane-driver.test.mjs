@@ -1369,6 +1369,33 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
 }
 
 {
+  const envInfo = makeEnv('full-capacity-target-does-not-bypass-waiting-review-sync');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 1,
+    lanes: [
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0 },
+    ],
+  }));
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '1',
+    CURRENT_BRANCH: 'dev1',
+    OPENSPEC_BUDDY_AUTO_TARGET_ISSUE: '676',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const log = fs.readFileSync(envInfo.logFile, 'utf8');
+  assert.doesNotMatch(log, /driver-env targetIssue=676/);
+  assert.doesNotMatch(log, /claim 676/);
+  assert.match(log, /probe 707/);
+  const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  assert.equal(state.lanes.length, 1);
+  assert.equal(state.lanes[0].issue, '675');
+}
+
+{
   const envInfo = makeEnv('dirty-foreground-lane-does-not-park');
   fs.mkdirSync(envInfo.stateDir, { recursive: true });
   fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({

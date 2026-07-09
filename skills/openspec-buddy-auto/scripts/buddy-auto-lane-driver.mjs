@@ -1971,7 +1971,7 @@ function runScheduler(opts) {
       if (opts.goal) ensureBoundBranch();
       if (opts.goal && reservedLaneCount(state) < state.maxLanes && syncWaitingReviewStatusBeforeNewClaim(state)) return;
       if (opts.goal) ensureBoundBranch();
-      if (opts.goal && recoverTargetIssueLane(state)) return;
+      if (opts.goal && reservedLaneCount(state) < state.maxLanes && recoverTargetIssueLane(state)) return;
       const beforeClaim = JSON.stringify(state.lanes || []);
       if (claimNextIssue(state, opts)) return;
       state = readLaneState({ maxLanes });
