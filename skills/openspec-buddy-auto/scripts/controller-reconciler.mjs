@@ -48,6 +48,16 @@ export function canClearReviewInterrupt({ state, lane, dirty = false, allowCache
   const sameInterrupt = state.interrupt ? samePrHead(state.interrupt, lane) : true;
   if (!sameReviewFix || !sameInterrupt) return false;
   if (threadCacheFreshForHead(truth, lane.head) && truth.threadState === 'clear') return true;
+  if (
+    state.reviewFix?.pending
+    && lane.stage === 'waiting_review'
+    && truth.restFreshAt
+    && truth.probeState === 'waiting'
+    && truth.requestState === 'present-current-head'
+    && (truth.signature || lane.lastSignature)
+  ) {
+    return true;
+  }
   return Boolean(
     allowCachedRestTruth
     &&

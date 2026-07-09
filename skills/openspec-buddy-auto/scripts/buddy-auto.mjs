@@ -116,9 +116,12 @@ function childEnv(state) {
 
 function runChild(state) {
   const command = state.mode === 'multi' ? laneDriver : singleDriver;
-  return spawnSync(process.execPath, [command], {
+  const args = state.mode === 'multi' ? [command, '--poll-once'] : [command];
+  const env = childEnv(state);
+  if (state.mode === 'multi') env.OPENSPEC_BUDDY_AUTO_LANE_POLL_ONCE = '1';
+  return spawnSync(process.execPath, args, {
     cwd: process.cwd(),
-    env: childEnv(state),
+    env,
     encoding: 'utf8',
     stdio: 'pipe',
   });
