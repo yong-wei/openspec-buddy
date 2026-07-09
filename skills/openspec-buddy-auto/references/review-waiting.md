@@ -24,6 +24,10 @@ when capacity is available. It may poll parked review lanes only when no lane
 can be advanced and no new lane can be claimed. This is parked review
 scheduling, not parallel implementation.
 
+Each multi-lane controller run performs one scheduling/probe pass and returns to
+the top-level controller. The lane driver must not keep an internal sleep loop
+after a no-change parked review poll.
+
 ## Polling Contract
 
 The controller uses two-stage polling:

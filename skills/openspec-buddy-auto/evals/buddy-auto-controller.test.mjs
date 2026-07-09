@@ -98,10 +98,12 @@ if (process.env.BUDDY_STUB_STATUS === 'BLOCKED') {
 import fs from 'node:fs';
 fs.appendFileSync(${JSON.stringify(logFile)}, JSON.stringify({
   child: 'lane',
+  args: process.argv.slice(2),
   goal: process.env.OPENSPEC_BUDDY_AUTO_GOAL || '',
   lanes: process.env.OPENSPEC_BUDDY_AUTO_LANES || '',
   targetIssue: process.env.OPENSPEC_BUDDY_AUTO_TARGET_ISSUE || '',
   targetPr: process.env.OPENSPEC_BUDDY_AUTO_TARGET_PR || '',
+  pollOnce: process.env.OPENSPEC_BUDDY_AUTO_LANE_POLL_ONCE || '',
   controllerChild: process.env.OPENSPEC_BUDDY_AUTO_CONTROLLER_CHILD || ''
 }) + '\\n');
 if (process.env.BUDDY_STUB_STATUS === 'BLOCKED') {
@@ -205,8 +207,12 @@ function controllerPath(envInfo) {
   const log = readLog(envInfo);
   assert.equal(log[0].child, 'lane');
   assert.equal(log[0].lanes, '2');
+  assert.deepEqual(log[0].args, ['--poll-once']);
+  assert.equal(log[0].pollOnce, '1');
   assert.equal(log[1].child, 'lane');
   assert.equal(log[1].lanes, '2');
+  assert.deepEqual(log[1].args, ['--poll-once']);
+  assert.equal(log[1].pollOnce, '1');
   const state = readController(envInfo);
   assert.equal(state.mode, 'multi');
   assert.equal(state.goal, true);
@@ -875,7 +881,7 @@ console.log(JSON.stringify({ achieved: false, next: 'merge-pr', reason: 'PR is n
     laneState: { lanes: [{ ...baseLane }] },
     dirty: false,
     writeState: (next) => next,
-  }).changed, false);
+  }).changed, true);
   assert.equal(reconcilerModule.reconcileControllerState(baseState, {
     laneState: { lanes: [{ ...baseLane }] },
     allowCachedRestTruth: true,
