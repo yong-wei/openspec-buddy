@@ -156,7 +156,7 @@ export function initializeControllerState(seed = {}, { cwd = process.cwd() } = {
         pr: String(seed.pr || ''),
         change: String(seed.change || ''),
       };
-      if (seededTarget.issue || seededTarget.pr) {
+      if (seededTarget.issue || seededTarget.pr || seededTarget.change) {
         next.target = seededTarget;
         changed = true;
       }

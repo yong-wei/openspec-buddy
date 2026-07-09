@@ -321,6 +321,23 @@ function controllerPath(envInfo) {
 }
 
 {
+  const envInfo = makeEnv('empty-controller-accepts-change-only-target');
+  let result = run(envInfo);
+  assert.equal(result.status, 0, result.stderr);
+  result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_CHANGE: 'local-change',
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const log = readLog(envInfo);
+  assert.equal(log[1].change, 'local-change');
+  assert.equal(log[1].goal, '1');
+  const state = readController(envInfo);
+  assert.equal(state.target.change, 'local-change');
+  assert.equal(state.goal, true);
+}
+
+{
   const envInfo = makeEnv('legacy-env-cleared');
   let result = run(envInfo);
   assert.equal(result.status, 0, result.stderr);
@@ -329,7 +346,6 @@ function controllerPath(envInfo) {
     OPENSPEC_BUDDY_AUTO_ISSUE: '999',
     OPENSPEC_BUDDY_AUTO_PR: '888',
     OPENSPEC_BUDDY_AUTO_HEAD: 'stale-head',
-    OPENSPEC_BUDDY_AUTO_CHANGE: 'stale-change',
     OPENSPEC_BUDDY_AUTO_CHANGE_ID: 'stale-change-id',
     OPENSPEC_BUDDY_REVIEW_FIX_CONTEXT: '1',
   });

@@ -83,6 +83,17 @@ function runWithRepo(repo, fn) {
 }
 
 {
+  const repo = makeRepo('empty-change-target-seed');
+  runWithRepo(repo, () => {
+    let state = controller.initializeControllerState({}, { cwd: repo.repoDir });
+    assert.equal(state.target.change, '');
+    state = controller.initializeControllerState({ change: 'local-change', goal: true }, { cwd: repo.repoDir });
+    assert.equal(state.target.change, 'local-change');
+    assert.equal(state.goal, true);
+  });
+}
+
+{
   const repo = makeRepo('interrupt-not-upgraded');
   runWithRepo(repo, () => {
     let state = controller.initializeControllerState({ mode: 'single', issue: '123' }, { cwd: repo.repoDir });
