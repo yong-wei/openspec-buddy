@@ -13,8 +13,8 @@ function makeExecutable(file, body) {
   fs.writeFileSync(file, body, { mode: 0o755 });
 }
 
-function makeEnv() {
-  const root = path.join(tmp, 'park-then-fill-capacity');
+function makeEnv(name = 'park-then-fill-capacity') {
+  const root = path.join(tmp, name);
   const binDir = path.join(root, 'bin');
   const coreDir = path.join(root, 'core');
   const repoDir = path.join(root, 'repo');
@@ -108,6 +108,7 @@ fi
   makeExecutable(path.join(coreDir, 'probe-review-state.sh'), `#!/bin/bash
 echo "probe $*" >> ${JSON.stringify(logFile)}
 case "\${1:-}" in
+  707) printf '%s\\n' '{"pr":"707","head":"head-1","signature":"sig-707","requestState":"present-current-head","state":"waiting","requestAgeSeconds":60,"retryDue":false,"clearCandidate":false}' ;;
   709) printf '%s\\n' '{"pr":"709","head":"head-3","signature":"sig-709","requestState":"present-current-head","state":"waiting","requestAgeSeconds":60,"retryDue":false,"clearCandidate":false}' ;;
   *) printf '%s\\n' '{"pr":"708","head":"head-2","signature":"sig-708","requestState":"present-current-head","state":"waiting","requestAgeSeconds":60,"retryDue":false,"clearCandidate":false}' ;;
 esac
@@ -176,5 +177,46 @@ assert.deepEqual(
   state.lanes.map((lane) => [lane.issue, lane.pr, lane.stage]),
   [['676', '708', 'waiting_review'], ['677', '709', 'waiting_review']],
 );
+
+{
+  const parkedEnv = makeEnv('parked-review-fills-capacity-before-probe');
+  fs.mkdirSync(parkedEnv.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(parkedEnv.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: parkedEnv.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 2,
+    lanes: [
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0, reviewStatusSyncedAt: '2026-06-28T00:00:00.000Z', lastRequestState: 'present-current-head' },
+    ],
+  }));
+  const parkedResult = spawnSync(process.execPath, [laneDriver, '--poll-once'], {
+    cwd: parkedEnv.repoDir,
+    timeout: 60000,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      PATH: `${parkedEnv.binDir}:${process.env.PATH}`,
+      OPENSPEC_BUDDY_AUTO_CONTROLLER_CHILD: '1',
+      OPENSPEC_BUDDY_AUTO_GOAL: '1',
+      OPENSPEC_BUDDY_AUTO_LANES: '2',
+      OPENSPEC_BUDDY_AUTO_LANE_STATE_DIR: parkedEnv.stateDir,
+      OPENSPEC_BUDDY_AUTO_SINGLE_DRIVER: parkedEnv.singleDriver,
+      OPENSPEC_BUDDY_CORE_SCRIPT_DIR: parkedEnv.coreDir,
+      OPENSPEC_BUDDY_COMMAND_TIMEOUT_MS: '10000',
+    },
+  });
+  assert.equal(parkedResult.status, 0, parkedResult.stderr);
+  const parkedLog = fs.readFileSync(parkedEnv.logFile, 'utf8');
+  const selectIndex = parkedLog.indexOf('select excludes=');
+  const probeIndex = parkedLog.indexOf('probe 707');
+  assert.notEqual(selectIndex, -1, parkedLog);
+  assert.notEqual(probeIndex, -1, parkedLog);
+  assert.ok(selectIndex < probeIndex, parkedLog);
+  const parkedState = JSON.parse(fs.readFileSync(path.join(parkedEnv.stateDir, 'dev1.json'), 'utf8'));
+  assert.deepEqual(
+    parkedState.lanes.map((lane) => [lane.issue, lane.pr, lane.stage]),
+    [['675', '707', 'waiting_review'], ['676', '708', 'waiting_review']],
+  );
+}
 
 console.log('buddy-auto-lane-driver fast tests passed');

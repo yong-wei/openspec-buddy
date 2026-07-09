@@ -17,9 +17,12 @@ In single-lane mode, the controller may internally run the blocking review wait
 helper. The agent must not call that helper directly.
 
 In multi-lane mode, the controller parks lanes that are committed, pushed,
-coordinated, and waiting for a current-head Codex review. It then polls waiting
-lanes and schedules another lane only when the worktree is clean and the lane
-switch gates pass. This is pooled waiting, not parallel implementation.
+coordinated, and waiting for a current-head Codex review. `waiting_review` is a
+background parked lane state, not a foreground waiting phase. After parking a
+lane, the scheduler must first continue another owned lane or claim a new issue
+when capacity is available. It may poll parked review lanes only when no lane
+can be advanced and no new lane can be claimed. This is parked review
+scheduling, not parallel implementation.
 
 ## Polling Contract
 

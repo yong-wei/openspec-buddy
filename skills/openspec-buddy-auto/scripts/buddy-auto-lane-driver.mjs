@@ -931,6 +931,13 @@ function syncWaitingReviewStatusBeforeNewClaim(state) {
     && !lane.reviewStatusSyncedAt
   ));
   for (const lane of waiting) {
+    const prTruth = refreshWaitingLanePrTruth(state, lane);
+    if (prTruth.emitted) return true;
+    if (prTruth.handled) {
+      const refreshed = readLaneState({ maxLanes: state.maxLanes });
+      if (emitBlockedLaneSummaryIfTerminal(refreshed)) return true;
+      continue;
+    }
     if (markLaneInReviewOrBlock(state, lane, 'mark-review-before-claim')) return true;
   }
   return false;
@@ -1948,19 +1955,7 @@ function runScheduler(opts) {
       }
     }
     if (emitBlockedLaneSummaryIfTerminal(state)) return;
-    const beforeEarlyWaitingRetry = waitingReviewRetrySnapshot(state);
-    if (processWaitingReviewLanes(state)) return;
-    state = readLaneState({ maxLanes });
-    if (retrySnapshotChanged(beforeEarlyWaitingRetry, state)) {
-      if (emitBlockedLaneSummaryIfTerminal(state)) return;
-      emitDone([
-        ['stage', 'waiting_review'],
-        ['reason', 'Waiting review retry state changed; rerun the controller before probing this lane again.'],
-      ]);
-      return;
-    }
     if (emitBlockedLaneSummaryIfTerminal(state)) return;
-    let skipWaitingProbeOnce = beforeEarlyWaitingRetry.size > 0;
 
     if (blockIfForegroundLaneNotParked(state)) return;
 
@@ -1969,20 +1964,30 @@ function runScheduler(opts) {
       if (reconcileRecoverableLanes(state)) return;
       state = readLaneState({ maxLanes });
       if (emitBlockedLaneSummaryIfTerminal(state)) return;
-      if (skipWaitingProbeOnce) {
-        skipWaitingProbeOnce = false;
-      } else if (processWaitingReviewLanes(state)) return;
+      if (blockIfForegroundLaneNotParked(state)) return;
       state = readLaneState({ maxLanes });
       if (emitBlockedLaneSummaryIfTerminal(state)) return;
-      if (blockIfForegroundLaneNotParked(state)) return;
       if (opts.goal && verifyCurrentWaitingLaneIfOnBranch(state)) return;
-      if (opts.goal && syncWaitingReviewStatusBeforeNewClaim(state)) return;
       if (opts.goal) ensureBoundBranch();
-      if (opts.goal && recoverTargetIssueLane(state)) return;
+      if (opts.goal && reservedLaneCount(state) < state.maxLanes && syncWaitingReviewStatusBeforeNewClaim(state)) return;
+      if (opts.goal) ensureBoundBranch();
+      if (opts.goal && reservedLaneCount(state) < state.maxLanes && recoverTargetIssueLane(state)) return;
       const beforeClaim = JSON.stringify(state.lanes || []);
       if (claimNextIssue(state, opts)) return;
       state = readLaneState({ maxLanes });
       if (JSON.stringify(state.lanes || []) !== beforeClaim) continue;
+      const beforeWaitingRetry = waitingReviewRetrySnapshot(state);
+      if (processWaitingReviewLanes(state)) return;
+      state = readLaneState({ maxLanes });
+      if (retrySnapshotChanged(beforeWaitingRetry, state)) {
+        if (emitBlockedLaneSummaryIfTerminal(state)) return;
+        emitDone([
+          ['stage', 'waiting_review'],
+          ['reason', 'Waiting review retry state changed; rerun the controller before probing this lane again.'],
+        ]);
+        return;
+      }
+      if (emitBlockedLaneSummaryIfTerminal(state)) return;
       if (opts.pollOnce) {
         emitDone([
           ['stage', 'waiting_review'],
