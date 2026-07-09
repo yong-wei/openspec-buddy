@@ -121,6 +121,17 @@ export function threadCacheFreshForHead(truth = {}, head = '') {
   );
 }
 
+export function signatureHasReviewActivity(signature = '') {
+  try {
+    const parsed = JSON.parse(String(signature || '{}'));
+    return Number(parsed.reviews || 0) > 0
+      || Number(parsed.reviewComments || 0) > 0
+      || Boolean(parsed.latestReviewSubmittedAt);
+  } catch {
+    return false;
+  }
+}
+
 export function laneReviewTruth(lane = {}) {
   return normalizeReviewTruth({
     pr: lane.pr,

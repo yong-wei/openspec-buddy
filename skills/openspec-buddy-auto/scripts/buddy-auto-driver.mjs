@@ -457,6 +457,15 @@ function commandFor(opts, state) {
   const reviewClear = contextMatches && validReceipt(state, 'review_clear');
   const mergeGatesPassed = contextMatches && validReceipt(state, 'merge_gates_passed');
 
+  if (truthy(process.env.OPENSPEC_BUDDY_REVIEW_FIX_CONTEXT) && !reviewResponseGatePassed) {
+    return {
+      stage: 'review-response-gate',
+      command: [path.join(coreScriptDir, 'review-response-gate.sh'), opts.pr, '--head', opts.head],
+      reason: 'Review-fix context requires reply -> resolve -> verify before requesting or waiting for another review.',
+      records: ['review_response_gate_passed'],
+    };
+  }
+
   if (!markReviewPassed || !reviewRequested) {
     return {
       stage: 'mark-review',
@@ -467,14 +476,6 @@ function commandFor(opts, state) {
   }
 
   if (!reviewClear) {
-    if (truthy(process.env.OPENSPEC_BUDDY_REVIEW_FIX_CONTEXT) && !reviewResponseGatePassed) {
-      return {
-        stage: 'review-response-gate',
-        command: [path.join(coreScriptDir, 'review-response-gate.sh'), opts.pr, '--head', opts.head],
-        reason: 'Review-fix context requires reply -> resolve -> verify before requesting or waiting for another review.',
-        records: ['review_response_gate_passed'],
-      };
-    }
     if (process.env.OPENSPEC_BUDDY_AUTO_REVIEW_WAIT_MODE === 'yield') {
       return {
         stage: 'review-yield',

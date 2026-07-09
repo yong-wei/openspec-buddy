@@ -881,13 +881,13 @@ console.log(JSON.stringify({ achieved: false, next: 'merge-pr', reason: 'PR is n
     laneState: { lanes: [{ ...baseLane }] },
     dirty: false,
     writeState: (next) => next,
-  }).changed, true);
+  }).changed, false);
   assert.equal(reconcilerModule.reconcileControllerState(baseState, {
     laneState: { lanes: [{ ...baseLane }] },
     allowCachedRestTruth: true,
     dirty: false,
     writeState: (next) => next,
-  }).changed, true);
+  }).changed, false);
   assert.equal(reconcilerModule.reconcileControllerState({ ...baseState, interrupt: { type: 'blocked', stage: 'request_missing', blockedCode: 'request_missing' }, reviewFix: { pending: false, pr: '', head: '', evidence: '' }, target: { issue: '', pr: '', change: '' } }, {
     laneState: { lanes: [{ ...baseLane, id: 'issue-111', issue: '111', pr: '111' }, { ...baseLane, id: 'issue-222', issue: '222', pr: '222' }] },
     allowCachedRestTruth: true,

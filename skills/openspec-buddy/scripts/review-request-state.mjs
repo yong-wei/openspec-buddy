@@ -1,10 +1,13 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 
-const [reviewRequest, prFile, commitsFile, commentsFile] = process.argv.slice(2);
+const args = process.argv.slice(2);
+const jsonOutput = args[0] === '--json';
+if (jsonOutput) args.shift();
+const [reviewRequest, prFile, commitsFile, commentsFile] = args;
 
 if (!reviewRequest || !prFile || !commitsFile || !commentsFile) {
-  process.stderr.write('Usage: review-request-state.mjs <review-request> <pr-json> <commits-json> <issue-comments-json>\n');
+  process.stderr.write('Usage: review-request-state.mjs [--json] <review-request> <pr-json> <commits-json> <issue-comments-json>\n');
   process.exit(2);
 }
 
@@ -38,13 +41,20 @@ const headTime = entryTime(headCommit);
 const matchingRequests = comments.filter((comment) => String(comment?.body || '').includes(reviewRequest));
 
 if (headTime === null) {
-  process.stdout.write('unknown-head');
+  if (jsonOutput) process.stdout.write(`${JSON.stringify({ state: 'unknown-head', requestedAt: '' })}\n`);
+  else process.stdout.write('unknown-head');
   process.exit(0);
 }
 
-const freshRequest = matchingRequests.some((comment) => {
-  const createdAt = entryTime(comment);
-  return createdAt !== null && createdAt >= headTime;
-});
+const freshRequests = matchingRequests
+  .map((comment) => ({ comment, time: entryTime(comment) }))
+  .filter((entry) => entry.time !== null && entry.time >= headTime)
+  .sort((left, right) => left.time - right.time);
+const latestRequest = freshRequests.at(-1) || null;
+const state = latestRequest ? 'present-current-head' : 'missing-current-head';
+const requestedAt = latestRequest
+  ? String(latestRequest.comment?.createdAt || latestRequest.comment?.created_at || '')
+  : '';
 
-process.stdout.write(freshRequest ? 'present-current-head' : 'missing-current-head');
+if (jsonOutput) process.stdout.write(`${JSON.stringify({ state, requestedAt })}\n`);
+else process.stdout.write(state);
