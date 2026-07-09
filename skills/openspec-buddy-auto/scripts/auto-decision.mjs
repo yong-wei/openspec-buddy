@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { laneReviewTruth, threadCacheFreshForHead } from './review-truth.mjs';
+import { laneReviewTruth, signatureHasReviewActivity, threadCacheFreshForHead } from './review-truth.mjs';
 
 export const laneActions = new Set([
   'keep-waiting',
@@ -58,6 +58,14 @@ export function decideLaneAction({ lane = {}, reviewTruth = null, controllerInte
   }
   if (truth.probeState === 'retry_due' || truth.probeState === 'retry_expired') {
     return { action: 'request-current-head-review', reason: `probe state ${truth.probeState} permits bounded retry` };
+  }
+  if (
+    truth.probeState === 'waiting'
+    && truth.requestState === 'present-current-head'
+    && truth.threadState === 'unknown'
+    && signatureHasReviewActivity(truth.signature)
+  ) {
+    return { action: 'deep-check-review', reason: 'unchanged signature already contains review activity without thread truth' };
   }
   if (truth.probeState === 'waiting' && truth.requestState === 'present-current-head') {
     return { action: 'keep-waiting', reason: 'current-head request is present and signature is unchanged' };

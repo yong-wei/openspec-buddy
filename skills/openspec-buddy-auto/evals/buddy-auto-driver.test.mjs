@@ -570,8 +570,8 @@ const env = {
   });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(fs.readFileSync(reviewFixLogFile, 'utf8').trim(), [
-    'mark-review 12 34',
     'review-response-gate 34 --head fix-head',
+    'mark-review 12 34',
     'wait-review 34',
     'verify-review 34',
     'achieved-truth 12 34',

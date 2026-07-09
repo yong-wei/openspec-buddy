@@ -113,6 +113,27 @@ const clock = () => new Date('2026-06-30T00:00:00.000Z');
     reviewTruth: {
       pr: '743',
       head: 'head-1',
+      probeState: 'waiting',
+      requestState: 'present-current-head',
+      signature: JSON.stringify({
+        reviews: 1,
+        reviewComments: 0,
+        latestReviewSubmittedAt: '2026-06-30T00:00:00Z',
+      }),
+      restFreshAt: '2026-06-30T00:00:00.000Z',
+      threadState: 'unknown',
+      actionableState: 'unknown',
+    },
+  }).action, 'deep-check-review');
+}
+
+{
+  const lane = { stage: 'waiting_review', pr: '743', head: 'head-1' };
+  assert.equal(decideLaneAction({
+    lane,
+    reviewTruth: {
+      pr: '743',
+      head: 'head-1',
       probeState: 'changed',
       requestState: 'present-current-head',
     },

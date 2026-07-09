@@ -1275,6 +1275,40 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
 }
 
 {
+  const envInfo = makeEnv('waiting-review-baseline-review-activity-enters-review-fix');
+  const signature = JSON.stringify({
+    reviews: 1,
+    reviewComments: 0,
+    latestReviewSubmittedAt: '2026-06-28T00:00:00Z',
+  });
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 1,
+    lanes: [
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0, reviewStatusSyncedAt: '2026-06-28T00:00:00.000Z', lastRequestState: 'present-current-head', lastSignature: signature },
+    ],
+  }));
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '1',
+    CURRENT_BRANCH: 'dev1',
+    PROBE_SIGNATURE_707: signature.replaceAll('"', '\\"'),
+    CHECK_REVIEW_STATUS: '3',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^HANDOFF/m);
+  assert.match(result.stdout, /^stage: review-fix$/m);
+  const log = fs.readFileSync(envInfo.logFile, 'utf8');
+  assert.match(log, /probe 707/);
+  assert.match(log, /check 707/);
+  assert.match(log, /mark-in-progress 675/);
+  const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  assert.equal(state.lanes[0].stage, 'review_fix');
+}
+
+{
   const envInfo = makeEnv('waiting-review-waiting-allows-foreground-implementing');
   fs.mkdirSync(envInfo.stateDir, { recursive: true });
   fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({

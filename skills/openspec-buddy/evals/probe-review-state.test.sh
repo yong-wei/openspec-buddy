@@ -112,6 +112,7 @@ fi
 : > "$GH_LOG_FILE"
 export OPENSPEC_BUDDY_REVIEW_LAST_SIGNATURE="$(node -e 'const fs=require("node:fs"); const pr=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(JSON.stringify({number:pr.number,state:pr.state,merged:false,head:pr.head.sha,headRefName:pr.head.ref,updatedAt:pr.updated_at,comments:pr.comments,reviewComments:pr.review_comments,commits:pr.commits,reviews:0,latestReviewSubmittedAt:""}));' "$tmp_dir/pr.json")"
 export OPENSPEC_BUDDY_REVIEW_PREVIOUS_REQUEST_STATE=present-current-head
+export OPENSPEC_BUDDY_REVIEW_REQUESTED_AT=2026-01-01T00:01:00Z
 second_output="$(bash "$helper" 123)"
 node -e '
 const result = JSON.parse(process.argv[1]);
@@ -123,6 +124,32 @@ if grep -E 'commits|issues/123/comments|graphql' "$GH_LOG_FILE" >/dev/null; then
   cat "$GH_LOG_FILE" >&2
   exit 1
 fi
+
+: > "$GH_LOG_FILE"
+unset OPENSPEC_BUDDY_REVIEW_REQUESTED_AT
+export OPENSPEC_BUDDY_REVIEW_RETRY_SECONDS=1
+export OPENSPEC_BUDDY_REVIEW_RETRY_COUNT=0
+missing_time_output="$(bash "$helper" 123)"
+node -e '
+const result = JSON.parse(process.argv[1]);
+if (result.state !== "waiting") throw new Error(`expected waiting, got ${result.state}`);
+if (result.requestState !== "present-current-head") throw new Error("request state was not preserved");
+if (result.requestAgeSeconds <= 0) throw new Error("expected requestAgeSeconds to be backfilled");
+if (result.retryDue !== true) throw new Error("expected retryDue after backfilled requestedAt");
+' "$missing_time_output"
+if ! grep -E 'commits|issues/123/comments' "$GH_LOG_FILE" >/dev/null; then
+  echo "probe-review-state.sh should fetch comments/commits to backfill missing requestedAt" >&2
+  cat "$GH_LOG_FILE" >&2
+  exit 1
+fi
+review_fetch_count="$(grep -c 'pulls/123/reviews' "$GH_LOG_FILE" || true)"
+if [[ "$review_fetch_count" -gt 1 || "$(grep -c 'api graphql' "$GH_LOG_FILE" || true)" -gt 0 ]]; then
+  echo "probe-review-state.sh should not fetch extra reviews or GraphQL just to backfill requestedAt" >&2
+  cat "$GH_LOG_FILE" >&2
+  exit 1
+fi
+unset OPENSPEC_BUDDY_REVIEW_RETRY_SECONDS
+unset OPENSPEC_BUDDY_REVIEW_RETRY_COUNT
 
 : > "$GH_LOG_FILE"
 cat > "$tmp_dir/reviews-new-only.json" <<'JSON'

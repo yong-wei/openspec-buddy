@@ -63,26 +63,42 @@ head_sha="$(node -e 'const s=JSON.parse(process.argv[1]); process.stdout.write(s
 last_head_sha="${OPENSPEC_BUDDY_REVIEW_LAST_HEAD:-}"
 previous_request_state="${OPENSPEC_BUDDY_REVIEW_PREVIOUS_REQUEST_STATE:-}"
 request_state="$previous_request_state"
+request_info='{"state":"","requestedAt":""}'
 clear_candidate='{"hasCandidate":false}'
+needs_request_info=0
+needs_clear_candidate=0
 
 if [[ "$force_request_state" == "1" || "$signature" != "$last_signature" || -z "$request_state" ]]; then
+  needs_request_info=1
+  needs_clear_candidate=1
+elif [[ -z "${OPENSPEC_BUDDY_REVIEW_REQUESTED_AT:-}" && "$request_state" == "present-current-head" ]]; then
+  needs_request_info=1
+fi
+
+if [[ "$needs_request_info" == "1" || "$needs_clear_candidate" == "1" ]]; then
   pr_file="$cache_dir/probe-pr-${pr_number}.json"
   commits_file="$cache_dir/probe-commits-${pr_number}.json"
   comments_file="$cache_dir/probe-issue-comments-${pr_number}.json"
-  reviews_file="$cache_dir/probe-reviews-${pr_number}.json"
   node -e '
 const fs = require("node:fs");
 const signature = JSON.parse(process.argv[1]);
 process.stdout.write(`${JSON.stringify({ head: { sha: signature.head || "" } })}\n`);
-' "$signature" > "$pr_file"
+  ' "$signature" > "$pr_file"
   buddy_gh_api_paginated_array "repos/$repo_nwo/pulls/$pr_number/commits?per_page=100" > "$commits_file"
   buddy_gh_api_paginated_array "repos/$repo_nwo/issues/$pr_number/comments?per_page=100" > "$comments_file"
-  buddy_gh_api_paginated_array "repos/$repo_nwo/pulls/$pr_number/reviews?per_page=100" > "$reviews_file"
-  request_state="$(node "$script_dir/review-request-state.mjs" "$OPENSPEC_BUDDY_PR_REVIEW_REQUEST" "$pr_file" "$commits_file" "$comments_file")"
-  clear_candidate="$(node "$script_dir/current-head-clear-comment-candidate.mjs" "$OPENSPEC_BUDDY_PR_REVIEW_REQUEST" "$pr_file" "$commits_file" "$comments_file" "$reviews_file" "${OPENSPEC_BUDDY_PR_REVIEW_AUTHOR:-chatgpt-codex-connector}")"
+  request_info="$(node "$script_dir/review-request-state.mjs" --json "$OPENSPEC_BUDDY_PR_REVIEW_REQUEST" "$pr_file" "$commits_file" "$comments_file")"
+  request_state="$(node -e 'const data=JSON.parse(process.argv[1] || "{}"); process.stdout.write(data.state || "");' "$request_info")"
+  if [[ "$needs_clear_candidate" == "1" ]]; then
+    reviews_file="$cache_dir/probe-reviews-${pr_number}.json"
+    buddy_gh_api_paginated_array "repos/$repo_nwo/pulls/$pr_number/reviews?per_page=100" > "$reviews_file"
+    clear_candidate="$(node "$script_dir/current-head-clear-comment-candidate.mjs" "$OPENSPEC_BUDDY_PR_REVIEW_REQUEST" "$pr_file" "$commits_file" "$comments_file" "$reviews_file" "${OPENSPEC_BUDDY_PR_REVIEW_AUTHOR:-chatgpt-codex-connector}")"
+  fi
 fi
 
 requested_at="${OPENSPEC_BUDDY_REVIEW_REQUESTED_AT:-}"
+if [[ -z "$requested_at" ]]; then
+  requested_at="$(node -e 'const data=JSON.parse(process.argv[1] || "{}"); process.stdout.write(data.requestedAt || "");' "$request_info")"
+fi
 retry_after="${OPENSPEC_BUDDY_REVIEW_RETRY_SECONDS:-900}"
 retry_count="${OPENSPEC_BUDDY_REVIEW_RETRY_COUNT:-0}"
 if ! [[ "$retry_after" =~ ^[0-9]+$ && "$retry_count" =~ ^[0-9]+$ ]]; then
