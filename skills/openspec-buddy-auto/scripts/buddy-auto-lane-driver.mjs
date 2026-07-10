@@ -1194,12 +1194,22 @@ function blockIfForegroundLaneNotParked(state) {
   if (!lane) return false;
   const branch = currentBranch();
   if (lane.branch && branch && branch !== lane.branch) {
+    const originalBranch = branch;
     const laneSnapshot = structuredClone(lane);
     const resumed = resumeLaneOrFail(state, lane, 'resume-foreground-lane');
     if (!resumed.ok) {
       if (resumed.handoff === 'review_fix') {
         emitReviewFixHandoff(lane, resumed.reason);
       } else {
+        let reason = resumed.reason;
+        if (currentBranch() !== originalBranch) {
+          const restored = run('git', ['switch', originalBranch], { allowFailure: true });
+          const restoredBranch = currentBranch();
+          if (restored.status !== 0 || restoredBranch !== originalBranch) {
+            const restoreReason = restored.stderr || restored.stdout || `current branch is ${restoredBranch || 'unknown'}`;
+            reason = `${reason}\nfailed to restore original branch ${originalBranch}: ${restoreReason.trim()}`;
+          }
+        }
         for (const key of Object.keys(lane)) delete lane[key];
         Object.assign(lane, laneSnapshot);
         writeLaneState(state);
@@ -1208,7 +1218,7 @@ function blockIfForegroundLaneNotParked(state) {
           ['lane', lane.id],
           ['issue', lane.issue],
           ['pr', lane.pr],
-          ['reason', resumed.reason],
+          ['reason', reason],
         ]);
       }
       return true;

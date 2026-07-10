@@ -65,6 +65,10 @@ case "\${1:-}" in
     ;;
   switch)
     echo "switch \${2:-}" >> ${JSON.stringify(logFile)}
+    if [[ "\${SWITCH_FAIL_FOR:-}" == "\${2:-}" ]]; then
+      echo "switch failed for \${2:-}" >&2
+      exit 42
+    fi
     printf '%s\\n' "\${2:-}" > "$branch_file"
     exit 0
     ;;
@@ -1355,6 +1359,80 @@ function normalizedLane(overrides) {
 }
 
 {
+  const envInfo = makeEnv('claim-failed-owned-lane-resume-restores-original-branch');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  const initialLanes = [
+    normalizedLane({ id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewStatusSyncedAt: '2026-06-28T00:00:00.000Z' }),
+    normalizedLane({ id: 'issue-676', issue: '676', change: 'change-676', branch: 'change-676', pr: '708', head: 'head-2', stage: 'implementing' }),
+  ];
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 2,
+    lanes: initialLanes,
+  }));
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '2',
+    CURRENT_BRANCH: 'change-675',
+    CLAIM_GUARD_FAIL: '1',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^BLOCKED/m);
+  assert.match(result.stdout, /foreign claim/);
+  const log = fs.readFileSync(envInfo.logFile, 'utf8');
+  assert.match(log, /switch change-676/);
+  assert.match(log, /switch change-675/);
+  assert.ok(log.indexOf('switch change-675') > log.indexOf('switch change-676'), log);
+  assert.doesNotMatch(log, /driver-env/);
+  assert.doesNotMatch(log, /probe 707/);
+  assert.doesNotMatch(log, /probe 708/);
+  assert.doesNotMatch(log, /select excludes=/);
+  assert.doesNotMatch(log, /claim 676/);
+  assert.equal(fs.readFileSync(envInfo.branchFile, 'utf8').trim(), 'change-675');
+  const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  assert.deepEqual(state.lanes, initialLanes);
+}
+
+{
+  const envInfo = makeEnv('failed-original-branch-restore-is-reported');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  const initialLanes = [
+    normalizedLane({ id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewStatusSyncedAt: '2026-06-28T00:00:00.000Z' }),
+    normalizedLane({ id: 'issue-676', issue: '676', change: 'change-676', branch: 'change-676', pr: '708', head: 'head-2', stage: 'implementing' }),
+  ];
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 2,
+    lanes: initialLanes,
+  }));
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '2',
+    CURRENT_BRANCH: 'change-675',
+    CLAIM_GUARD_FAIL: '1',
+    SWITCH_FAIL_FOR: 'change-675',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^BLOCKED/m);
+  assert.match(result.stdout, /foreign claim/);
+  assert.match(result.stdout, /failed to restore original branch change-675/i);
+  assert.match(result.stdout, /switch failed for change-675/);
+  const log = fs.readFileSync(envInfo.logFile, 'utf8');
+  assert.match(log, /switch change-676/);
+  assert.match(log, /switch change-675/);
+  assert.doesNotMatch(log, /driver-env/);
+  assert.doesNotMatch(log, /probe 707/);
+  assert.doesNotMatch(log, /probe 708/);
+  assert.doesNotMatch(log, /select excludes=/);
+  assert.doesNotMatch(log, /claim 676/);
+  assert.equal(fs.readFileSync(envInfo.branchFile, 'utf8').trim(), 'change-676');
+  const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  assert.deepEqual(state.lanes, initialLanes);
+}
+
+{
   const envInfo = makeEnv('owned-lane-wrong-head-preserves-review-fix-normalization');
   fs.mkdirSync(envInfo.stateDir, { recursive: true });
   fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
@@ -1377,8 +1455,10 @@ function normalizedLane(overrides) {
   assert.match(result.stdout, /^stage: review-fix$/m);
   const log = fs.readFileSync(envInfo.logFile, 'utf8');
   assert.match(log, /switch change-675/);
+  assert.doesNotMatch(log, /switch dev1/);
   assert.doesNotMatch(log, /driver-env/);
   assert.doesNotMatch(log, /probe 707/);
+  assert.equal(fs.readFileSync(envInfo.branchFile, 'utf8').trim(), 'change-675');
   const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
   assert.equal(state.lanes[0].stage, 'review_fix');
   assert.equal(state.lanes[0].head, 'new-local-head');
