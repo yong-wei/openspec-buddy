@@ -247,7 +247,8 @@ if ((issue === '676' || pr === '708') && process.env.FIND_PR_FOR_676 === '1') {
     head: 'head-2',
     stages: {
       issue_pr_bound: { issue: '676', pr: '708', head: 'head-2', headRefName: 'change-676' },
-      review_requested: { at: new Date().toISOString(), head: 'head-2' },
+      mark_review_passed: { at: new Date().toISOString(), pr: process.env.DRIVER_MARK_REVIEW_PR || '708', head: 'head-2' },
+      review_requested: { at: new Date().toISOString(), head: process.env.DRIVER_REVIEW_REQUEST_HEAD || 'head-2' },
     },
   }));
   console.log('DONE');
@@ -282,6 +283,17 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
     },
     encoding: 'utf8',
   });
+}
+
+function normalizedLane(overrides) {
+  return {
+    id: '', issue: '', change: '', branch: '', pr: '', head: '', stage: '', claimId: '',
+    reviewRequestedAt: '', reviewRetryCount: 0, lastProbeAt: '', lastSignature: '',
+    lastRequestState: '', lastResult: '', probeState: '', requestState: '', actionableState: '',
+    threadState: '', restFreshAt: '', threadsFreshAt: '', threadsHead: '',
+    reviewStatusSyncedAt: '', blockedReason: '', retryableStage: '', retryableHead: '',
+    retryableSince: '', retryAttempts: 0, updatedAt: '', ...overrides,
+  };
 }
 
 {
@@ -446,10 +458,35 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
   const log = fs.readFileSync(envInfo.logFile, 'utf8');
   assert.match(log, /pull-rest repos\/opt-de\/foo\.bar\/pulls\/708/);
   assert.match(log, /driver-env targetIssue= targetPr= lanePr=708/);
+  assert.equal((log.match(/^mark-review 676 708$/gm) || []).length, 1, log);
   const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
   const lane = state.lanes.find((candidate) => candidate.issue === '676');
   assert.equal(lane.stage, 'waiting_review');
   assert.equal(lane.pr, '708');
+  assert.match(lane.reviewStatusSyncedAt, /^\d{4}-\d{2}-\d{2}T/);
+}
+
+{
+  const envInfo = makeEnv('target-lane-mismatched-receipt-retains-mark-review-fallback');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 2,
+    lanes: [],
+  }));
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '2',
+    OPENSPEC_BUDDY_AUTO_TARGET_ISSUE: '676',
+    OPENSPEC_BUDDY_AUTO_TARGET_PR: '708',
+    FIND_PR_FOR_676: '1',
+    DRIVER_MARK_REVIEW_PR: '999',
+    CURRENT_BRANCH: 'dev1',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const log = fs.readFileSync(envInfo.logFile, 'utf8');
+  assert.equal((log.match(/^mark-review 676 708$/gm) || []).length, 2, log);
 }
 
 {
@@ -1209,7 +1246,11 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
   assert.match(second.stdout, /^stage: waiting_review$/m);
   const log = fs.readFileSync(envInfo.logFile, 'utf8');
   assert.match(log, /find-pr 676/);
-  assert.match(log, /mark-review 676 708/);
+  assert.equal(
+    (log.match(/^mark-review 676 708$/gm) || []).length,
+    1,
+    log,
+  );
   assert.match(log, /verify-claim --issue 676 --pr 708/);
   assert.match(log, /verify-request 708/);
   const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
@@ -1217,6 +1258,34 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
   assert.equal(lane.stage, 'waiting_review');
   assert.equal(lane.pr, '708');
   assert.equal(lane.head, 'head-2');
+  assert.match(lane.reviewStatusSyncedAt, /^\d{4}-\d{2}-\d{2}T/);
+}
+
+{
+  const envInfo = makeEnv('mismatched-review-receipt-retains-mark-review-fallback');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 2,
+    lanes: [
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0, reviewStatusSyncedAt: '2026-06-28T00:00:00.000Z' },
+    ],
+  }));
+  const first = run(envInfo, { OPENSPEC_BUDDY_AUTO_GOAL: '1', OPENSPEC_BUDDY_AUTO_LANES: '2', CURRENT_BRANCH: 'change-675' });
+  assert.equal(first.status, 0, first.stderr);
+  const second = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '2',
+    CURRENT_BRANCH: 'change-676',
+    FIND_PR_FOR_676: '1',
+    DRIVER_MARK_REVIEW_PR: '999',
+  });
+  assert.equal(second.status, 0, second.stderr);
+  const log = fs.readFileSync(envInfo.logFile, 'utf8');
+  assert.equal((log.match(/^mark-review 676 708$/gm) || []).length, 2, log);
+  const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  assert.match(state.lanes.find((candidate) => candidate.issue === '676').reviewStatusSyncedAt, /^\d{4}-\d{2}-\d{2}T/);
 }
 
 {
@@ -1239,15 +1308,81 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
   });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /^HANDOFF/m);
-  assert.match(result.stdout, /Switch to lane branch change-675/);
+  assert.doesNotMatch(result.stdout, /Switch to lane branch/);
   const log = fs.readFileSync(envInfo.logFile, 'utf8');
   assert.match(log, /mark-review 676 708/);
+  assert.match(log, /switch change-675/);
+  assert.ok(log.indexOf('switch change-675') > log.indexOf('mark-review 676 708'));
+  assert.doesNotMatch(log, /probe 707/);
+  assert.doesNotMatch(log, /probe 708/);
   assert.doesNotMatch(log, /select excludes=/);
   assert.doesNotMatch(log, /claim 676/);
   const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
   assert.equal(state.lanes.find((candidate) => candidate.issue === '676').stage, 'waiting_review');
   assert.match(state.lanes.find((candidate) => candidate.issue === '676').reviewStatusSyncedAt, /^\d{4}-\d{2}-\d{2}T/);
   assert.equal(state.lanes.find((candidate) => candidate.issue === '675').stage, 'implementing');
+}
+
+{
+  const envInfo = makeEnv('dirty-owned-lane-resume-blocks-before-switch-or-probes');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  const initialLanes = [
+    normalizedLane({ id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewStatusSyncedAt: '2026-06-28T00:00:00.000Z' }),
+    normalizedLane({ id: 'issue-676', issue: '676', change: 'change-676', branch: 'change-676', stage: 'implementing' }),
+  ];
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 2,
+    lanes: initialLanes,
+  }));
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '2',
+    CURRENT_BRANCH: 'change-675',
+    BUDDY_FAKE_DIRTY: '1',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^BLOCKED/m);
+  assert.match(result.stdout, /worktree is dirty/);
+  const log = fs.existsSync(envInfo.logFile) ? fs.readFileSync(envInfo.logFile, 'utf8') : '';
+  assert.doesNotMatch(log, /switch change-676/);
+  assert.doesNotMatch(log, /driver-env/);
+  assert.doesNotMatch(log, /probe 707/);
+  assert.doesNotMatch(log, /probe 708/);
+  const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  assert.deepEqual(state.lanes, initialLanes);
+}
+
+{
+  const envInfo = makeEnv('owned-lane-wrong-head-preserves-review-fix-normalization');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 2,
+    lanes: [
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'implementing', reviewRetryCount: 0 },
+    ],
+  }));
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '2',
+    CURRENT_BRANCH: 'dev1',
+    LOCAL_HEAD_675: 'new-local-head',
+    PR_707_HEAD: 'head-1',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^HANDOFF/m);
+  assert.match(result.stdout, /^stage: review-fix$/m);
+  const log = fs.readFileSync(envInfo.logFile, 'utf8');
+  assert.match(log, /switch change-675/);
+  assert.doesNotMatch(log, /driver-env/);
+  assert.doesNotMatch(log, /probe 707/);
+  const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  assert.equal(state.lanes[0].stage, 'review_fix');
+  assert.equal(state.lanes[0].head, 'new-local-head');
+  assert.equal(state.lanes[0].lastResult, 'local-review-fix-head-detected');
 }
 
 {
@@ -1475,9 +1610,11 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
     FIND_PR_FOR_676: '1',
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /^HANDOFF/m);
-  assert.match(result.stdout, /Switch to lane branch change-676/);
-  assert.equal(fs.existsSync(envInfo.logFile), false);
+  assert.match(result.stdout, /^DONE/m);
+  assert.doesNotMatch(result.stdout, /Switch to lane branch/);
+  const log = fs.readFileSync(envInfo.logFile, 'utf8');
+  assert.match(log, /switch change-676/);
+  assert.match(log, /driver-env/);
 }
 
 {
@@ -1507,6 +1644,32 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
   assert.equal(lane.head, 'head-2');
   assert.equal(lane.branch, 'change-676');
   assert.match(lane.reviewRequestedAt, /^\d{4}-\d{2}-\d{2}T/);
+  assert.match(lane.reviewStatusSyncedAt, /^\d{4}-\d{2}-\d{2}T/);
+  const log = fs.readFileSync(envInfo.logFile, 'utf8');
+  assert.equal((log.match(/^mark-review 676 708$/gm) || []).length, 1, log);
+}
+
+{
+  const envInfo = makeEnv('new-lane-mismatched-receipt-retains-mark-review-fallback');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 2,
+    lanes: [
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'waiting_review', reviewRetryCount: 0, reviewStatusSyncedAt: '2026-06-28T00:00:00.000Z' },
+    ],
+  }));
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '2',
+    CURRENT_BRANCH: 'change-676',
+    FIND_PR_FOR_676: '1',
+    DRIVER_MARK_REVIEW_PR: '999',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const log = fs.readFileSync(envInfo.logFile, 'utf8');
+  assert.equal((log.match(/^mark-review 676 708$/gm) || []).length, 2, log);
 }
 
 {
@@ -1613,6 +1776,40 @@ console.log('state_file: ${fakeState}');
   const log = fs.readFileSync(envInfo.logFile, 'utf8');
   assert.match(log, /probe 707 skip=1/);
   assert.doesNotMatch(log, /check 707/);
+}
+
+for (const receiptCase of [
+  { name: 'valid', markReviewPr: '708', expectedMarkReviewCount: 1 },
+  { name: 'mismatched', markReviewPr: '999', expectedMarkReviewCount: 2 },
+]) {
+  const envInfo = makeEnv(`resumed-lane-${receiptCase.name}-receipt-coordination-count`);
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 2,
+    lanes: [
+      { id: 'issue-676', issue: '676', change: 'change-676', branch: 'change-676', pr: '708', head: 'head-2', stage: 'review_fix', reviewRetryCount: 0 },
+    ],
+  }));
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '2',
+    CURRENT_BRANCH: 'change-676',
+    FIND_PR_FOR_676: '1',
+    DRIVER_MARK_REVIEW_PR: receiptCase.markReviewPr,
+    SELECT_NONE: '1',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const log = fs.readFileSync(envInfo.logFile, 'utf8');
+  assert.equal(
+    (log.match(/^mark-review 676 708$/gm) || []).length,
+    receiptCase.expectedMarkReviewCount,
+    log,
+  );
+  const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  assert.equal(state.lanes[0].stage, 'waiting_review');
+  assert.match(state.lanes[0].reviewStatusSyncedAt, /^\d{4}-\d{2}-\d{2}T/);
 }
 
 {
