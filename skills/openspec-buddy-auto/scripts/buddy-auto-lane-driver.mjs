@@ -26,6 +26,7 @@ const coreScriptDir = process.env.OPENSPEC_BUDDY_CORE_SCRIPT_DIR || defaultCoreS
 const singleDriver = process.env.OPENSPEC_BUDDY_AUTO_SINGLE_DRIVER || path.join(autoScriptDir, 'buddy-auto-driver.mjs');
 const laneSwitchGate = path.join(autoScriptDir, 'lane-switch-gate.mjs');
 const prTruthCache = new Map();
+let justSafeYieldedLane = null;
 
 function truthy(value) {
   return ['1', 'true', 'yes', 'on'].includes(String(value || '').toLowerCase());
@@ -1179,6 +1180,11 @@ function parkLaneFromDriverReceipt(state, lane, parsed, driverState) {
     ...candidateLane,
   });
   writeLaneState(state);
+  justSafeYieldedLane = {
+    id: candidateLane.id,
+    pr: candidateLane.pr,
+    head: candidateLane.head,
+  };
   return { status: 'parked', lane: candidateLane, reviewStatusSyncedAt };
 }
 
@@ -1261,6 +1267,14 @@ function verifyCurrentWaitingLaneIfOnBranch(state) {
   if (!branch) return false;
   const lane = state.lanes.find((candidate) => candidate.stage === 'waiting_review' && candidate.branch === branch);
   if (!lane) return false;
+  const safeYieldedLane = justSafeYieldedLane;
+  justSafeYieldedLane = null;
+  if (
+    safeYieldedLane
+    && safeYieldedLane.id === lane.id
+    && safeYieldedLane.pr === lane.pr
+    && safeYieldedLane.head === lane.head
+  ) return false;
   const safe = safeYieldCurrentLane(lane);
   if (safe.status === 0) return false;
   const reason = safe.stderr || safe.stdout || 'safe-yield gate failed';

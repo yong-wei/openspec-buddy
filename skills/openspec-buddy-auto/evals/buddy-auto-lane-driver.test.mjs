@@ -1647,6 +1647,35 @@ function normalizedLane(overrides) {
   assert.match(lane.reviewStatusSyncedAt, /^\d{4}-\d{2}-\d{2}T/);
   const log = fs.readFileSync(envInfo.logFile, 'utf8');
   assert.equal((log.match(/^mark-review 676 708$/gm) || []).length, 1, log);
+  assert.equal((log.match(/^verify-claim --issue 676 --pr 708$/gm) || []).length, 1, log);
+  assert.equal((log.match(/^verify-request 708$/gm) || []).length, 1, log);
+}
+
+{
+  const envInfo = makeEnv('just-parked-marker-does-not-skip-other-lane');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 3,
+    lanes: [
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-676', pr: '707', head: 'head-2', stage: 'waiting_review', reviewRetryCount: 0, reviewStatusSyncedAt: '2026-06-28T00:00:00.000Z' },
+    ],
+  }));
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '3',
+    CURRENT_BRANCH: 'change-675',
+    FIND_PR_FOR_676: '1',
+    PR_707_BRANCH: 'change-676',
+    PR_707_HEAD: 'head-2',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const log = fs.readFileSync(envInfo.logFile, 'utf8');
+  assert.equal((log.match(/^verify-claim --issue 676 --pr 708$/gm) || []).length, 1, log);
+  assert.equal((log.match(/^verify-request 708$/gm) || []).length, 1, log);
+  assert.equal((log.match(/^verify-claim --issue 675 --pr 707$/gm) || []).length, 1, log);
+  assert.equal((log.match(/^verify-request 707$/gm) || []).length, 1, log);
 }
 
 {
