@@ -1202,16 +1202,26 @@ function blockIfForegroundLaneNotParked(state) {
         emitReviewFixHandoff(lane, resumed.reason);
       } else {
         let reason = resumed.reason;
-        if (currentBranch() !== originalBranch) {
+        let originalBranchRestored = currentBranch() === originalBranch;
+        if (!originalBranchRestored) {
           const restored = run('git', ['switch', originalBranch], { allowFailure: true });
           const restoredBranch = currentBranch();
-          if (restored.status !== 0 || restoredBranch !== originalBranch) {
+          originalBranchRestored = restored.status === 0 && restoredBranch === originalBranch;
+          if (!originalBranchRestored) {
             const restoreReason = restored.stderr || restored.stdout || `current branch is ${restoredBranch || 'unknown'}`;
             reason = `${reason}\nfailed to restore original branch ${originalBranch}: ${restoreReason.trim()}`;
           }
         }
-        for (const key of Object.keys(lane)) delete lane[key];
-        Object.assign(lane, laneSnapshot);
+        if (originalBranchRestored) {
+          for (const key of Object.keys(lane)) delete lane[key];
+          Object.assign(lane, laneSnapshot);
+        } else {
+          lane.stage = 'blocked';
+          lane.blockedReason = reason;
+          lane.lastResult = 'resume-branch-restore-failed';
+          clearRetryableState(lane);
+          lane.updatedAt = new Date().toISOString();
+        }
         writeLaneState(state);
         emitBlocked([
           ['stage', 'resume-lane'],

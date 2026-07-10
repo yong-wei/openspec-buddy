@@ -337,6 +337,7 @@ export function selectorExcludedIssues(state) {
 
 export function laneNeedsReconciliation(lane) {
   if (!lane || lane.stage === 'done') return false;
+  if (lane.stage === 'blocked' && lane.lastResult === 'resume-branch-restore-failed') return false;
   return lane.stage === 'retryable_blocked'
     || (lane.stage === 'blocked' && Boolean(lane.issue || lane.pr || lane.branch || lane.claimId));
 }

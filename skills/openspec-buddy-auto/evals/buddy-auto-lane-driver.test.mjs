@@ -1429,7 +1429,31 @@ function normalizedLane(overrides) {
   assert.doesNotMatch(log, /claim 676/);
   assert.equal(fs.readFileSync(envInfo.branchFile, 'utf8').trim(), 'change-676');
   const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
-  assert.deepEqual(state.lanes, initialLanes);
+  const failedLane = state.lanes.find((lane) => lane.issue === '676');
+  assert.equal(failedLane.stage, 'blocked');
+  assert.match(failedLane.blockedReason, /foreign claim/);
+  assert.match(failedLane.blockedReason, /failed to restore original branch change-675/i);
+  assert.match(failedLane.blockedReason, /switch failed for change-675/);
+  assert.equal(failedLane.lastResult, 'resume-branch-restore-failed');
+  assert.equal(failedLane.retryableStage, '');
+  assert.equal(failedLane.retryableHead, '');
+  assert.equal(failedLane.retryableSince, '');
+  assert.equal(failedLane.retryAttempts, 0);
+
+  const second = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '2',
+    CURRENT_BRANCH: 'change-676',
+    SELECT_NONE: '1',
+  });
+  assert.equal(second.status, 0, second.stderr);
+  assert.match(second.stdout, /^(?:BLOCKED|DONE)/m);
+  const secondLog = fs.readFileSync(envInfo.logFile, 'utf8').slice(log.length);
+  assert.doesNotMatch(secondLog, /driver-env/);
+  assert.doesNotMatch(secondLog, /^claim 676$/m);
+  assert.doesNotMatch(secondLog, /probe 708/);
+  const secondState = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  assert.equal(secondState.lanes.find((lane) => lane.issue === '676').stage, 'blocked');
 }
 
 {
