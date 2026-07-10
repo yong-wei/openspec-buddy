@@ -26,6 +26,7 @@ const coreScriptDir = process.env.OPENSPEC_BUDDY_CORE_SCRIPT_DIR || defaultCoreS
 const singleDriver = process.env.OPENSPEC_BUDDY_AUTO_SINGLE_DRIVER || path.join(autoScriptDir, 'buddy-auto-driver.mjs');
 const laneSwitchGate = path.join(autoScriptDir, 'lane-switch-gate.mjs');
 const prTruthCache = new Map();
+let justSafeYieldedLane = null;
 
 function truthy(value) {
   return ['1', 'true', 'yes', 'on'].includes(String(value || '').toLowerCase());
@@ -1055,7 +1056,7 @@ function advanceIssueFromSingleDriver(state, selected, sourceStage) {
     return true;
   }
   if (parkResult.status === 'parked') {
-    if (markLaneInReviewOrBlock(state, parkResult.lane, sourceStage === 'recover-stale-claim' ? 'mark-review-recovered-lane' : 'mark-review-new-lane')) return true;
+    if (!parkResult.reviewStatusSyncedAt && markLaneInReviewOrBlock(state, parkResult.lane, sourceStage === 'recover-stale-claim' ? 'mark-review-recovered-lane' : 'mark-review-new-lane')) return true;
     return false;
   }
   if (parkResult.status === 'review_fix_handoff') {
@@ -1100,7 +1101,7 @@ function advanceTargetLaneFromSingleDriver(state, lane) {
     return true;
   }
   if (parkResult.status === 'parked') {
-    if (markLaneInReviewOrBlock(state, parkResult.lane, 'mark-review-target-lane')) return true;
+    if (!parkResult.reviewStatusSyncedAt && markLaneInReviewOrBlock(state, parkResult.lane, 'mark-review-target-lane')) return true;
     return false;
   }
   if (parkResult.status === 'review_fix_handoff') {
@@ -1122,6 +1123,20 @@ function advanceTargetLaneFromSingleDriver(state, lane) {
   return true;
 }
 
+function reviewStatusSyncedAtFromDriverReceipt(driverState, candidatePr, candidateHead) {
+  const markReviewPassed = driverState.stages?.mark_review_passed;
+  const reviewRequested = driverState.stages?.review_requested;
+  if (!markReviewPassed || !reviewRequested) return '';
+  const pr = String(candidatePr || '');
+  const head = String(candidateHead || '');
+  const receiptPrs = [markReviewPassed.pr, reviewRequested.pr]
+    .filter((value) => value !== undefined && value !== null && String(value) !== '')
+    .map(String);
+  if (!pr || receiptPrs.some((value) => value !== pr)) return '';
+  if (!head || String(reviewRequested.head || '') !== head) return '';
+  return String(markReviewPassed.at || reviewRequested.at || '');
+}
+
 function parkLaneFromDriverReceipt(state, lane, parsed, driverState) {
   const issuePrBound = driverState.stages?.issue_pr_bound || {};
   const reviewRequested = driverState.stages?.review_requested || {};
@@ -1134,6 +1149,7 @@ function parkLaneFromDriverReceipt(state, lane, parsed, driverState) {
     };
   }
   if (parsed.stage !== 'review-yield') return { status: 'ignored' };
+  const reviewStatusSyncedAt = reviewStatusSyncedAtFromDriverReceipt(driverState, lanePr, laneHead);
   const candidateLane = {
     ...lane,
     issue: String(driverState.issue || issuePrBound.issue || lane.issue || ''),
@@ -1143,6 +1159,7 @@ function parkLaneFromDriverReceipt(state, lane, parsed, driverState) {
     head: laneHead,
     stage: 'waiting_review',
     reviewRequestedAt: reviewRequested.at || lane.reviewRequestedAt || '',
+    reviewStatusSyncedAt,
     lastResult: parsed.stage,
   };
   const safe = safeYieldCurrentLane(candidateLane);
@@ -1163,7 +1180,12 @@ function parkLaneFromDriverReceipt(state, lane, parsed, driverState) {
     ...candidateLane,
   });
   writeLaneState(state);
-  return { status: 'parked', lane: candidateLane };
+  justSafeYieldedLane = {
+    id: candidateLane.id,
+    pr: candidateLane.pr,
+    head: candidateLane.head,
+  };
+  return { status: 'parked', lane: candidateLane, reviewStatusSyncedAt };
 }
 
 function blockIfForegroundLaneNotParked(state) {
@@ -1172,14 +1194,45 @@ function blockIfForegroundLaneNotParked(state) {
   if (!lane) return false;
   const branch = currentBranch();
   if (lane.branch && branch && branch !== lane.branch) {
-    emitHandoff([
-      ['stage', lane.stage],
-      ['lane', lane.id],
-      ['issue', lane.issue],
-      ['pr', lane.pr],
-      ['required_action', `Switch to lane branch ${lane.branch} before advancing this foreground lane.`],
-    ]);
-    return true;
+    const originalBranch = branch;
+    const laneSnapshot = structuredClone(lane);
+    const resumed = resumeLaneOrFail(state, lane, 'resume-foreground-lane');
+    if (!resumed.ok) {
+      if (resumed.handoff === 'review_fix') {
+        emitReviewFixHandoff(lane, resumed.reason);
+      } else {
+        let reason = resumed.reason;
+        let originalBranchRestored = currentBranch() === originalBranch;
+        if (!originalBranchRestored) {
+          const restored = run('git', ['switch', originalBranch], { allowFailure: true });
+          const restoredBranch = currentBranch();
+          originalBranchRestored = restored.status === 0 && restoredBranch === originalBranch;
+          if (!originalBranchRestored) {
+            const restoreReason = restored.stderr || restored.stdout || `current branch is ${restoredBranch || 'unknown'}`;
+            reason = `${reason}\nfailed to restore original branch ${originalBranch}: ${restoreReason.trim()}`;
+          }
+        }
+        if (originalBranchRestored) {
+          for (const key of Object.keys(lane)) delete lane[key];
+          Object.assign(lane, laneSnapshot);
+        } else {
+          lane.stage = 'blocked';
+          lane.blockedReason = reason;
+          lane.lastResult = 'resume-branch-restore-failed';
+          clearRetryableState(lane);
+          lane.updatedAt = new Date().toISOString();
+        }
+        writeLaneState(state);
+        emitBlocked([
+          ['stage', 'resume-lane'],
+          ['lane', lane.id],
+          ['issue', lane.issue],
+          ['pr', lane.pr],
+          ['reason', reason],
+        ]);
+      }
+      return true;
+    }
   }
   const driver = runSingleDriverForLane(lane);
   if (driver.status !== 0) {
@@ -1212,7 +1265,7 @@ function blockIfForegroundLaneNotParked(state) {
     return true;
   }
   if (parkResult.status === 'parked') {
-    if (markLaneInReviewOrBlock(state, parkResult.lane, lane.stage === 'review_fix' ? 'mark-review-after-review-fix' : 'mark-review-foreground-lane')) return true;
+    if (!parkResult.reviewStatusSyncedAt && markLaneInReviewOrBlock(state, parkResult.lane, lane.stage === 'review_fix' ? 'mark-review-after-review-fix' : 'mark-review-foreground-lane')) return true;
     return false;
   }
   if (parkResult.status === 'review_fix_handoff') {
@@ -1234,6 +1287,14 @@ function verifyCurrentWaitingLaneIfOnBranch(state) {
   if (!branch) return false;
   const lane = state.lanes.find((candidate) => candidate.stage === 'waiting_review' && candidate.branch === branch);
   if (!lane) return false;
+  const safeYieldedLane = justSafeYieldedLane;
+  justSafeYieldedLane = null;
+  if (
+    safeYieldedLane
+    && safeYieldedLane.id === lane.id
+    && safeYieldedLane.pr === lane.pr
+    && safeYieldedLane.head === lane.head
+  ) return false;
   const safe = safeYieldCurrentLane(lane);
   if (safe.status === 0) return false;
   const reason = safe.stderr || safe.stdout || 'safe-yield gate failed';
@@ -1382,7 +1443,7 @@ function advanceResumedLane(state, lane) {
     return true;
   }
   if (parkResult.status === 'parked') {
-    if (markLaneInReviewOrBlock(state, parkResult.lane, lane.stage === 'review_fix' ? 'mark-review-after-review-fix' : 'mark-review-resumed-lane')) return true;
+    if (!parkResult.reviewStatusSyncedAt && markLaneInReviewOrBlock(state, parkResult.lane, lane.stage === 'review_fix' ? 'mark-review-after-review-fix' : 'mark-review-resumed-lane')) return true;
     return false;
   }
   if (lane.stage === 'review_fix' && parsed.stage === 'review-fix') {
