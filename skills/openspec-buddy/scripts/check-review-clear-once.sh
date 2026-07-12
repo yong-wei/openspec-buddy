@@ -72,6 +72,11 @@ is_actionable_review_failure() {
   return 1
 }
 
+is_unavailable_review_failure() {
+  local output="$1"
+  grep -E '^review_outcome: unavailable$|Review response is unavailable' <<<"$output" >/dev/null
+}
+
 is_waitable_review_failure() {
   local output="$1"
   if grep -E 'No review found|no .*review request comment after the current head|top-level clear comment exists|targets .*,? not current head' <<<"$output" >/dev/null; then
@@ -122,6 +127,11 @@ if [[ "$status" -eq 124 ]]; then
   echo "Review clearance verifier timed out after ${command_timeout}s." >&2
   cat "$output_file" >&2
   exit 2
+fi
+
+if is_unavailable_review_failure "$(cat "$output_file")"; then
+  cat "$output_file"
+  exit 4
 fi
 
 if is_actionable_review_failure "$(cat "$output_file")"; then

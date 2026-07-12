@@ -35,7 +35,9 @@ function basePr(review, overrides = {}) {
   return {
     number: 162,
     headRefOid: 'abc123',
-    reviews: [review],
+    commits: [{ oid: 'abc123', committedDate: '2026-01-01T00:00:00Z' }],
+    comments: [{ author: { login: 'YW' }, body: reviewRequest, createdAt: '2026-01-01T00:01:00Z' }],
+    reviews: [{ submittedAt: '2026-01-01T00:02:00Z', ...review }],
     ...overrides,
   };
 }
@@ -214,6 +216,81 @@ try {
   );
   assert.match(staleBotReviewWithHeadRequestedBotClearComment.stdout, /top-level PR comment/);
   assert.match(staleBotReviewWithHeadRequestedBotClearComment.stdout, /issuecomment-bot-clear/);
+
+  const quotaComment = 'You have reached your Codex usage limits for code reviews. You can see your limits in the Codex usage dashboard.\nTo continue using code reviews, add credits to your account.';
+  const quotaOnly = runVerify({
+    pr: basePr({}, {
+      reviews: [],
+      comments: [
+        { author: { login: 'YW' }, body: reviewRequest, createdAt: '2026-01-01T00:03:00Z' },
+        { author: { login: `${reviewer}[bot]` }, body: quotaComment, createdAt: '2026-01-01T00:04:00Z' },
+      ],
+    }),
+  });
+  assert.notEqual(quotaOnly.status, 0);
+  assert.match(quotaOnly.stderr, /review_outcome: unavailable/);
+  assert.match(quotaOnly.stderr, /Review response is unavailable/);
+  assert.doesNotMatch(quotaOnly.stdout, /Review clearance verified/);
+
+  const oldClearThenQuota = runVerify({
+    pr: basePr({}, {
+      reviews: [],
+      comments: [
+        { author: { login: 'YW' }, body: reviewRequest, createdAt: '2026-01-01T00:03:00Z' },
+        { author: { login: `${reviewer}[bot]` }, body: "Didn't find any major issues.", createdAt: '2026-01-01T00:04:00Z' },
+        { author: { login: 'YW' }, body: reviewRequest, createdAt: '2026-01-01T00:05:00Z' },
+        { author: { login: `${reviewer}[bot]` }, body: quotaComment, createdAt: '2026-01-01T00:06:00Z' },
+      ],
+    }),
+  });
+  assert.notEqual(oldClearThenQuota.status, 0);
+  assert.match(oldClearThenQuota.stderr, /review_outcome: unavailable/);
+
+  const quotaThenCurrentHeadClear = runVerify({
+    pr: basePr({}, {
+      reviews: [],
+      comments: [
+        { author: { login: 'YW' }, body: reviewRequest, createdAt: '2026-01-01T00:03:00Z' },
+        { author: { login: `${reviewer}[bot]` }, body: quotaComment, createdAt: '2026-01-01T00:04:00Z' },
+        { author: { login: 'YW' }, body: reviewRequest, createdAt: '2026-01-01T00:05:00Z' },
+        { author: { login: `${reviewer}[bot]` }, body: "Didn't find any major issues.", createdAt: '2026-01-01T00:06:00Z' },
+      ],
+    }),
+  });
+  assert.equal(
+    quotaThenCurrentHeadClear.status,
+    0,
+    quotaThenCurrentHeadClear.stderr || quotaThenCurrentHeadClear.stdout,
+  );
+  assert.match(quotaThenCurrentHeadClear.stdout, /Review clearance verified/);
+
+  const clearThenUnknown = runVerify({
+    pr: basePr({}, {
+      reviews: [],
+      comments: [
+        { author: { login: 'YW' }, body: reviewRequest, createdAt: '2026-01-01T00:03:00Z' },
+        { author: { login: `${reviewer}[bot]` }, body: "Didn't find any major issues.", createdAt: '2026-01-01T00:04:00Z' },
+        { author: { login: `${reviewer}[bot]` }, body: 'Review is still being analyzed.', createdAt: '2026-01-01T00:05:00Z' },
+      ],
+    }),
+  });
+  assert.notEqual(clearThenUnknown.status, 0);
+  assert.match(clearThenUnknown.stderr, /review_outcome: unknown/);
+  assert.doesNotMatch(clearThenUnknown.stdout, /Review clearance verified/);
+
+  const clearBeforeHeadChange = runVerify({
+    pr: basePr({}, {
+      headRefOid: 'head-2',
+      commits: [{ oid: 'head-2', committedDate: '2026-01-01T00:05:00Z' }],
+      reviews: [],
+      comments: [
+        { author: { login: 'YW' }, body: reviewRequest, createdAt: '2026-01-01T00:03:00Z' },
+        { author: { login: `${reviewer}[bot]` }, body: "Didn't find any major issues.", createdAt: '2026-01-01T00:04:00Z' },
+      ],
+    }),
+  });
+  assert.notEqual(clearBeforeHeadChange.status, 0);
+  assert.doesNotMatch(clearBeforeHeadChange.stdout, /Review clearance verified/);
 
   console.log('verify-review-clear tests passed');
 } finally {

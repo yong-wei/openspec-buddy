@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import fs from 'node:fs';
+import { latestReviewCycle } from './classify-review-response.mjs';
 
 const [prFile, reviewCommentsFile, reviewThreadsFile, reviewerArg] = process.argv.slice(2);
 
@@ -153,19 +154,6 @@ const topLevelClearCandidates = issueComments
     const commentCreatedAt = entryTime(comment);
     return headCommitTime !== null && commentCreatedAt !== null && commentCreatedAt >= headCommitTime;
   });
-const reviewerClearComments = topLevelClearCandidates
-  .filter((comment) => {
-    if (!latestHeadReviewRequest) return false;
-    const commentCreatedAt = entryTime(comment);
-    const requestCreatedAt = entryTime(latestHeadReviewRequest);
-    return commentCreatedAt !== null && requestCreatedAt !== null && commentCreatedAt >= requestCreatedAt;
-  });
-const latestReviewerClearComment = reviewerClearComments.sort((left, right) => {
-  const leftTime = entryTime(left) ?? 0;
-  const rightTime = entryTime(right) ?? 0;
-  return leftTime - rightTime;
-}).at(-1);
-
 function topLevelClearBlocker() {
   if (topLevelClearCandidates.length === 0) return '';
   if (headCommitTime === null) {
@@ -178,50 +166,42 @@ function topLevelClearBlocker() {
   return 'A top-level clear comment exists, but it is older than the latest review request for the current head commit.';
 }
 
-const latestReview = reviewerReviews.at(-1);
-if (!latestReview) {
-  if (!latestReviewerClearComment) {
-    errors.push(topLevelClearBlocker() || `No review found from ${reviewer}.`);
-  } else {
-    topLevelClearUsed = true;
-  }
-} else {
-  const state = String(latestReview.state || '').toUpperCase();
-  const body = String(latestReview.body || '');
-  const markers = priorityMarkers(body);
-  const commitOid = reviewCommitOid(latestReview);
-  const headOid = pr.headRefOid || pr.headOid || pr.head?.oid || '';
-  const reviewTargetsOlderCommit = Boolean(headOid && commitOid && commitOid !== headOid);
-  const olderReviewCanBeSuperseded = Boolean(reviewTargetsOlderCommit && latestReviewerClearComment);
+const headOid = pr.headRefOid || pr.headOid || pr.head?.oid || '';
+const cycle = latestReviewCycle({
+  comments: issueComments,
+  reviews: reviewerReviews,
+  reviewer,
+  reviewRequest: configuredReviewRequest,
+  headOid,
+  headCommitTime: headCommitTime === null ? '' : new Date(headCommitTime).toISOString(),
+});
+const latestReview = cycle.source === 'review' ? cycle.response : null;
 
-  if (reviewTargetsOlderCommit) {
-    if (!latestReviewerClearComment) {
-      errors.push(topLevelClearBlocker() || `Latest review from ${reviewer} targets ${commitOid}, not current head ${headOid}.`);
-    } else {
-      topLevelClearUsed = true;
-    }
-  }
-  if (['REQUEST_CHANGES', 'CHANGES_REQUESTED'].includes(state)) {
-    if (olderReviewCanBeSuperseded) {
-      topLevelClearUsed = true;
-    } else {
+if (cycle.outcome !== 'clear') {
+  errors.push(`review_outcome: ${cycle.outcome}`);
+  if (cycle.outcome === 'unavailable') {
+    errors.push(`Review response is unavailable from ${reviewer}; Codex review capacity or service is unavailable.`);
+  } else if (!cycle.request) {
+    errors.push(topLevelClearBlocker() || `No '${configuredReviewRequest || '@codex review'}' review request comment after the current head commit was found.`);
+  } else if (!cycle.response) {
+    errors.push(`No review response from ${reviewer} was found after the latest current-head review request.`);
+  } else if (cycle.outcome === 'actionable') {
+    const state = String(cycle.response.state || '').toUpperCase();
+    const markers = priorityMarkers(cycle.response.body || '');
+    if (['REQUEST_CHANGES', 'CHANGES_REQUESTED'].includes(state)) {
       errors.push(`Latest review from ${reviewer} requested changes.`);
     }
-  }
-  if (markers.length > 0) {
-    if (olderReviewCanBeSuperseded) {
-      topLevelClearUsed = true;
-    } else {
+    if (markers.length > 0) {
       errors.push(`Latest review from ${reviewer} contains ${markers.join('/')} findings; verify and address them before merge.`);
     }
-  }
-  if (state === 'COMMENTED' && !isExplicitlyClear(body)) {
-    if (!latestReviewerClearComment) {
-      errors.push(topLevelClearBlocker() || `Latest COMMENTED review from ${reviewer} is not an explicit no-actionable-findings review.`);
-    } else {
-      topLevelClearUsed = true;
+    if (!['REQUEST_CHANGES', 'CHANGES_REQUESTED'].includes(state) && markers.length === 0) {
+      errors.push(`Latest review response from ${reviewer} contains actionable feedback.`);
     }
+  } else {
+    errors.push(`Latest review response from ${reviewer} is not an explicit no-actionable-findings response.`);
   }
+} else if (cycle.source === 'top-level-comment') {
+  topLevelClearUsed = true;
 }
 
 const reviewThreads = normalizeReviewThreads(reviewThreadsInput);
@@ -255,16 +235,16 @@ if (errors.length > 0) {
 }
 
 const lines = [`Review clearance verified for PR #${pr.number || 'unknown'} using reviewer ${reviewer}.`];
-if (topLevelClearUsed && latestReviewerClearComment) {
+if (topLevelClearUsed && cycle.response) {
   lines.push('Clearance source: top-level PR comment after a current-head review request.');
-  lines.push(`Review request createdAt: ${latestHeadReviewRequest?.createdAt || latestHeadReviewRequest?.created_at || 'unknown'}`);
-  if (latestHeadReviewRequest?.url) lines.push(`Review request url: ${latestHeadReviewRequest.url}`);
-  lines.push(`Clear comment createdAt: ${latestReviewerClearComment.createdAt || latestReviewerClearComment.created_at || 'unknown'}`);
-  if (latestReviewerClearComment.url) lines.push(`Clear comment url: ${latestReviewerClearComment.url}`);
-  lines.push(`Clear comment excerpt: ${excerpt(latestReviewerClearComment.body)}`);
+  lines.push(`Review request createdAt: ${cycle.request?.createdAt || cycle.request?.created_at || 'unknown'}`);
+  if (cycle.request?.url || cycle.request?.html_url) lines.push(`Review request url: ${cycle.request.url || cycle.request.html_url}`);
+  lines.push(`Clear comment createdAt: ${cycle.response.createdAt || cycle.response.created_at || 'unknown'}`);
+  if (cycle.response.url || cycle.response.html_url) lines.push(`Clear comment url: ${cycle.response.url || cycle.response.html_url}`);
+  lines.push(`Clear comment excerpt: ${excerpt(cycle.response.body)}`);
   lines.push('Human gate: use this returned clear comment as the judgment record that the script matched a no-major-issues review cycle.');
 } else if (latestReview) {
-  lines.push(`Clearance source: latest review state ${String(latestReview.state || 'UNKNOWN').toUpperCase()}.`);
+  lines.push(`Clearance source: latest review state ${String(latestReview.state || 'UNKNOWN').toUpperCase()} from the latest current-head request cycle.`);
   lines.push(`Latest review commit: ${reviewCommitOid(latestReview) || 'unknown'}`);
   const latestSubmittedAt = latestReview.submittedAt || latestReview.submitted_at || latestReview.createdAt || latestReview.created_at || 'unknown';
   lines.push(`Latest review submittedAt: ${latestSubmittedAt}`);
