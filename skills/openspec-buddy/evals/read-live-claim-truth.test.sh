@@ -61,6 +61,10 @@ if [[ "$1" == "-C" && "$3" == "remote" && "$4" == "get-url" && "$5" == origin ]]
   exit 0
 fi
 if [[ "$1" == "-C" && "$3" == "config" ]]; then
+  if [[ "$4" == "--worktree" && "$5" == "--get" && "$6" == "buddy.boundBranch" ]]; then
+    printf 'dev1\n'
+    exit 0
+  fi
   exit 1
 fi
 if [[ "$1" == "worktree" && "$2" == "list" && "$3" == "--porcelain" ]]; then
@@ -119,6 +123,10 @@ cat > "$tmp_dir/comments-invalid.json" <<JSON
 [{"created_at":"2026-07-12T11:00:00Z","body":"OpenSpec Buddy Claim\\n\\nclaim_id: claim-invalid\\nstate: active\\nagent: @agent-a\\nchange_id: demo-change\\nbranch: demo-change\\nworktree_alias: dev1\\nworktree_path_hash: $path_hash\\ncoordination_branch: dev1"}]
 JSON
 
+cat > "$tmp_dir/comments-missing-coordination.json" <<JSON
+[{"created_at":"2026-07-12T11:00:00Z","body":"OpenSpec Buddy Claim\\n\\nclaim_id: claim-missing-coordination\\nstate: active\\nagent: @agent-a\\nchange_id: demo-change\\nbranch: demo-change\\nlease_until: 2026-07-12T13:00:00Z\\nworktree_alias: dev1\\nworktree_path_hash: $path_hash"}]
+JSON
+
 cat > "$tmp_dir/comments-empty.json" <<'JSON'
 []
 JSON
@@ -156,6 +164,9 @@ assert_status expired "$tmp_dir/expired.json"
 
 run_probe "$tmp_dir/issue-claimed.json" "$tmp_dir/comments-invalid.json" > "$tmp_dir/invalid.json"
 assert_status invalid "$tmp_dir/invalid.json"
+
+run_probe "$tmp_dir/issue-claimed.json" "$tmp_dir/comments-missing-coordination.json" > "$tmp_dir/missing-coordination.json"
+assert_status invalid "$tmp_dir/missing-coordination.json"
 
 set +e
 BUDDY_TEST_FAIL=1 run_probe "$tmp_dir/issue-claimed.json" "$tmp_dir/comments-owned.json" > "$tmp_dir/failure.out" 2> "$tmp_dir/failure.err"

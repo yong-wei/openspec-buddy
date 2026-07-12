@@ -103,17 +103,22 @@ if (result.issueState !== 'OPEN') {
   } else if (lease <= now) {
     result.status = 'expired';
   } else {
-    const mismatches = [];
-    const claimAgent = result.agent.replace(/^@/, '');
-    if (claimAgent !== viewer) mismatches.push('agent');
-    if (result.worktreeAlias && result.worktreeAlias !== String(identity.alias || '')) mismatches.push('worktree_alias');
-    if (result.worktreePathHash && result.worktreePathHash !== String(identity.path_hash || '')) mismatches.push('worktree_path_hash');
-    if (boundBranch && result.coordinationBranch && result.coordinationBranch !== boundBranch) mismatches.push('coordination_branch');
-    if (mismatches.length > 0) {
-      result.status = 'foreign';
-      result.reason = `claim-identity-mismatch:${mismatches.join(',')}`;
+    if (boundBranch && !result.coordinationBranch) {
+      result.status = 'invalid';
+      result.reason = 'claim-missing-coordination-branch';
     } else {
-      result.status = 'owned';
+      const mismatches = [];
+      const claimAgent = result.agent.replace(/^@/, '');
+      if (claimAgent !== viewer) mismatches.push('agent');
+      if (result.worktreeAlias && result.worktreeAlias !== String(identity.alias || '')) mismatches.push('worktree_alias');
+      if (result.worktreePathHash && result.worktreePathHash !== String(identity.path_hash || '')) mismatches.push('worktree_path_hash');
+      if (boundBranch && result.coordinationBranch !== boundBranch) mismatches.push('coordination_branch');
+      if (mismatches.length > 0) {
+        result.status = 'foreign';
+        result.reason = `claim-identity-mismatch:${mismatches.join(',')}`;
+      } else {
+        result.status = 'owned';
+      }
     }
   }
 }
