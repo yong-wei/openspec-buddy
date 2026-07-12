@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   clearInterrupt,
+  createControllerRunId,
   controllerStatePath,
   initializeControllerState,
   readControllerState,
@@ -91,7 +92,7 @@ function compact(result) {
   return [result.stdout || '', result.stderr || ''].join('\n').trim();
 }
 
-function childEnv(state, opts = {}) {
+function childEnv(state, opts = {}, controllerRunId = '') {
   const env = {
     ...process.env,
     OPENSPEC_BUDDY_AUTO_CONTROLLER_CHILD: '1',
@@ -99,6 +100,7 @@ function childEnv(state, opts = {}) {
   if (state.goal) env.OPENSPEC_BUDDY_AUTO_GOAL = '1';
   else delete env.OPENSPEC_BUDDY_AUTO_GOAL;
   if (state.mode === 'multi') env.OPENSPEC_BUDDY_AUTO_LANES = String(state.maxLanes || 2);
+  if (controllerRunId) env.OPENSPEC_BUDDY_AUTO_CONTROLLER_RUN_ID = controllerRunId;
   if (state.target.issue) env.OPENSPEC_BUDDY_AUTO_TARGET_ISSUE = state.target.issue;
   else delete env.OPENSPEC_BUDDY_AUTO_TARGET_ISSUE;
   if (state.target.pr) env.OPENSPEC_BUDDY_AUTO_TARGET_PR = state.target.pr;
@@ -122,10 +124,10 @@ function childEnv(state, opts = {}) {
   return env;
 }
 
-function runChild(state, opts = {}) {
+function runChild(state, opts = {}, controllerRunId = '') {
   const command = state.mode === 'multi' ? laneDriver : singleDriver;
   const args = state.mode === 'multi' ? [command, '--poll-once'] : [command];
-  const env = childEnv(state, opts);
+  const env = childEnv(state, opts, controllerRunId);
   if (state.mode === 'multi') env.OPENSPEC_BUDDY_AUTO_LANE_POLL_ONCE = '1';
   return spawnSync(process.execPath, args, {
     cwd: process.cwd(),
@@ -390,9 +392,10 @@ function main() {
     throw error;
   }
 
+  const controllerRunId = createControllerRunId();
   state = reconcileControllerState(state).state;
   state = syncTargetPrFromIssueLane(state);
-  handleChildResult(state, runChild(state, opts));
+  handleChildResult(state, runChild(state, opts, controllerRunId));
 }
 
 try {

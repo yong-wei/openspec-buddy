@@ -89,8 +89,14 @@ assert.equal(mergeReviewTruth(oldTruth, { reviewRequestId: 'request-2' }).respon
     actionableState: 'clear',
     threadsHead: 'head-1',
     threadsFreshAt: '2026-06-30T00:00:00.000Z',
+    runId: 'run-1',
+    source: 'live-review-probe',
   });
-  assert.equal(threadCacheFreshForHead(truth, 'head-1'), true);
+  assert.equal(threadCacheFreshForHead(truth, 'head-1', { now: clock, runId: 'run-1' }), true);
+  assert.equal(threadCacheFreshForHead(truth, 'head-1', { now: '2026-07-01T00:00:00.000Z', runId: 'run-1' }), false);
+  assert.equal(threadCacheFreshForHead(truth, 'head-1', { now: clock, runId: 'run-2' }), false);
+  assert.equal(threadCacheFreshForHead({ ...truth, threadsFreshAt: '2026-07-01T00:00:00.000Z' }, 'head-1', { now: clock, runId: 'run-1' }), false);
+  assert.equal(threadCacheFreshForHead({ ...truth, threadsFreshAt: '' }, 'head-1', { now: clock, runId: 'run-1' }), false);
 }
 
 {
@@ -196,7 +202,8 @@ assert.equal(mergeReviewTruth(oldTruth, { reviewRequestId: 'request-2' }).respon
       threadState: 'clear',
       actionableState: 'clear',
       threadsHead: 'head-1',
-      threadsFreshAt: '2026-06-30T00:00:00.000Z',
+      threadsFreshAt: new Date().toISOString(),
+      runId: 'test-run',
     },
   }).action, 'request-current-head-review');
 }
@@ -230,7 +237,8 @@ assert.equal(mergeReviewTruth(oldTruth, { reviewRequestId: 'request-2' }).respon
       threadState: 'clear',
       actionableState: 'clear',
       threadsHead: 'head-1',
-      threadsFreshAt: '2026-06-30T00:00:00.000Z',
+      threadsFreshAt: new Date().toISOString(),
+      runId: 'test-run',
     },
   }).action, 'enter-merge-ready');
 }

@@ -34,6 +34,9 @@ export const responseOutcomes = new Set([
   'unavailable',
 ]);
 
+export const defaultReviewTruthMaxAgeSeconds = 300;
+export const defaultReviewTruthClockSkewSeconds = 30;
+
 export function nowIso(clock = () => new Date()) {
   return clock().toISOString();
 }
@@ -64,6 +67,8 @@ export function normalizeReviewTruth(input = {}) {
     restFreshAt: String(input.restFreshAt || ''),
     threadsFreshAt: String(input.threadsFreshAt || ''),
     threadsHead: String(input.threadsHead || ''),
+    runId: String(input.runId || input.freshTruthRunId || ''),
+    source: String(input.source || input.truthSource || ''),
     signature: String(input.signature || ''),
     responseOutcome,
     reviewRequestId: String(input.reviewRequestId || ''),
@@ -105,6 +110,8 @@ export function classifyProbe(probe = {}, { previousHead = '', previousSignature
     reviewResponseId: probe.reviewResponseId,
     reviewResponseAt: probe.reviewResponseAt,
     reviewResponseUrl: probe.reviewResponseUrl,
+    runId: probe.runId || process.env.OPENSPEC_BUDDY_AUTO_CONTROLLER_RUN_ID || '',
+    source: probe.source || 'live-review-probe',
     restFreshAt: nowIso(clock),
   });
 }
@@ -112,7 +119,13 @@ export function classifyProbe(probe = {}, { previousHead = '', previousSignature
 export function mergeReviewTruth(existing = {}, patch = {}) {
   const current = normalizeReviewTruth(existing);
   const normalizedPatch = normalizeReviewTruth(patch);
-  const threadPatchIsFresh = Boolean(normalizedPatch.threadsFreshAt || normalizedPatch.threadsHead || normalizedPatch.threadState !== 'unknown');
+  const threadPatchIsFresh = Boolean(
+    normalizedPatch.threadsFreshAt
+    || normalizedPatch.threadsHead
+    || normalizedPatch.runId
+    || normalizedPatch.source
+    || normalizedPatch.threadState !== 'unknown',
+  );
   const headChanged = Boolean(patch.head && String(patch.head) !== current.head);
   const requestChanged = Object.hasOwn(patch, 'reviewRequestId')
     && String(patch.reviewRequestId || '') !== current.reviewRequestId;
@@ -125,6 +138,8 @@ export function mergeReviewTruth(existing = {}, patch = {}) {
       actionableState: current.actionableState,
       threadsFreshAt: current.threadsFreshAt,
       threadsHead: current.threadsHead,
+      runId: current.runId,
+      source: current.source,
     } : {}),
     ...(responseInvalidated ? {
       responseOutcome: 'unknown',
@@ -139,15 +154,37 @@ export function mergeReviewTruth(existing = {}, patch = {}) {
     next.actionableState = 'unknown';
     next.threadsFreshAt = '';
     next.threadsHead = '';
+    next.runId = '';
+    next.source = '';
   }
   return next;
 }
 
-export function threadCacheFreshForHead(truth = {}, head = '') {
+function timeValue(value) {
+  if (typeof value === 'function') return timeValue(value());
+  if (value instanceof Date) return value.getTime();
+  if (typeof value === 'number') return value;
+  return Date.parse(String(value || ''));
+}
+
+export function threadCacheFreshForHead(truth = {}, head = '', {
+  now = Date.now(),
+  maxAgeSeconds = defaultReviewTruthMaxAgeSeconds,
+  runId = '',
+  clockSkewSeconds = defaultReviewTruthClockSkewSeconds,
+} = {}) {
   const normalized = normalizeReviewTruth(truth);
+  const fetchedAt = timeValue(normalized.threadsFreshAt);
+  const nowAt = timeValue(now);
+  const ageSeconds = Number(maxAgeSeconds);
+  const skewSeconds = Number(clockSkewSeconds);
+  if (!normalized.runId || !Number.isFinite(fetchedAt) || !Number.isFinite(nowAt)) return false;
+  if (runId && normalized.runId !== String(runId)) return false;
+  if (!Number.isFinite(ageSeconds) || ageSeconds < 0 || !Number.isFinite(skewSeconds) || skewSeconds < 0) return false;
+  if (fetchedAt > nowAt + skewSeconds * 1000) return false;
+  if (nowAt - fetchedAt > ageSeconds * 1000) return false;
   return Boolean(
-    normalized.threadsFreshAt
-    && normalized.threadsHead
+    normalized.threadsHead
     && String(normalized.threadsHead) === String(head || normalized.head || '')
     && normalized.threadState !== 'unknown'
   );
@@ -175,6 +212,8 @@ export function laneReviewTruth(lane = {}) {
     restFreshAt: lane.restFreshAt || lane.lastProbeAt || '',
     threadsFreshAt: lane.threadsFreshAt || '',
     threadsHead: lane.threadsHead || '',
+    runId: lane.reviewRunId || lane.truthRunId || lane.runId || '',
+    source: lane.reviewTruthSource || lane.truthSource || '',
     signature: lane.lastSignature || lane.signature || '',
     responseOutcome: lane.responseOutcome || '',
     reviewRequestId: lane.reviewRequestId || '',
@@ -195,8 +234,10 @@ export function applyReviewTruthToLane(lane, truth = {}, { updatedAt = nowIso() 
   lane.actionableState = normalized.actionableState || '';
   lane.threadState = normalized.threadState || '';
   lane.restFreshAt = normalized.restFreshAt || lane.restFreshAt || '';
-  lane.threadsFreshAt = normalized.threadsFreshAt || lane.threadsFreshAt || '';
-  lane.threadsHead = normalized.threadsHead || lane.threadsHead || '';
+  lane.threadsFreshAt = normalized.threadsFreshAt || '';
+  lane.threadsHead = normalized.threadsHead || '';
+  lane.reviewRunId = normalized.runId || '';
+  lane.reviewTruthSource = normalized.source || '';
   lane.responseOutcome = normalized.responseOutcome || 'unknown';
   lane.reviewRequestId = normalized.reviewRequestId || '';
   lane.reviewResponseId = normalized.reviewResponseId || '';

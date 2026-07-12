@@ -23,6 +23,8 @@ trap 'rm -rf "$tmp_dir"' EXIT
 
 cache_dir="$(buddy_cache_dir)"
 repo_nwo="$(buddy_repo_nwo)"
+repo_root="$(buddy_worktree_repo_root)"
+bound_branch="$(buddy_worktree_bound_branch "$repo_root")"
 issue_file="$tmp_dir/issue.json"
 comments_file="$tmp_dir/comments.json"
 active_file="$tmp_dir/active-claim.json"
@@ -51,10 +53,10 @@ if [[ -z "$viewer" ]]; then
   exit 2
 fi
 
-node - "$issue_file" "$active_file" "$identity_file" "$issue_number" "$viewer" <<'NODE'
+node - "$issue_file" "$active_file" "$identity_file" "$issue_number" "$viewer" "$bound_branch" <<'NODE'
 const fs = require('node:fs');
 
-const [issueFile, activeFile, identityFile, issueNumber, viewer] = process.argv.slice(2);
+const [issueFile, activeFile, identityFile, issueNumber, viewer, boundBranch] = process.argv.slice(2);
 const issue = JSON.parse(fs.readFileSync(issueFile, 'utf8'));
 const active = JSON.parse(fs.readFileSync(activeFile, 'utf8'));
 const identity = JSON.parse(fs.readFileSync(identityFile, 'utf8'));
@@ -106,7 +108,7 @@ if (result.issueState !== 'OPEN') {
     if (claimAgent !== viewer) mismatches.push('agent');
     if (result.worktreeAlias && result.worktreeAlias !== String(identity.alias || '')) mismatches.push('worktree_alias');
     if (result.worktreePathHash && result.worktreePathHash !== String(identity.path_hash || '')) mismatches.push('worktree_path_hash');
-    if (result.coordinationBranch && result.coordinationBranch !== String(identity.coordination_branch || '')) mismatches.push('coordination_branch');
+    if (boundBranch && result.coordinationBranch && result.coordinationBranch !== boundBranch) mismatches.push('coordination_branch');
     if (mismatches.length > 0) {
       result.status = 'foreign';
       result.reason = `claim-identity-mismatch:${mismatches.join(',')}`;

@@ -847,9 +847,65 @@ else console.log(JSON.stringify({ achieved: false, next: 'merge-pr', reason: 'PR
       return next;
     },
   });
-  assert.equal(result.changed, true);
-  assert.equal(written.reviewFix.pending, false);
-  assert.equal(written.interrupt, null);
+  assert.equal(result.changed, false);
+  assert.equal(written, null);
+
+  const freshResult = reconcilerModule.reconcileControllerState(state, {
+    cwd: envInfo.repoDir,
+    laneState,
+    freshTruth: {
+      pr: '743',
+      head: 'head-1',
+      threadState: 'clear',
+      actionableState: 'clear',
+      threadsHead: 'head-1',
+      threadsFreshAt: '2026-06-30T00:00:00.000Z',
+      runId: 'controller-run-1',
+      source: 'live-review-probe',
+    },
+    now: '2026-06-30T00:00:01.000Z',
+    runId: 'controller-run-1',
+    dirty: false,
+    writeState: (next) => next,
+  });
+  assert.equal(freshResult.changed, true);
+  assert.equal(freshResult.state.reviewFix.pending, false);
+  assert.equal(freshResult.state.interrupt, null);
+
+  const freshTruth = {
+    pr: '743',
+    head: 'head-1',
+    threadState: 'clear',
+    actionableState: 'clear',
+    threadsHead: 'head-1',
+    threadsFreshAt: '2026-06-30T00:00:00.000Z',
+    runId: 'controller-run-1',
+    source: 'live-review-probe',
+  };
+  assert.equal(reconcilerModule.reconcileControllerState(state, {
+    laneState,
+    freshTruth: { ...freshTruth, head: 'head-2', threadsHead: 'head-2' },
+    now: '2026-06-30T00:00:01.000Z',
+    runId: 'controller-run-1',
+    dirty: false,
+    writeState: (next) => next,
+  }).changed, false);
+  assert.equal(reconcilerModule.reconcileControllerState(state, {
+    laneState,
+    freshTruth: { ...freshTruth, threadState: 'actionable', actionableState: 'actionable' },
+    now: '2026-06-30T00:00:01.000Z',
+    runId: 'controller-run-1',
+    dirty: false,
+    writeState: (next) => next,
+  }).changed, false);
+  assert.equal(reconcilerModule.reconcileControllerState(state, {
+    laneState,
+    freshTruth,
+    now: '2026-06-30T00:00:01.000Z',
+    runId: 'controller-run-1',
+    dirty: true,
+    writeState: (next) => next,
+  }).changed, false);
 }
 
 {
@@ -916,7 +972,7 @@ else console.log(JSON.stringify({ achieved: false, next: 'merge-pr', reason: 'PR
     laneState: { lanes: [{ ...baseLane, probeState: 'changed', threadState: 'clear', actionableState: 'clear', threadsHead: 'head-1', threadsFreshAt: '2026-06-30T00:00:00.000Z' }] },
     dirty: false,
     writeState: (next) => next,
-  }).changed, true);
+  }).changed, false);
 }
 
 {
