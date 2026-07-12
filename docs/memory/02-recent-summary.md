@@ -35,7 +35,7 @@
 - `v0.16.0` 发布线为 Buddy Auto driver 增加用户指定目标绑定：`OPENSPEC_BUDDY_AUTO_TARGET_ISSUE` 不会被当前工作树历史 PR 覆盖，`OPENSPEC_BUDDY_AUTO_TARGET_PR` 只从目标 PR 读取 origin issue 和 head；issue-only 目标由 driver 执行 `claim-issue.sh` 并记录 `claimed` receipt 后再 handoff 实现。
 - `v0.17.0` 发布线修复 Buddy Auto goal-loop 空上下文入口：只有 `OPENSPEC_BUDDY_AUTO_GOAL=1` 或 `--goal` 明确授权时，driver 才会在无 issue/PR 上下文时运行 selector，并把选中的 issue-backed 候选转入 `claim-issue.sh`；普通空上下文仍停止，且 goal 模式不再被协调分支上的历史 PR 推断覆盖。
 - `v0.18.0` 发布线将 Buddy Auto driver 推进为确定性状态机执行器：claim 后自动精确发现 issue-bound PR，review 阶段连续执行 mark-review/wait/merge gates，合并后通过 achievement truth 与 post-merge helper 在绑定协调分支同步 issue/Project 终态；同时新增 same-thread review reply helper、review-response-gate 可重跑输出、轻量 PR/thread 查询和高频 helper `--help`。
-- 2026-07-12 review quota 与 merge gate hardening：共享 Codex response classifier 将 quota/service-limit 响应判为 `unavailable`；最新 review request cycle 的最新响应才拥有 clearance 权；`review_unavailable` 会持久阻断且不重复请求；合并改由 controller-owned helper 执行并写入 head/request/response 绑定的 `merge_authorized` 与 `merged` 回执；远端无授权回执的合并进入持久 `unauthorized_merge` 审计阻断。
+- 2026-07-12 review quota 与 merge gate hardening：共享 Codex response classifier 将 quota/service-limit 响应判为 `unavailable`；最新 review request cycle 的最新响应才拥有 clearance 权；`review_unavailable` 会持久阻断且不重复请求；foreground wait 在 unavailable 时返回 `4` 并停止 retry；合并改由 controller-owned helper 执行并写入 head/request/response 绑定的 `merge_authorized` 与 `merged` 回执，helper 失败或证据不匹配会清除授权；远端无授权回执的合并进入持久 `unauthorized_merge` 审计阻断。
 
 ## 当前警惕点
 
