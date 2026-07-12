@@ -209,7 +209,8 @@ function readFreshReviewTruth(state, controllerRunId) {
     try {
       const data = JSON.parse(result.stdout || '{}');
       const head = String(data.head || data.headRefOid || '');
-      return head ? { data, head } : null;
+      const signature = String(data.signature || '');
+      return head && signature ? { data, head, signature } : null;
     } catch {
       return null;
     }
@@ -232,7 +233,9 @@ function readFreshReviewTruth(state, controllerRunId) {
     lane.pr,
     env,
   ));
-  if (!finalProbe || finalProbe.head !== initialProbe.head) return null;
+  if (!finalProbe
+    || finalProbe.head !== initialProbe.head
+    || finalProbe.signature !== initialProbe.signature) return null;
 
   const fetchedAt = new Date().toISOString();
   const threadTruthFresh = threadState !== 'unknown';
