@@ -107,13 +107,16 @@ const fs = require("node:fs");
 const checks = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
 const status = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
 const allowed = new Set(["success", "neutral", "skipped"]);
-const badCheck = (checks.check_runs || []).find((run) => run.status !== "completed" || !allowed.has(String(run.conclusion || "").toLowerCase()));
+const checkRuns = Array.isArray(checks.check_runs) ? checks.check_runs : [];
+const badCheck = checkRuns.find((run) => run.status !== "completed" || !allowed.has(String(run.conclusion || "").toLowerCase()));
 if (badCheck) {
   process.stderr.write(`CI check is not successful: ${badCheck.name || "unnamed"} (${badCheck.status}/${badCheck.conclusion}).\n`);
   process.exit(1);
 }
 const combinedState = String(status.state || "").toLowerCase();
-if (combinedState && combinedState !== "success") {
+const legacyStatuses = Array.isArray(status.statuses) ? status.statuses : [];
+const checksOnlyPending = combinedState === "pending" && legacyStatuses.length === 0 && checkRuns.length > 0;
+if (combinedState && combinedState !== "success" && !checksOnlyPending) {
   process.stderr.write(`Combined CI status is not successful: ${combinedState}.\n`);
   process.exit(1);
 }
@@ -157,7 +160,7 @@ head_before_merge="$(pr_field head.sha)"
 
 merge_output="$tmp_dir/merge.out"
 set +e
-gh pr merge "$pr_number" --squash --delete-branch --match-head-commit "$expected_head" > "$merge_output" 2>&1
+gh pr merge --repo "$repo_nwo" "$pr_number" --squash --delete-branch --match-head-commit "$expected_head" > "$merge_output" 2>&1
 merge_status="$?"
 set -e
 if [[ "$merge_status" -ne 0 ]]; then

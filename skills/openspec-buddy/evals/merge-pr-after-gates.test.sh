@@ -112,7 +112,11 @@ if [[ "${1:-}" == "api" && "${2:-}" == repos/owner/repo/commits/*/check-runs* ]]
   exit 0
 fi
 if [[ "${1:-}" == "api" && "${2:-}" == repos/owner/repo/commits/*/status* ]]; then
-  printf '%s\n' '{"state":"success","statuses":[]}'
+  case "${STATUS_MODE:-success}" in
+    checks-only) printf '%s\n' '{"state":"pending","statuses":[]}' ;;
+    legacy-pending) printf '%s\n' '{"state":"pending","statuses":[{"state":"pending"}]}' ;;
+    *) printf '%s\n' '{"state":"success","statuses":[]}' ;;
+  esac
   exit 0
 fi
 if [[ "${1:-}" == "pr" && "${2:-}" == "merge" ]]; then
@@ -132,7 +136,7 @@ run_case() {
   : > "$OPENSPEC_BUDDY_MERGE_GATE_LOG"
   : > "$GH_LOG_FILE"
   rm -f "$PR_FETCH_COUNT_FILE" "$MERGE_MARKER"
-  REVIEW_MODE=success CHECK_MODE=success BASE_WRONG=0 MERGEABLE_FALSE=0 PR_HEAD_MODE=head-1 FINAL_HEAD_CHANGE=0 "$@"
+  REVIEW_MODE=success CHECK_MODE=success STATUS_MODE=success BASE_WRONG=0 MERGEABLE_FALSE=0 PR_HEAD_MODE=head-1 FINAL_HEAD_CHANGE=0 "$@"
 }
 
 expect_denied() {
@@ -156,6 +160,7 @@ expect_denied missing-response env REVIEW_MODE=missing
 expect_denied unresolved-thread env REVIEW_MODE=unresolved
 expect_denied ci-failing env CHECK_MODE=failing
 expect_denied ci-pending env CHECK_MODE=pending
+expect_denied legacy-status-pending env STATUS_MODE=legacy-pending
 expect_denied not-mergeable env MERGEABLE_FALSE=1
 expect_denied wrong-base env BASE_WRONG=1
 expect_denied stale-head env PR_HEAD_MODE=head-2
@@ -178,5 +183,16 @@ node -e '
 const data = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
 if (data.merged !== true || data.pr !== "123" || data.head !== "head-1" || data.mergeCommit !== "merge-1" || data.reviewRequestId !== "request-1" || data.reviewResponseId !== "response-1") process.exit(1);
 ' "$tmp_dir/success.out"
+
+run_case checks-only env STATUS_MODE=checks-only bash "$helper" 42 123 head-1 >"$tmp_dir/checks-only.out"
+node -e '
+const data = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+if (data.merged !== true || data.pr !== "123" || data.head !== "head-1") process.exit(1);
+' "$tmp_dir/checks-only.out"
+if ! grep -F -- 'pr merge --repo owner/repo 123 --squash --delete-branch --match-head-commit head-1' "$GH_LOG_FILE" >/dev/null; then
+  echo "merge command must target the verified repository explicitly" >&2
+  cat "$GH_LOG_FILE" >&2
+  exit 1
+fi
 
 echo "merge-pr-after-gates tests passed"
