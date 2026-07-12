@@ -161,6 +161,55 @@ export BUDDY_TEST_BRANCH_EXISTS=1
 # shellcheck source=../scripts/claim-lock.sh
 source "$claim_lock"
 
+cat >"$tmp_dir/current-metadata.json" <<'JSON'
+{"coupling_group":"none"}
+JSON
+cat >"$tmp_dir/current-issue-coupling-label.json" <<'JSON'
+{"labels":[{"name":"status:ready"},{"name":"coupling:alpha"}]}
+JSON
+resolved_coupling="$(buddy_resolve_coupling_group "$tmp_dir/current-metadata.json" "$tmp_dir/current-issue-coupling-label.json")"
+if [[ "$resolved_coupling" != "alpha" ]]; then
+  echo "current issue coupling resolver must use a stricter coupling label when metadata is none" >&2
+  exit 1
+fi
+
+cat >"$tmp_dir/current-issue-multiple-coupling-labels.json" <<'JSON'
+{"labels":[{"name":"status:ready"},{"name":"coupling:alpha"},{"name":"coupling:beta"}]}
+JSON
+set +e
+buddy_resolve_coupling_group "$tmp_dir/current-metadata.json" "$tmp_dir/current-issue-multiple-coupling-labels.json" >"$tmp_dir/multiple-coupling.out" 2>"$tmp_dir/multiple-coupling.err"
+multiple_coupling_status="$?"
+set -e
+if [[ "$multiple_coupling_status" -eq 0 ]]; then
+  echo "current issue coupling resolver must reject multiple concrete coupling labels" >&2
+  exit 1
+fi
+if ! grep -F "multiple coupling labels" "$tmp_dir/multiple-coupling.err" >/dev/null; then
+  echo "coupling resolver should explain multiple coupling labels" >&2
+  cat "$tmp_dir/multiple-coupling.err" >&2
+  exit 1
+fi
+
+cat >"$tmp_dir/current-issue-conflicting-coupling.json" <<'JSON'
+{"labels":[{"name":"status:ready"},{"name":"coupling:beta"}]}
+JSON
+cat >"$tmp_dir/current-metadata-alpha.json" <<'JSON'
+{"coupling_group":"alpha"}
+JSON
+set +e
+buddy_resolve_coupling_group "$tmp_dir/current-metadata-alpha.json" "$tmp_dir/current-issue-conflicting-coupling.json" >"$tmp_dir/conflicting-coupling.out" 2>"$tmp_dir/conflicting-coupling.err"
+conflicting_coupling_status="$?"
+set -e
+if [[ "$conflicting_coupling_status" -eq 0 ]]; then
+  echo "current issue coupling resolver must reject metadata and label disagreement" >&2
+  exit 1
+fi
+if ! grep -F "metadata and labels disagree" "$tmp_dir/conflicting-coupling.err" >/dev/null; then
+  echo "coupling resolver should explain metadata and label disagreement" >&2
+  cat "$tmp_dir/conflicting-coupling.err" >&2
+  exit 1
+fi
+
 set +e
 buddy_preflight_claim_truth_check "42" "issue-42-race" "issue-42-race" "agent-a" "example/repo" "$tmp_dir/preflight" 2>"$tmp_dir/preflight.err"
 preflight_status="$?"
@@ -179,7 +228,28 @@ fi
 
 : > "$BUDDY_TEST_LOG"
 export BUDDY_TEST_BRANCH_EXISTS=0
+export BUDDY_TEST_ISSUE_JSON="$tmp_dir/issue-claimed-extra-status.json"
+export BUDDY_TEST_COMMENTS_JSON="$tmp_dir/comments-empty.json"
+
+set +e
+buddy_preflight_claim_truth_check "42" "issue-42-race" "issue-42-race" "agent-a" "example/repo" "$tmp_dir/preflight-extra-status" 2>"$tmp_dir/preflight-extra-status.err"
+preflight_extra_status="$?"
+set -e
+
+if [[ "$preflight_extra_status" -eq 0 ]]; then
+  echo "preflight must reject multiple status labels before claim write" >&2
+  exit 1
+fi
+if ! grep -F "multiple status labels" "$tmp_dir/preflight-extra-status.err" >/dev/null; then
+  echo "preflight should explain multiple status labels" >&2
+  cat "$tmp_dir/preflight-extra-status.err" >&2
+  exit 1
+fi
+
+: > "$BUDDY_TEST_LOG"
+export BUDDY_TEST_BRANCH_EXISTS=0
 export BUDDY_TEST_PRS_JSON="$tmp_dir/open-prs.json"
+export BUDDY_TEST_ISSUE_JSON="$tmp_dir/issue-ready.json"
 
 set +e
 buddy_preflight_claim_truth_check "42" "issue-42-race" "issue-42-race" "agent-a" "example/repo" "$tmp_dir/preflight-open-pr" 2>"$tmp_dir/preflight-open-pr.err"

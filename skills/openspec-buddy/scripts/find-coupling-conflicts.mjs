@@ -26,25 +26,52 @@ const activeStatuses = new Set(["status:claimed", "status:in-progress"]);
 const parser = new URL("./parse-issue-metadata.mjs", import.meta.url);
 const conflicts = [];
 
+function couplingGroupForIssue(issue) {
+  let parsedChangeId = "";
+  if (issue.body) {
+    const parsed = spawnSync(process.execPath, [parser.pathname, "-"], {
+      input: issue.body,
+      encoding: "utf8",
+    });
+    if (parsed.status === 0) {
+      const metadata = JSON.parse(parsed.stdout);
+      const metadataGroup = normalizeCouplingGroup(metadata.coupling_group);
+      parsedChangeId = metadata.change_id || "";
+      const labelGroups = [...new Set((issue.labels || [])
+        .map((label) => label?.name || "")
+        .map((name) => name.replace(/^coupling:\s+/, "coupling:"))
+        .filter((name) => name.startsWith("coupling:"))
+        .map((name) => normalizeCouplingGroup(name.slice("coupling:".length)))
+        .filter(Boolean))];
+      return {
+        couplingGroups: [...new Set([metadataGroup, ...labelGroups].filter(Boolean))],
+        changeId: parsedChangeId,
+      };
+    }
+  }
+  const couplingGroups = [...new Set((issue.labels || [])
+    .map((label) => label?.name || "")
+    .map((name) => name.replace(/^coupling:\s+/, "coupling:"))
+    .filter((name) => name.startsWith("coupling:"))
+    .map((name) => normalizeCouplingGroup(name.slice("coupling:".length)))
+    .filter(Boolean))];
+  return {
+    couplingGroups,
+    changeId: parsedChangeId,
+  };
+}
+
 for (const issue of issues) {
   if (issue.number === currentIssue) continue;
   const labelNames = (issue.labels || []).map((label) => label.name.replace(/^status:\s+/, "status:"));
   if (!labelNames.some((name) => activeStatuses.has(name))) continue;
-  if (!issue.body) continue;
-
-  const parsed = spawnSync(process.execPath, [parser.pathname, "-"], {
-    input: issue.body,
-    encoding: "utf8",
-  });
-
-  if (parsed.status !== 0) continue;
-  const metadata = JSON.parse(parsed.stdout);
-  if (normalizeCouplingGroup(metadata.coupling_group) === couplingGroup) {
+  const issueCoupling = couplingGroupForIssue(issue);
+  if (issueCoupling.couplingGroups.includes(couplingGroup)) {
     conflicts.push({
       number: issue.number,
       title: issue.title,
       status: labelNames.find((name) => activeStatuses.has(name)),
-      change_id: metadata.change_id,
+      change_id: issueCoupling.changeId,
     });
   }
 }

@@ -35,10 +35,6 @@ function normalizeAssignees(assignees) {
   return list.map((assignee) => (typeof assignee === "string" ? assignee : assignee?.login)).filter(Boolean);
 }
 
-function statusLabel(labels) {
-  return labels.find((label) => label.startsWith("status:")) || "";
-}
-
 const candidates = [];
 const staleCandidates = [];
 const rejected = [];
@@ -46,7 +42,8 @@ const rejected = [];
 for (const issue of issues) {
   const number = Number(issue.number);
   const labels = normalizeLabels(issue.labels);
-  const status = statusLabel(labels);
+  const statusLabels = labels.filter((label) => label.startsWith("status:"));
+  const status = statusLabels[0] || "";
   const assignees = normalizeAssignees(issue.assignees);
 
   if (!number) {
@@ -59,8 +56,13 @@ for (const issue of issues) {
     continue;
   }
 
-  if (labels.includes("type:series-parent") || status === "status:tracking") {
+  if (labels.includes("type:series-parent") || statusLabels.includes("status:tracking")) {
     rejected.push({ number, reason: "series parent issue" });
+    continue;
+  }
+
+  if (statusLabels.length > 1) {
+    rejected.push({ number, reason: "multiple status labels", statuses: statusLabels });
     continue;
   }
 

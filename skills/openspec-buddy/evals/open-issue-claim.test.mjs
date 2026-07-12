@@ -12,6 +12,7 @@ const parser = path.join(skillDir, "scripts/parse-issue-metadata.mjs");
 const selector = path.join(skillDir, "scripts/select-claim-issue.mjs");
 const builder = path.join(skillDir, "scripts/build-open-issue-metadata.mjs");
 const claimIssue = path.join(skillDir, "scripts/claim-issue.sh");
+const claimChange = path.join(skillDir, "scripts/claim-change.sh");
 const couplingConflicts = path.join(skillDir, "scripts/find-coupling-conflicts.mjs");
 
 process.env.OPENSPEC_BUDDY_BASE_BRANCH = "integration";
@@ -83,7 +84,12 @@ Human-readable issue description stays visible.
 
 {
   const claimScript = fs.readFileSync(claimIssue, "utf8");
+  const claimChangeScript = fs.readFileSync(claimChange, "utf8");
   assert.match(claimScript, /buddy_write_minimal_claim_lock .*\$tmp_dir\/adopted-body\.md/);
+  assert.match(claimScript, /buddy_open_issues_rest "\$\{OPENSPEC_BUDDY_CLAIM_ISSUE_LIMIT:-200\}" > "\$tmp_dir\/issues\.json"/);
+  assert.match(claimScript, /buddy_open_issues_rest "all" > "\$tmp_dir\/issues-for-coupling\.json"/);
+  assert.match(claimChangeScript, /buddy_open_issues_rest "all" > "\$issues_file"/);
+  assert.doesNotMatch(claimScript, /issue list[\s\S]*--limit/);
   assert.doesNotMatch(claimScript, /gh issue create/);
 }
 
@@ -141,6 +147,41 @@ area: demo
   const conflict = spawnSync(process.execPath, [couplingConflicts, issuesFile, "8", "alpha"], { encoding: "utf8" });
   assert.equal(conflict.status, 1);
   assert.match(conflict.stderr, /Claimed coupled issue/);
+
+  fs.writeFileSync(issuesFile, JSON.stringify([
+    {
+      number: 7,
+      title: "Claimed coupled issue without body",
+      labels: [{ name: "status:claimed" }, { name: "coupling:alpha" }],
+    },
+  ]));
+  const bodylessConflict = spawnSync(process.execPath, [couplingConflicts, issuesFile, "8", "alpha"], { encoding: "utf8" });
+  assert.equal(bodylessConflict.status, 1);
+  assert.match(bodylessConflict.stderr, /without body/);
+
+  fs.writeFileSync(issuesFile, JSON.stringify([
+    {
+      number: 9,
+      title: "Claimed issue with stricter coupling label",
+      labels: [{ name: "status:claimed" }, { name: "coupling:alpha" }],
+      body: `---
+change_id: claimed-metadata-none
+claim_branch: claimed-metadata-none
+series: alpha
+coupling_group: none
+execution_mode: isolated
+base_branch: integration
+depends_on: []
+openspec_path: openspec/changes/claimed-metadata-none
+risk: low
+area: demo
+---
+`,
+    },
+  ]));
+  const stricterLabelConflict = spawnSync(process.execPath, [couplingConflicts, issuesFile, "8", "alpha"], { encoding: "utf8" });
+  assert.equal(stricterLabelConflict.status, 1);
+  assert.match(stricterLabelConflict.stderr, /stricter coupling label/);
   fs.rmSync(tmpDir, { recursive: true, force: true });
 }
 
@@ -179,6 +220,29 @@ area: demo
   assert.equal(result.selected.number, 8);
   assert.equal(result.selected.reason, "lowest claimable issue number");
   assert.equal(result.rejected.find((entry) => entry.number === 4).reason, "already claimed; skipped until stale-claim fallback");
+}
+
+{
+  const result = runNode(selector, {
+    issues: [
+      {
+        number: 4,
+        title: "Conflicting active status",
+        state: "OPEN",
+        labels: [{ name: "status:ready" }, { name: "status:in-progress" }],
+        assignees: [],
+      },
+      {
+        number: 6,
+        title: "First valid issue",
+        state: "OPEN",
+        labels: [{ name: "status:ready" }],
+        assignees: [],
+      },
+    ],
+  });
+  assert.equal(result.selected.number, 6);
+  assert.equal(result.rejected.find((entry) => entry.number === 4).reason, "multiple status labels");
 }
 
 {

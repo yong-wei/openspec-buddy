@@ -228,16 +228,21 @@ function latestActiveClaim(comments) {
   return [...active.values()].sort((left, right) => String(left.created_at || "").localeCompare(String(right.created_at || ""))).at(-1);
 }
 const labels = labelsOf(issue.labels);
-const status = labels.find((label) => label.startsWith("status:")) || "";
+const statusLabels = labels.filter((label) => label.startsWith("status:"));
+const status = statusLabels[0] || "";
 const state = String(issue.state || "").toUpperCase();
 if (state !== "OPEN") {
   process.stderr.write(`Issue is not open: ${issue.state || "unknown"}\n`);
   process.exit(10);
 }
 if (mode === "preflight") {
-  if (labels.includes("type:series-parent") || status === "status:tracking") {
+  if (labels.includes("type:series-parent") || statusLabels.includes("status:tracking")) {
     process.stderr.write("Issue is a series parent and cannot be claimed.\n");
     process.exit(11);
+  }
+  if (statusLabels.length > 1) {
+    process.stderr.write(`Issue has multiple status labels: ${statusLabels.join(", ")}\n`);
+    process.exit(17);
   }
   if (status === "status:claimed") {
     process.stderr.write("Issue is already status:claimed; skipped until stale-claim fallback.\n");
@@ -263,6 +268,34 @@ if (mode === "preflight") {
   }
 }
 ' "$issue_file" "$comments_file" "$viewer" "$mode"
+}
+
+buddy_resolve_coupling_group() {
+  local metadata_file="$1"
+  local issue_file="$2"
+  node -e '
+const fs = require("node:fs");
+const metadata = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+const issue = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const normalize = (value) => {
+  const normalized = String(value || "").trim();
+  return normalized && normalized.toLowerCase() !== "none" ? normalized : "";
+};
+const metadataGroup = normalize(metadata.coupling_group);
+const couplingGroups = [...new Set((issue.labels || [])
+  .map((label) => label?.name || "")
+  .map((name) => name.replace(/^coupling:\s+/, "coupling:"))
+  .filter((name) => name.startsWith("coupling:"))
+  .map((name) => normalize(name.slice("coupling:".length)))
+  .filter(Boolean))];
+if (couplingGroups.length > 1 || (metadataGroup && couplingGroups.length === 1 && couplingGroups[0] !== metadataGroup)) {
+  process.stderr.write(metadataGroup && couplingGroups.length === 1
+    ? `Issue coupling metadata and labels disagree: metadata=${metadataGroup}, label=${couplingGroups[0]}\n`
+    : `Issue has multiple coupling labels: ${couplingGroups.join(", ")}\n`);
+  process.exit(1);
+}
+process.stdout.write(metadataGroup || couplingGroups[0] || "none");
+' "$metadata_file" "$issue_file"
 }
 
 buddy_preflight_claim_truth_check() {

@@ -11,7 +11,7 @@ function normalizeLabels(labels) {
   return list
     .map((label) => (typeof label === "string" ? label : label.name))
     .filter(Boolean)
-    .map((name) => name.replace(/^(status|type|area|series|risk|mode):\s+/, "$1:"));
+    .map((name) => name.replace(/^(status|type|area|series|risk|mode|coupling):\s+/, "$1:"));
 }
 
 function normalizeActiveChanges(activeChanges) {
@@ -98,12 +98,35 @@ function isCompleteIssue(node) {
   if (!node) return false;
   const state = String(node.state || "").toUpperCase();
   if (state === "CLOSED" || state === "MERGED") return true;
-  const labels = normalizeLabels(node.labels);
-  return labels.some((label) => label === "status:archived" || label === "status:merged");
+  const statusLabels = normalizeLabels(node.labels).filter((label) => label.startsWith("status:"));
+  return statusLabels.length === 1
+    && (statusLabels[0] === "status:archived" || statusLabels[0] === "status:merged");
 }
 
-function statusLabel(issue) {
-  return normalizeLabels(issue.labels).find((label) => label.startsWith("status:")) || "";
+function normalizeCouplingGroup(value) {
+  const normalized = String(value || "").trim();
+  return normalized && normalized.toLowerCase() !== "none" ? normalized : "";
+}
+
+function couplingEvidenceForIssue(issue) {
+  const metadataGroup = normalizeCouplingGroup(parseMetadata(issue).metadata?.coupling_group);
+  const labelGroups = [...new Set(normalizeLabels(issue.labels)
+    .filter((name) => name.startsWith("coupling:"))
+    .map((name) => normalizeCouplingGroup(name.slice("coupling:".length)))
+    .filter(Boolean))];
+  const groups = [...new Set([metadataGroup, ...labelGroups].filter(Boolean))];
+  return {
+    groups,
+    conflict: labelGroups.length > 1
+      || (Boolean(metadataGroup) && labelGroups.length > 0 && !labelGroups.includes(metadataGroup)),
+    conflictReason: labelGroups.length > 1 && !metadataGroup
+      ? "multiple coupling labels"
+      : "coupling metadata and labels disagree",
+  };
+}
+
+function issueCouplingGroups(issue) {
+  return couplingEvidenceForIssue(issue).groups;
 }
 
 function riskRank(risk) {
@@ -161,6 +184,7 @@ const staleClaimCandidates = [];
 
 for (const issue of issues) {
   const labels = normalizeLabels(issue.labels);
+  const statusLabels = labels.filter((label) => label.startsWith("status:"));
   const parsed = parseMetadata(issue);
 
   if (excludeIssues.has(Number(issue.number))) {
@@ -168,12 +192,17 @@ for (const issue of issues) {
     continue;
   }
 
-  if (labels.includes("type:series-parent") || labels.includes("status:tracking")) {
+  if (labels.includes("type:series-parent") || statusLabels.includes("status:tracking")) {
     rejected.push({ number: issue.number, reason: "series parent issue" });
     continue;
   }
 
-  if (labels.includes("status:claimed")) {
+  if (statusLabels.length > 1) {
+    rejected.push({ number: issue.number, reason: "multiple status labels", statuses: statusLabels });
+    continue;
+  }
+
+  if (statusLabels[0] === "status:claimed") {
     if (parsed.metadata?.change_id && activeChanges.has(parsed.metadata.change_id)) {
       staleClaimCandidates.push({
         number: issue.number,
@@ -187,7 +216,7 @@ for (const issue of issues) {
     continue;
   }
 
-  if (!labels.includes("status:ready")) {
+  if (statusLabels[0] !== "status:ready") {
     rejected.push({ number: issue.number, reason: "not status:ready" });
     continue;
   }
@@ -208,6 +237,46 @@ for (const issue of issues) {
     continue;
   }
 
+  const couplingEvidence = couplingEvidenceForIssue(issue);
+  const couplingGroups = couplingEvidence.groups;
+  if (couplingEvidence.conflict) {
+    rejected.push({
+      number: issue.number,
+      change_id: metadata.change_id,
+      reason: couplingEvidence.conflictReason,
+      coupling_groups: couplingGroups,
+    });
+    continue;
+  }
+  if (couplingGroups.length > 1) {
+    rejected.push({
+      number: issue.number,
+      change_id: metadata.change_id,
+      reason: "multiple coupling labels",
+      coupling_groups: couplingGroups,
+    });
+    continue;
+  }
+  const couplingGroup = couplingGroups[0] || "";
+  const couplingConflicts = couplingGroup
+    ? issues.filter((candidate) => {
+      if (candidate.number === issue.number) return false;
+      const candidateLabels = normalizeLabels(candidate.labels);
+      if (!candidateLabels.some((name) => name === "status:claimed" || name === "status:in-progress")) return false;
+      return issueCouplingGroups(candidate).includes(couplingGroup);
+    })
+    : [];
+  if (couplingConflicts.length > 0) {
+    rejected.push({
+      number: issue.number,
+      change_id: metadata.change_id,
+      reason: "coupling group has active issue",
+      coupling_group: couplingGroup,
+      coupling_conflicts: couplingConflicts.map((candidate) => candidate.number),
+    });
+    continue;
+  }
+
   const openBlockers = relationshipNodes(issue, "blockedBy").filter((node) => !isCompleteIssue(node));
   if (openBlockers.length > 0) {
     rejected.push({
@@ -222,7 +291,7 @@ for (const issue of issues) {
   const incompleteDependsOn = (metadata.depends_on || []).filter((changeId) => {
     const upstream = issuesByChange.get(changeId);
     if (!upstream) return activeChanges.size === 0 || activeChanges.has(changeId);
-    return !["status:archived", "status:merged"].includes(statusLabel(upstream));
+    return !isCompleteIssue(upstream);
   });
   if (incompleteDependsOn.length > 0) {
     rejected.push({

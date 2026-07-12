@@ -55,7 +55,7 @@ node "$script_dir/parse-issue-metadata.mjs" "$body_file" > "$metadata_file"
 
 change_id="$(node -e 'const fs=require("fs"); const data=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(data.change_id);' "$metadata_file")"
 claim_branch="$(node -e 'const fs=require("fs"); const data=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(data.claim_branch);' "$metadata_file")"
-coupling_group="$(node -e 'const fs=require("fs"); const data=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(data.coupling_group);' "$metadata_file")"
+coupling_group="$(buddy_resolve_coupling_group "$metadata_file" "$issue_file")"
 base_branch="$(node -e 'const fs=require("fs"); const data=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(data.base_branch);' "$metadata_file")"
 
 if [[ "$change_id" != "$claim_branch" ]]; then
@@ -73,7 +73,20 @@ if ! gh issue develop --help >/dev/null 2>&1; then
   exit 1
 fi
 
-issue_status="$(node -e 'const fs=require("fs"); const issue=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); const labels=issue.labels.map((l)=>l.name.replace(/^status:\s+/,"status:")); process.stdout.write(labels.find((label)=>label.startsWith("status:")) || "");' "$issue_file")"
+issue_status="$(node -e '
+const fs = require("fs");
+const issue = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+const statuses = issue.labels
+  .map((label) => label.name.replace(/^status:\s+/, "status:"))
+  .filter((label) => label.startsWith("status:"));
+if (statuses.length !== 1) {
+  process.stderr.write(statuses.length > 1
+    ? `Issue has multiple status labels: ${statuses.join(", ")}\n`
+    : "Issue must have exactly one status label.\n");
+  process.exit(1);
+}
+process.stdout.write(statuses[0]);
+' "$issue_file")"
 if [[ "$issue_status" == "status:claimed" ]]; then
   stale_recovery=1
 elif [[ "$issue_status" != "status:ready" ]]; then
@@ -136,7 +149,7 @@ if (unfinished.length > 0) {
   fi
 fi
 
-gh issue list --state open --limit 200 --json number,title,labels,body > "$issues_file"
+buddy_open_issues_rest "all" > "$issues_file"
 node "$script_dir/find-coupling-conflicts.mjs" "$issues_file" "$issue_number" "$coupling_group" > /dev/null
 
 git fetch origin "$base_branch" >/dev/null

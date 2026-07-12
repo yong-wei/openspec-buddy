@@ -531,13 +531,84 @@ if (matches.length === 1 && matches[0]?.id) process.stdout.write(matches[0].id);
 
 buddy_open_issues_rest() {
   local limit="${1:-100}"
+  if [[ "$limit" != "all" && ! "$limit" =~ ^[0-9]+$ ]]; then
+    echo "Issue scan limit must be a non-negative integer or all." >&2
+    return 2
+  fi
+  local repo
+  repo="$(buddy_repo_nwo)"
   unset OPENSPEC_BUDDY_OPEN_ISSUES_NEEDS_BODY
-  if gh issue list --state open --limit "$limit" --json number,title,url,state,labels,body; then
+  if [[ "$limit" == "all" ]]; then
+    gh api --paginate --slurp "repos/$repo/issues?state=open&per_page=100" | node -e '
+const fs = require("node:fs");
+const pages = JSON.parse(fs.readFileSync(0, "utf8"));
+const issues = (Array.isArray(pages) ? pages.flat() : [])
+  .filter((issue) => !issue.pull_request)
+  .map((issue) => ({
+    number: issue.number,
+    title: issue.title,
+    url: issue.html_url || issue.url || "",
+    state: issue.state,
+    labels: issue.labels || [],
+    assignees: issue.assignees || [],
+    body: issue.body || "",
+  }));
+process.stdout.write(`${JSON.stringify(issues)}\n`);
+'
     return 0
   fi
 
-  export OPENSPEC_BUDDY_OPEN_ISSUES_NEEDS_BODY=1
-  gh issue list --state open --limit "$limit" --json number,title,url,state,labels
+  if (( limit == 0 )); then
+    printf '[]\n'
+    return 0
+  fi
+
+  local page_size=100
+  if (( limit < page_size )); then
+    page_size="$limit"
+  fi
+  local pages_dir
+  pages_dir="$(mktemp -d)"
+  local page=1
+  while :; do
+    local page_file="$pages_dir/$page.json"
+    gh api "repos/$repo/issues?state=open&per_page=$page_size&page=$page" > "$page_file"
+    local raw_count
+    raw_count="$(node -e 'const fs=require("node:fs"); const data=JSON.parse(fs.readFileSync(process.argv[1], "utf8")); process.stdout.write(String(Array.isArray(data) ? data.length : 0));' "$page_file")"
+    local issue_count
+    issue_count="$(node -e '
+const fs = require("node:fs");
+const dir = process.argv[1];
+const files = fs.readdirSync(dir).sort((left, right) => Number.parseInt(left, 10) - Number.parseInt(right, 10));
+const issues = files.flatMap((file) => JSON.parse(fs.readFileSync(`${dir}/${file}`, "utf8")))
+  .filter((issue) => !issue.pull_request);
+process.stdout.write(String(issues.length));
+' "$pages_dir")"
+    if (( issue_count >= limit || raw_count < page_size )); then
+      break
+    fi
+    page=$((page + 1))
+  done
+
+  node -e '
+const fs = require("node:fs");
+const dir = process.argv[1];
+const limit = Number(process.argv[2]);
+const files = fs.readdirSync(dir).sort((left, right) => Number.parseInt(left, 10) - Number.parseInt(right, 10));
+const issues = files.flatMap((file) => JSON.parse(fs.readFileSync(`${dir}/${file}`, "utf8")))
+  .filter((issue) => !issue.pull_request)
+  .map((issue) => ({
+    number: issue.number,
+    title: issue.title,
+    url: issue.html_url || issue.url || "",
+    state: issue.state,
+    labels: issue.labels || [],
+    assignees: issue.assignees || [],
+    body: issue.body || "",
+  }));
+process.stdout.write(`${JSON.stringify(issues.slice(0, limit))}\n`);
+' "$pages_dir" "$limit"
+  rm -rf "$pages_dir"
 }
 
 buddy_issue_body_rest() {
