@@ -631,6 +631,27 @@ function commandFor(opts, state, runtime = {}) {
     };
   }
 
+  runtime.liveClaim ||= readLiveClaimTruth(opts.issue);
+  if (!runtime.liveClaim.ok) {
+    return {
+      stage: 'blocked',
+      command: [],
+      reason: runtime.liveClaim.error,
+    };
+  }
+  if (runtime.liveClaim.status !== 'owned') {
+    recordCacheMetric('coordination', 'live-claim', 'stale_recovery', {
+      issue: opts.issue,
+      pr: opts.pr,
+      status: runtime.liveClaim.status,
+    });
+    return {
+      stage: 'blocked',
+      command: [],
+      reason: `Live claim status '${runtime.liveClaim.status}' cannot authorize PR phases.`,
+    };
+  }
+
   if (truthy(process.env.OPENSPEC_BUDDY_REVIEW_FIX_CONTEXT) && !reviewResponseGatePassed) {
     return {
       stage: 'review-response-gate',

@@ -131,6 +131,14 @@ function run(args, options = {}) {
   const corePath = options.env?.OPENSPEC_BUDDY_CORE_SCRIPT_DIR || '';
   ensureMergeHelper(corePath);
   ensureReviewEvidence(corePath);
+  if (corePath) {
+    const liveClaimHelper = path.join(corePath, 'read-live-claim-truth.sh');
+    if (!fs.existsSync(liveClaimHelper)) {
+      makeExecutable(liveClaimHelper, `#!/usr/bin/env bash
+printf '%s\\n' '{"status":"owned","source":"github-rest","claimId":"test-claim"}'
+`);
+    }
+  }
   const childEnv = {
     ...env,
     OPENSPEC_BUDDY_AUTO_CONTROLLER_CHILD: '1',
@@ -488,6 +496,40 @@ const env = {
   assert.equal(state.stages.merged.requestId, 'request-1');
   assert.equal(state.stages.merged.responseId, 'response-1');
   assert.ok(state.stages.merged.mergeAttemptId);
+}
+
+{
+  const prClaimStateDir = path.join(tmp, 'state-pr-live-claim-gate');
+  const prClaimCoreDir = path.join(tmp, 'core-pr-live-claim-gate');
+  const prClaimLogFile = path.join(tmp, 'commands-pr-live-claim-gate.log');
+  fs.mkdirSync(prClaimCoreDir, { recursive: true });
+  makeExecutable(path.join(prClaimCoreDir, 'read-live-claim-truth.sh'), `#!/usr/bin/env bash
+printf '%s\\n' '{"status":"expired","source":"github-rest","claimId":"claim-675"}'
+`);
+  makeExecutable(path.join(prClaimCoreDir, 'mark-review.sh'), `#!/usr/bin/env bash
+echo "mark-review $*" >> ${JSON.stringify(prClaimLogFile)}
+`);
+  fs.mkdirSync(prClaimStateDir, { recursive: true });
+  fs.writeFileSync(path.join(prClaimStateDir, 'pr-707.json'), JSON.stringify({
+    version: 1,
+    key: 'pr-707',
+    issue: '675',
+    pr: '707',
+    head: 'exact-head',
+    repository: 'owner/repo',
+    stages: {},
+  }));
+  const result = run(['--issue', '675', '--pr', '707', '--head', 'exact-head'], {
+    env: {
+      OPENSPEC_BUDDY_AUTO_STATE_DIR: prClaimStateDir,
+      OPENSPEC_BUDDY_CORE_SCRIPT_DIR: prClaimCoreDir,
+    },
+  });
+  assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}`);
+  assert.match(result.stdout, /^BLOCKED/m);
+  assert.match(result.stdout, /expired/);
+  const log = fs.existsSync(prClaimLogFile) ? fs.readFileSync(prClaimLogFile, 'utf8') : '';
+  assert.doesNotMatch(log, /mark-review/);
 }
 
 {
