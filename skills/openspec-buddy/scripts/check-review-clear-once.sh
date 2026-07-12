@@ -79,7 +79,7 @@ is_unavailable_review_failure() {
 
 is_waitable_review_failure() {
   local output="$1"
-  if grep -E 'No review found|no .*review request comment after the current head|top-level clear comment exists|targets .*,? not current head' <<<"$output" >/dev/null; then
+  if grep -E 'No review found|No review response from .* was found after the latest current-head review request|no .*review request comment after the current head|top-level clear comment exists|targets .*,? not current head' <<<"$output" >/dev/null; then
     return 0
   fi
   return 1

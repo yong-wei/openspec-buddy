@@ -303,6 +303,14 @@ function writeState(opts, state) {
   fs.writeFileSync(statePath(opts), `${JSON.stringify(state, null, 2)}\n`);
 }
 
+function clearMergeAuthorization(opts, mergeAttemptId) {
+  const state = readState(opts);
+  const authorization = state.stages?.merge_authorized;
+  if (!authorization || (mergeAttemptId && authorization.mergeAttemptId !== mergeAttemptId)) return;
+  delete state.stages.merge_authorized;
+  writeState(opts, state);
+}
+
 function recordStage(opts, stage, command = [], extras = {}) {
   if (!stages.has(stage)) throw new Error(`Unknown stage: ${stage}`);
   const state = readState(opts);
@@ -657,6 +665,7 @@ function runControllerOwnedMerge(opts) {
 
   const result = runProcess(mergeCommand);
   if (result.status !== 0) {
+    clearMergeAuthorization(opts, mergeAttemptId);
     emitBlocked({
       stage: 'merge-pr',
       reason: `${mergeCommand[0]} exited with status ${result.status ?? 1}`,
@@ -667,6 +676,7 @@ function runControllerOwnedMerge(opts) {
   }
   const merged = parseJsonOutput(result.stdout || '', 'merge-pr-after-gates.sh did not return JSON.');
   if (merged.error || merged.merged !== true) {
+    clearMergeAuthorization(opts, mergeAttemptId);
     emitBlocked({
       stage: 'merge-pr',
       reason: merged.error || 'Controller-owned merge did not return merged: true.',
@@ -682,6 +692,7 @@ function runControllerOwnedMerge(opts) {
     || String(merged.reviewResponseId || '') !== evidence.responseId
     || (evidence.responseUrl && String(merged.reviewResponseUrl || '') !== evidence.responseUrl)
   ) {
+    clearMergeAuthorization(opts, mergeAttemptId);
     emitBlocked({
       stage: 'merge-pr',
       reason: 'Controller-owned merge evidence does not match the authorized repository, PR, head, request, or response.',

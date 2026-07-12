@@ -121,7 +121,7 @@ fi
 cat > "$tmp_dir/verify-waitable.sh" <<'VERIFY'
 #!/bin/bash
 set -euo pipefail
-echo "No review found for current head"
+echo "No review response from chatgpt-codex-connector was found after the latest current-head review request."
 exit 1
 VERIFY
 chmod +x "$tmp_dir/verify-waitable.sh"

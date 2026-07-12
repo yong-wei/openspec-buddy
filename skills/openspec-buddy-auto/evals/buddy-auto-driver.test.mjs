@@ -368,6 +368,64 @@ const env = {
 }
 
 {
+  const failedStateDir = path.join(tmp, 'state-merge-failure-clears-authorization');
+  const failedCoreDir = path.join(tmp, 'core-merge-failure-clears-authorization');
+  const failedLogFile = path.join(tmp, 'commands-merge-failure-clears-authorization.log');
+  fs.mkdirSync(failedCoreDir, { recursive: true });
+  makeExecutable(path.join(failedCoreDir, 'mark-review.sh'), `#!/usr/bin/env bash\necho "mark-review $*" >> ${JSON.stringify(failedLogFile)}\n`);
+  makeExecutable(path.join(failedCoreDir, 'wait-for-review-clear.sh'), `#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' 'review_outcome: clear' 'review_request_id: request-1' 'review_response_id: response-1' 'review_response_url: https://example.test/response-1' >&2
+`);
+  makeExecutable(path.join(failedCoreDir, 'verify-review-clear.sh'), `#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' 'review_outcome: clear' 'review_request_id: request-1' 'review_response_id: response-1' 'review_response_url: https://example.test/response-1' >&2
+`);
+  makeMergeAwareAchievedTruth(path.join(failedCoreDir, 'verify-achieved-truth.mjs'), failedLogFile);
+  makeExecutable(path.join(failedCoreDir, 'merge-pr-after-gates.sh'), `#!/usr/bin/env bash
+set -euo pipefail
+echo 'merge helper failed' >&2
+exit 42
+`);
+
+  const failed = run(['--issue', '675', '--pr', '707', '--head', 'exact-head'], {
+    env: {
+      OPENSPEC_BUDDY_AUTO_STATE_DIR: failedStateDir,
+      OPENSPEC_BUDDY_CORE_SCRIPT_DIR: failedCoreDir,
+      OPENSPEC_BUDDY_AUTO_HEAD: 'exact-head',
+    },
+  });
+  assert.equal(failed.status, 42, failed.stderr);
+  let state = JSON.parse(fs.readFileSync(path.join(failedStateDir, 'pr-707.json'), 'utf8'));
+  assert.equal(state.stages.merge_authorized, undefined);
+  assert.equal(state.stages.merged, undefined);
+
+  const mergedBinDir = path.join(tmp, 'bin-merge-failure-external-merge');
+  fs.mkdirSync(mergedBinDir, { recursive: true });
+  makeExecutable(path.join(mergedBinDir, 'gh'), `#!/usr/bin/env bash
+set -euo pipefail
+if [[ "\${1:-}" == "api" && "\${2:-}" == "repos/owner/repo/pulls/707" ]]; then
+  printf '%s\\n' '{"number":707,"state":"closed","merged_at":"2026-07-12T07:00:00Z","head":{"sha":"exact-head"}}'
+  exit 0
+fi
+exit 1
+`);
+  const externalMerge = run(['--issue', '675', '--pr', '707', '--head', 'exact-head'], {
+    env: {
+      OPENSPEC_BUDDY_AUTO_STATE_DIR: failedStateDir,
+      OPENSPEC_BUDDY_CORE_SCRIPT_DIR: failedCoreDir,
+      OPENSPEC_BUDDY_AUTO_HEAD: 'exact-head',
+      PATH: `${mergedBinDir}:${process.env.PATH}`,
+    },
+  });
+  assert.equal(externalMerge.status, 1, externalMerge.stderr);
+  assert.match(externalMerge.stdout, /stage: unauthorized-merge/);
+  state = JSON.parse(fs.readFileSync(path.join(failedStateDir, 'pr-707.json'), 'utf8'));
+  assert.equal(state.stages.merge_authorized, undefined);
+  assert.equal(state.stages.merged, undefined);
+}
+
+{
   const yieldStateDir = path.join(tmp, 'state-review-yield');
   const yieldCoreDir = path.join(tmp, 'core-review-yield');
   const yieldLogFile = path.join(tmp, 'commands-review-yield.log');
