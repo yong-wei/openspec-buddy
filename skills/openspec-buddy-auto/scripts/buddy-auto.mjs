@@ -17,8 +17,11 @@ import {
 } from './controller-state.mjs';
 import { reconcileControllerState } from './controller-reconciler.mjs';
 import { readLaneState } from './lane-state.mjs';
+import { normalizeReviewTruth } from './review-truth.mjs';
 
 const autoScriptDir = path.dirname(fileURLToPath(import.meta.url));
+const coreScriptDir = process.env.OPENSPEC_BUDDY_CORE_SCRIPT_DIR
+  || path.resolve(autoScriptDir, '../../openspec-buddy/scripts');
 const singleDriver = process.env.OPENSPEC_BUDDY_AUTO_SINGLE_DRIVER || path.join(autoScriptDir, 'buddy-auto-driver.mjs');
 const laneDriver = process.env.OPENSPEC_BUDDY_AUTO_LANE_DRIVER || path.join(autoScriptDir, 'buddy-auto-lane-driver.mjs');
 
@@ -145,6 +148,87 @@ function laneForIssue(state, issue) {
   } catch {
     return null;
   }
+}
+
+function reviewLaneForState(state) {
+  const issue = String(state.interrupt?.issue || state.target?.issue || '');
+  const pr = String(state.reviewFix?.pr || state.interrupt?.pr || state.target?.pr || '');
+  const laneId = String(state.interrupt?.lane || '');
+  if (!issue && !pr && !laneId) return null;
+  try {
+    const laneState = readLaneState({ maxLanes: state.maxLanes || 1 });
+    return (laneState.lanes || []).find((lane) => {
+      if (laneId && String(lane.id || '') !== laneId) return false;
+      if (pr && String(lane.pr || '') !== pr) return false;
+      if (!pr && issue && String(lane.issue || '') !== issue) return false;
+      return Boolean(lane.pr);
+    }) || null;
+  } catch {
+    return null;
+  }
+}
+
+function runReviewTruthHelper(helper, pr, env) {
+  const timeoutMs = Number(process.env.OPENSPEC_BUDDY_COMMAND_TIMEOUT_MS || 120000);
+  return spawnSync(helper, [String(pr)], {
+    cwd: process.cwd(),
+    env,
+    encoding: 'utf8',
+    stdio: 'pipe',
+    timeout: Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 120000,
+  });
+}
+
+function readFreshReviewTruth(state, controllerRunId) {
+  if (!state.reviewFix?.pending && !state.interrupt) return null;
+  const lane = reviewLaneForState(state);
+  if (!lane?.pr || !lane.head) return null;
+
+  const env = {
+    ...process.env,
+    OPENSPEC_BUDDY_AUTO_CONTROLLER_RUN_ID: controllerRunId,
+    OPENSPEC_BUDDY_CACHE_REFRESH: '1',
+    OPENSPEC_BUDDY_PROBE_SKIP_WORKTREE_GUARD: '1',
+    OPENSPEC_BUDDY_REVIEW_LAST_SIGNATURE: '',
+    OPENSPEC_BUDDY_REVIEW_LAST_HEAD: '',
+    OPENSPEC_BUDDY_REVIEW_PREVIOUS_REQUEST_STATE: '',
+    OPENSPEC_BUDDY_REVIEW_REQUESTED_AT: '',
+    OPENSPEC_BUDDY_REUSE_PR_REST_CACHE: '0',
+  };
+  const probe = runReviewTruthHelper(path.join(coreScriptDir, 'probe-review-state.sh'), lane.pr, env);
+  if (probe.status !== 0) return null;
+
+  let probeData;
+  try {
+    probeData = JSON.parse(probe.stdout || '{}');
+  } catch {
+    return null;
+  }
+  const head = String(probeData.head || probeData.headRefOid || '');
+  if (!head) return null;
+
+  const review = runReviewTruthHelper(path.join(coreScriptDir, 'check-review-clear-once.sh'), lane.pr, env);
+  const threadState = review.status === 0
+    ? 'clear'
+    : review.status === 3
+      ? 'actionable'
+      : 'unknown';
+  const fetchedAt = new Date().toISOString();
+  const threadTruthFresh = threadState !== 'unknown';
+  return normalizeReviewTruth({
+    pr: lane.pr,
+    head,
+    probeState: probeData.state || probeData.probeState || 'waiting',
+    requestState: probeData.requestState || 'unknown',
+    threadState,
+    actionableState: threadState,
+    restFreshAt: fetchedAt,
+    threadsFreshAt: threadTruthFresh ? fetchedAt : '',
+    threadsHead: threadTruthFresh ? head : '',
+    runId: controllerRunId,
+    source: 'controller-live-review-truth',
+    responseOutcome: threadState === 'clear' ? 'clear' : threadState === 'actionable' ? 'actionable' : 'unknown',
+  });
 }
 
 function syncTargetPrFromIssueLane(state) {
@@ -393,7 +477,11 @@ function main() {
   }
 
   const controllerRunId = createControllerRunId();
-  state = reconcileControllerState(state).state;
+  const freshTruth = readFreshReviewTruth(state, controllerRunId);
+  state = reconcileControllerState(state, {
+    freshTruth,
+    runId: controllerRunId,
+  }).state;
   state = syncTargetPrFromIssueLane(state);
   handleChildResult(state, runChild(state, opts, controllerRunId));
 }

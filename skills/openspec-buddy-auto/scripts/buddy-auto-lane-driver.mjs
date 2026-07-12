@@ -330,7 +330,7 @@ function gateLaneLiveClaim(state, lane, source = 'live-claim', options = {}) {
   if (
     options.allowPostMergeBranchDeletion === true
     && truth.status === 'invalid'
-    && truth.reason === 'claim-branch-lock-missing'
+    && ['claim-branch-lock-missing', 'issue-closed'].includes(truth.reason)
   ) {
     recordCacheMetric('coordination', 'live-claim', 'stale_recovery', {
       issue: lane.issue,

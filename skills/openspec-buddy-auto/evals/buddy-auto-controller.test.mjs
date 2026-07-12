@@ -104,6 +104,7 @@ fs.appendFileSync(${JSON.stringify(logFile)}, JSON.stringify({
   targetIssue: process.env.OPENSPEC_BUDDY_AUTO_TARGET_ISSUE || '',
   targetPr: process.env.OPENSPEC_BUDDY_AUTO_TARGET_PR || '',
   pollOnce: process.env.OPENSPEC_BUDDY_AUTO_LANE_POLL_ONCE || '',
+  reviewFix: process.env.OPENSPEC_BUDDY_REVIEW_FIX_CONTEXT || '',
   controllerChild: process.env.OPENSPEC_BUDDY_AUTO_CONTROLLER_CHILD || ''
 }) + '\\n');
 if (process.env.BUDDY_STUB_STATUS === 'BLOCKED') {
@@ -803,6 +804,52 @@ else console.log(JSON.stringify({ achieved: false, next: 'merge-pr', reason: 'PR
   const state = readController(envInfo);
   assert.equal(state.reviewFix.pending, false);
   assert.equal(state.interrupt.stage, 'merge-pr');
+}
+
+{
+  const envInfo = makeEnv('production-reconcile-uses-fresh-review-truth');
+  const coreDir = path.join(envInfo.root, 'core');
+  fs.mkdirSync(coreDir, { recursive: true });
+  makeExecutable(path.join(coreDir, 'probe-review-state.sh'), `#!/bin/bash
+printf '%s\\n' '{"pr":"743","head":"head-1","state":"waiting","requestState":"present-current-head"}'
+`);
+  makeExecutable(path.join(coreDir, 'check-review-clear-once.sh'), `#!/bin/bash
+printf '%s\\n' 'Review clearance verified for PR #743.'
+printf '%s\\n' 'review_outcome: clear'
+exit 0
+`);
+
+  withControllerEnv(envInfo, () => {
+    const initialized = controllerModule.initializeControllerState({
+      mode: 'multi',
+      goal: true,
+      maxLanes: '2',
+      issue: '743',
+      pr: '743',
+    }, { cwd: envInfo.repoDir });
+    controllerModule.writeControllerState({
+      ...initialized,
+      reviewFix: { pending: true, pr: '743', head: 'head-1', evidence: 'response-gate-required' },
+      interrupt: { type: 'blocked', stage: 'request_missing', issue: '743', pr: '743', head: 'head-1', blockedCode: 'request_missing' },
+    }, { cwd: envInfo.repoDir });
+    laneStateModule.writeLaneState({
+      ...laneStateModule.emptyLaneState({ cwd: envInfo.repoDir, maxLanes: 2 }),
+      lanes: [{
+        id: 'issue-743',
+        issue: '743',
+        pr: '743',
+        head: 'head-1',
+        stage: 'waiting_review',
+      }],
+    }, { cwd: envInfo.repoDir });
+  });
+
+  const result = run(envInfo, { OPENSPEC_BUDDY_CORE_SCRIPT_DIR: coreDir });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(readLog(envInfo)[0].reviewFix, '');
+  const state = readController(envInfo);
+  assert.equal(state.reviewFix.pending, false);
+  assert.equal(state.interrupt, null);
 }
 
 {
