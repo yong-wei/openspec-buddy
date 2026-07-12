@@ -47,10 +47,7 @@ export OPENSPEC_BUDDY_GH_CACHE_DIR="$cache_dir"
 buddy_signal_apply "$cache_dir"
 
 if [[ -z "$issue_number" ]]; then
-  gh issue list \
-    --state open \
-    --limit "${OPENSPEC_BUDDY_CLAIM_ISSUE_LIMIT:-200}" \
-    --json number,title,labels,assignees,url,state,body > "$tmp_dir/issues.json"
+  buddy_open_issues_rest "${OPENSPEC_BUDDY_CLAIM_ISSUE_LIMIT:-200}" > "$tmp_dir/issues.json"
 
   node -e '
 const fs = require("fs");
@@ -124,7 +121,7 @@ node "$script_dir/parse-issue-metadata.mjs" "$tmp_dir/adopted-body.md" > "$metad
 
 change_id="$(node -e 'const fs=require("fs"); const data=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(data.change_id);' "$metadata_file")"
 claim_branch="$(node -e 'const fs=require("fs"); const data=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(data.claim_branch);' "$metadata_file")"
-coupling_group="$(node -e 'const fs=require("fs"); const data=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(data.coupling_group);' "$metadata_file")"
+coupling_group="$(buddy_resolve_coupling_group "$metadata_file" "$issue_file")"
 base_branch="$(node -e 'const fs=require("fs"); const data=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(data.base_branch);' "$metadata_file")"
 
 repo_nwo="$(buddy_repo_nwo)"
@@ -159,7 +156,7 @@ if (blockers.length > 0) {
   exit 1
 fi
 
-gh issue list --state open --limit 200 --json number,title,labels,body > "$tmp_dir/issues-for-coupling.json"
+buddy_open_issues_rest "${OPENSPEC_BUDDY_CLAIM_ISSUE_LIMIT:-200}" > "$tmp_dir/issues-for-coupling.json"
 node "$script_dir/find-coupling-conflicts.mjs" "$tmp_dir/issues-for-coupling.json" "$issue_number" "$coupling_group" > /dev/null
 
 git fetch origin "$base_branch" >/dev/null

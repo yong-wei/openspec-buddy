@@ -2,7 +2,7 @@
 set -euo pipefail
 
 current_series="${1:-}"
-limit="${2:-100}"
+limit="${2:-all}"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/load-config.sh"
 tmp_dir="$(mktemp -d)"

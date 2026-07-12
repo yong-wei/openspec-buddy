@@ -531,13 +531,31 @@ if (matches.length === 1 && matches[0]?.id) process.stdout.write(matches[0].id);
 
 buddy_open_issues_rest() {
   local limit="${1:-100}"
-  unset OPENSPEC_BUDDY_OPEN_ISSUES_NEEDS_BODY
-  if gh issue list --state open --limit "$limit" --json number,title,url,state,labels,body; then
-    return 0
+  if [[ "$limit" != "all" && ! "$limit" =~ ^[0-9]+$ ]]; then
+    echo "Issue scan limit must be a non-negative integer or all." >&2
+    return 2
   fi
-
-  export OPENSPEC_BUDDY_OPEN_ISSUES_NEEDS_BODY=1
-  gh issue list --state open --limit "$limit" --json number,title,url,state,labels
+  local repo
+  repo="$(buddy_repo_nwo)"
+  unset OPENSPEC_BUDDY_OPEN_ISSUES_NEEDS_BODY
+  gh api --paginate --slurp "repos/$repo/issues?state=open&per_page=100" | node -e '
+const fs = require("node:fs");
+const limit = process.argv[1];
+const pages = JSON.parse(fs.readFileSync(0, "utf8"));
+const issues = (Array.isArray(pages) ? pages.flat() : [])
+  .filter((issue) => !issue.pull_request)
+  .map((issue) => ({
+    number: issue.number,
+    title: issue.title,
+    url: issue.html_url || issue.url || "",
+    state: issue.state,
+    labels: issue.labels || [],
+    assignees: issue.assignees || [],
+    body: issue.body || "",
+  }));
+const selected = limit === "all" ? issues : issues.slice(0, Number(limit));
+process.stdout.write(`${JSON.stringify(selected)}\n`);
+' "$limit"
 }
 
 buddy_issue_body_rest() {

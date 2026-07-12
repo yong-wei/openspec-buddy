@@ -56,6 +56,36 @@ JSON
   exit 0
 fi
 
+if [[ "$1" == "api" && "$2" == "--paginate" && "$3" == "--slurp" && "$4" == "repos/owner/repo/issues?state=open&per_page=100" ]]; then
+  cat <<'JSON'
+[[
+  {
+    "number": 11,
+    "title": "Ready change",
+    "html_url": "https://example.test/issues/11",
+    "state": "open",
+    "labels": [
+      { "name": "status: ready" },
+      { "name": "series:alpha" }
+    ],
+    "body": "---\nchange_id: ready-change\nclaim_branch: ready-change\nseries: alpha\ncoupling_group: none\nexecution_mode: isolated\nbase_branch: integration\ndepends_on: []\nopenspec_path: openspec/changes/ready-change\nrisk: medium\narea: demo\n---\n"
+  },
+  {
+    "number": 12,
+    "title": "Tracking parent",
+    "html_url": "https://example.test/issues/12",
+    "state": "open",
+    "labels": [
+      { "name": "type:series-parent" },
+      { "name": "status:tracking" }
+    ],
+    "body": ""
+  }
+]]
+JSON
+  exit 0
+fi
+
 if [[ "$1" == "issue" && "$2" == "view" && "$3" == "11" ]]; then
   if [[ "$*" == *"--jq .body"* ]]; then
     cat <<'BODY'
@@ -124,7 +154,7 @@ OUTPUT_JSON="$output" node -e '
 const payload = JSON.parse(process.env.OUTPUT_JSON);
 const ready = payload.issues.find((issue) => issue.number === 11);
 if (!ready || !String(ready.body || "").includes("change_id: ready-change")) {
-  process.stderr.write("expected candidate body fallback to populate parseable front matter\n");
+  process.stderr.write("expected paginated REST scan to include parseable front matter\n");
   process.exit(1);
 }
 '
@@ -134,18 +164,13 @@ if grep -F 'issue view 12' "$GH_CALL_LOG" >/dev/null; then
   exit 1
 fi
 
-if ! grep -F 'issue view 11 --json body' "$GH_CALL_LOG" >/dev/null; then
-  echo "expected body fallback for candidate issue" >&2
+if grep -F 'issue view 11 --json body' "$GH_CALL_LOG" >/dev/null; then
+  echo "complete paginated scan should not require per-issue body fallback" >&2
   exit 1
 fi
 
-if ! grep -F 'issue list --state open --limit 50 --json number,title,url,state,labels,body' "$GH_CALL_LOG" >/dev/null; then
-  echo "expected initial issue list attempt with body field" >&2
-  exit 1
-fi
-
-if ! grep -F 'issue list --state open --limit 50 --json number,title,url,state,labels' "$GH_CALL_LOG" >/dev/null; then
-  echo "expected fallback issue list call without body field" >&2
+if ! grep -F 'api --paginate --slurp repos/owner/repo/issues?state=open&per_page=100' "$GH_CALL_LOG" >/dev/null; then
+  echo "expected complete paginated open issue scan" >&2
   exit 1
 fi
 
@@ -200,6 +225,37 @@ for number in range(1, 31):
         ]),
     })
 print(json.dumps(issues))
+PY
+  exit 0
+fi
+
+if [[ "$1" == "api" && "$2" == "--paginate" && "$3" == "--slurp" && "$4" == "repos/owner/repo/issues?state=open&per_page=100" ]]; then
+  python3 - <<'PY'
+import json
+issues = []
+for number in range(1, 31):
+    issues.append({
+        "number": number,
+        "title": f"Ready change {number}",
+        "html_url": f"https://example.test/issues/{number}",
+        "state": "open",
+        "labels": [{"name": "status:ready"}],
+        "body": "\n".join([
+            "---",
+            f"change_id: ready-change-{number}",
+            f"claim_branch: ready-change-{number}",
+            "series: alpha",
+            "coupling_group: none",
+            "execution_mode: isolated",
+            "base_branch: integration",
+            "depends_on: []",
+            f"openspec_path: openspec/changes/ready-change-{number}",
+            "risk: low",
+            "area: demo",
+            "---",
+        ]),
+    })
+print(json.dumps([issues]))
 PY
   exit 0
 fi
@@ -268,6 +324,23 @@ fi
 batch_graphql_calls="$(grep -c '^api graphql' "$batch_dir/gh.log" | tr -d ' ')"
 if [[ "$batch_graphql_calls" != "2" ]]; then
   echo "expected two GraphQL batches for 30 candidate issues" >&2
+  exit 1
+fi
+
+GH_CALL_LOG="$batch_dir/gh-limit.log" \
+GH_GRAPHQL_QUERY_LOG="$batch_dir/graphql-limit.log" \
+OPENSPEC_BUDDY_GH_CACHE_DIR="$batch_dir/cache-limit" \
+OPENSPEC_BUDDY_DISABLE_SIGNAL=1 \
+PATH="$batch_dir:$PATH" \
+  "$repo_root/skills/openspec-buddy/scripts/list-ready-change-relationships.sh" 2 > "$batch_dir/output-limit.json"
+
+limit_count="$(node -e 'const fs=require("node:fs"); const data=JSON.parse(fs.readFileSync(process.argv[1], "utf8")); process.stdout.write(String((data.issues || []).length));' "$batch_dir/output-limit.json")"
+if [[ "$limit_count" != "2" ]]; then
+  echo "explicit ready-scan limit must cap the returned issue set (got $limit_count)" >&2
+  exit 1
+fi
+if grep -F '"number": 3' "$batch_dir/output-limit.json" >/dev/null; then
+  echo "explicit ready-scan limit must not include issues beyond the requested limit" >&2
   exit 1
 fi
 

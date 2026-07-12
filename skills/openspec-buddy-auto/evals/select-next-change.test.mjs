@@ -1,25 +1,27 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 const currentFile = fileURLToPath(import.meta.url);
 const selector = path.resolve(path.dirname(currentFile), "../../openspec-buddy/scripts/select-next-change.mjs");
+const selectorWrapper = path.resolve(path.dirname(currentFile), "../../openspec-buddy/scripts/select-next-change.sh");
 process.env.OPENSPEC_BUDDY_BASE_BRANCH = "develop";
 
-function issue({ number, changeId, series, labels = [], status = "status:ready", blockedBy = [], blocking = [], risk = "medium", baseBranch = "develop", bodyOverrides = "" }) {
+function issue({ number, changeId, series, couplingGroup = "none", labels = [], status = "status:ready", blockedBy = [], blocking = [], risk = "medium", baseBranch = "develop", bodyOverrides = "" }) {
   return {
     number,
     title: `OpenSpec: ${changeId}`,
     state: "OPEN",
     url: `https://github.example.test/issues/${number}`,
-    labels: [status, `series:${series}`, `risk:${risk}`, "mode:isolated", ...labels].filter(Boolean).map((name) => ({ name })),
+    labels: [status, `series:${series}`, `risk:${risk}`, "mode:isolated", couplingGroup !== "none" ? `coupling:${couplingGroup}` : "", ...labels].filter(Boolean).map((name) => ({ name })),
     body: `---
 change_id: ${changeId}
 claim_branch: ${changeId}
 series: ${series}
-coupling_group: none
+coupling_group: ${couplingGroup}
 execution_mode: isolated
 base_branch: ${baseBranch}
 required_branch:
@@ -47,6 +49,8 @@ function runSelector(input) {
   assert.equal(result.status, 0, result.stderr || result.stdout);
   return JSON.parse(result.stdout);
 }
+
+assert.match(fs.readFileSync(selectorWrapper, "utf8"), /limit="\$\{2:-all\}"/);
 
 const baseInput = {
   activeChanges: [
@@ -172,6 +176,215 @@ const baseInput = {
 
 {
   const result = runSelector({
+    activeChanges: ["duplicate-status-work", "ready-work"],
+    issues: [
+      issue({
+        number: 20,
+        changeId: "duplicate-status-work",
+        series: "alpha",
+        status: "status:ready",
+        labels: ["status:in-progress"],
+      }),
+      issue({
+        number: 21,
+        changeId: "ready-work",
+        series: "alpha",
+      }),
+    ],
+  });
+  assert.equal(result.selected.change_id, "ready-work");
+  assert.equal(result.selected.number, 21);
+  assert.equal(result.rejected.find((entry) => entry.number === 20).reason, "multiple status labels");
+}
+
+{
+  const result = runSelector({
+    activeChanges: ["claimed-coupled-work", "ready-coupled-work", "ready-independent-work"],
+    issues: [
+      issue({
+        number: 20,
+        changeId: "claimed-coupled-work",
+        series: "alpha",
+        couplingGroup: "shared-data",
+        status: "status:claimed",
+      }),
+      issue({
+        number: 21,
+        changeId: "ready-coupled-work",
+        series: "alpha",
+        couplingGroup: "shared-data",
+      }),
+      issue({
+        number: 22,
+        changeId: "ready-independent-work",
+        series: "alpha",
+        couplingGroup: "independent-data",
+      }),
+    ],
+  });
+  assert.equal(result.selected.change_id, "ready-independent-work");
+  assert.equal(result.selected.number, 22);
+  assert.equal(result.rejected.find((entry) => entry.number === 21).reason, "coupling group has active issue");
+  assert.deepEqual(result.rejected.find((entry) => entry.number === 21).coupling_conflicts, [20]);
+}
+
+{
+  const activeWithoutBody = issue({
+    number: 20,
+    changeId: "claimed-coupled-work",
+    series: "alpha",
+    couplingGroup: "shared-data",
+    status: "status:ready",
+    labels: ["status:claimed"],
+  });
+  delete activeWithoutBody.body;
+  const result = runSelector({
+    activeChanges: ["ready-coupled-work", "ready-independent-work"],
+    issues: [
+      activeWithoutBody,
+      issue({
+        number: 21,
+        changeId: "ready-coupled-work",
+        series: "alpha",
+        couplingGroup: "shared-data",
+      }),
+      issue({
+        number: 22,
+        changeId: "ready-independent-work",
+        series: "alpha",
+        couplingGroup: "independent-data",
+      }),
+    ],
+  });
+  assert.equal(result.selected.change_id, "ready-independent-work");
+  assert.equal(result.selected.number, 22);
+  assert.deepEqual(result.rejected.find((entry) => entry.number === 21).coupling_conflicts, [20]);
+}
+
+{
+  const currentWithStricterLabel = issue({
+    number: 21,
+    changeId: "ready-coupled-work",
+    series: "alpha",
+    couplingGroup: "none",
+    labels: ["coupling:shared-data"],
+  });
+  const result = runSelector({
+    activeChanges: ["claimed-coupled-work", "ready-coupled-work", "ready-independent-work"],
+    issues: [
+      issue({
+        number: 20,
+        changeId: "claimed-coupled-work",
+        series: "alpha",
+        couplingGroup: "shared-data",
+        status: "status:claimed",
+      }),
+      currentWithStricterLabel,
+      issue({
+        number: 22,
+        changeId: "ready-independent-work",
+        series: "alpha",
+        couplingGroup: "independent-data",
+      }),
+    ],
+  });
+  assert.equal(result.selected.change_id, "ready-independent-work");
+  assert.deepEqual(result.rejected.find((entry) => entry.number === 21).coupling_conflicts, [20]);
+}
+
+{
+  const currentWithConflictingLabels = issue({
+    number: 21,
+    changeId: "ready-coupled-work",
+    series: "alpha",
+    couplingGroup: "none",
+    labels: ["coupling:alpha-data", "coupling:beta-data"],
+  });
+  const result = runSelector({
+    activeChanges: ["claimed-coupled-work", "ready-coupled-work", "ready-independent-work"],
+    issues: [
+      issue({
+        number: 20,
+        changeId: "claimed-coupled-work",
+        series: "alpha",
+        couplingGroup: "beta-data",
+        status: "status:claimed",
+      }),
+      currentWithConflictingLabels,
+      issue({
+        number: 22,
+        changeId: "ready-independent-work",
+        series: "alpha",
+        couplingGroup: "independent-data",
+      }),
+    ],
+  });
+  assert.equal(result.selected.change_id, "ready-independent-work");
+  assert.equal(result.rejected.find((entry) => entry.number === 21).reason, "multiple coupling labels");
+}
+
+{
+  const currentWithConflictingMetadata = issue({
+    number: 21,
+    changeId: "ready-coupled-work",
+    series: "alpha",
+    couplingGroup: "none",
+    labels: ["coupling:beta-data"],
+  });
+  currentWithConflictingMetadata.body = currentWithConflictingMetadata.body.replace(
+    "coupling_group: none",
+    "coupling_group: alpha-data",
+  );
+  const result = runSelector({
+    activeChanges: ["claimed-coupled-work", "ready-coupled-work", "ready-independent-work"],
+    issues: [
+      issue({
+        number: 20,
+        changeId: "claimed-coupled-work",
+        series: "alpha",
+        couplingGroup: "beta-data",
+        status: "status:claimed",
+      }),
+      currentWithConflictingMetadata,
+      issue({
+        number: 22,
+        changeId: "ready-independent-work",
+        series: "alpha",
+        couplingGroup: "independent-data",
+      }),
+    ],
+  });
+  assert.equal(result.selected.change_id, "ready-independent-work");
+  const rejected = result.rejected.find((entry) => entry.number === 21);
+  assert.equal(rejected.reason, "coupling metadata and labels disagree");
+  assert.deepEqual(rejected.coupling_groups, ["alpha-data", "beta-data"]);
+}
+
+{
+  const result = runSelector({
+    activeChanges: ["in-progress-coupled-work", "ready-coupled-work"],
+    issues: [
+      issue({
+        number: 20,
+        changeId: "in-progress-coupled-work",
+        series: "alpha",
+        couplingGroup: "shared-data",
+        status: "status:in-progress",
+      }),
+      issue({
+        number: 21,
+        changeId: "ready-coupled-work",
+        series: "alpha",
+        couplingGroup: "shared-data",
+      }),
+    ],
+  });
+  assert.equal(result.selected, null);
+  assert.deepEqual(result.rejected.find((entry) => entry.number === 21).coupling_conflicts, [20]);
+}
+
+{
+  const result = runSelector({
     activeChanges: ["claimed-work"],
     issues: [
       issue({
@@ -202,6 +415,60 @@ const baseInput = {
   });
   assert.equal(result.selected, null);
   assert.match(result.reason, /No executable/);
+}
+
+{
+  const completedUpstream = issue({
+    number: 20,
+    changeId: "completed-upstream",
+    series: "alpha",
+    status: "status:ready",
+    labels: ["status:merged"],
+  });
+  completedUpstream.state = "CLOSED";
+  const result = runSelector({
+    activeChanges: ["completed-upstream", "dependent-work"],
+    issues: [
+      completedUpstream,
+      issue({
+        number: 21,
+        changeId: "dependent-work",
+        series: "alpha",
+        bodyOverrides: "depends_on:\n  - completed-upstream\n",
+      }),
+    ],
+  });
+  assert.equal(result.selected.change_id, "dependent-work");
+  assert.equal(result.selected.number, 21);
+}
+
+{
+  const conflictingUpstream = issue({
+    number: 20,
+    changeId: "conflicting-upstream",
+    series: "alpha",
+    status: "status:ready",
+    labels: ["status:merged"],
+  });
+  const result = runSelector({
+    activeChanges: ["conflicting-upstream", "dependent-work", "independent-work"],
+    issues: [
+      conflictingUpstream,
+      issue({
+        number: 21,
+        changeId: "dependent-work",
+        series: "alpha",
+        bodyOverrides: "depends_on:\n  - conflicting-upstream\n",
+      }),
+      issue({
+        number: 22,
+        changeId: "independent-work",
+        series: "alpha",
+      }),
+    ],
+  });
+  assert.equal(result.selected.change_id, "independent-work");
+  assert.equal(result.rejected.find((entry) => entry.number === 21).reason, "depends_on includes incomplete change");
 }
 
 {
