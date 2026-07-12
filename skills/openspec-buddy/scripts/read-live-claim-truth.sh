@@ -144,9 +144,6 @@ if (result.issueState !== 'OPEN') {
     if (!result.changeId || !result.branch || !result.baseSha || result.branch !== result.changeId) {
       result.status = 'invalid';
       result.reason = 'claim-branch-proof-incomplete';
-    } else if (!remoteBranchExists) {
-      result.status = 'invalid';
-      result.reason = 'claim-branch-lock-missing';
     } else if (statusLabels.length !== 1 || !activeStatus.has(claimStatus)) {
       result.status = 'invalid';
       result.reason = statusLabels.length === 1
@@ -170,6 +167,9 @@ if (result.issueState !== 'OPEN') {
       if (mismatches.length > 0) {
         result.status = 'foreign';
         result.reason = `claim-identity-mismatch:${mismatches.join(',')}`;
+      } else if (!remoteBranchExists) {
+        result.status = 'invalid';
+        result.reason = 'claim-branch-lock-missing';
       } else {
         result.status = 'owned';
       }

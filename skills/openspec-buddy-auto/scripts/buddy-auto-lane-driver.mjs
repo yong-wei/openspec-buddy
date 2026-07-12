@@ -323,10 +323,27 @@ function recordCacheMetric(kind, surface, outcome, context = {}) {
   });
 }
 
-function gateLaneLiveClaim(state, lane, source = 'live-claim') {
+function gateLaneLiveClaim(state, lane, source = 'live-claim', options = {}) {
   if (!lane.issue) return { ok: true, status: 'not-applicable' };
   const truth = readLiveClaimTruth(lane.issue);
   if (truth.ok) return truth;
+  if (
+    options.allowPostMergeBranchDeletion === true
+    && truth.status === 'invalid'
+    && truth.reason === 'claim-branch-lock-missing'
+  ) {
+    recordCacheMetric('coordination', 'live-claim', 'stale_recovery', {
+      issue: lane.issue,
+      status: truth.status,
+      authorization: 'controller-merge-receipt',
+    });
+    return {
+      ok: true,
+      status: 'merged-receipt',
+      source: 'controller-merge-receipt',
+      reason: 'Remote claim branch was deleted by the verified merge; controller merge receipt authorizes post-merge achievement recovery.',
+    };
+  }
   if (['missing', 'expired', 'foreign', 'invalid'].includes(truth.status)) {
     recordCacheMetric('coordination', 'live-claim', 'stale_recovery', {
       issue: lane.issue,
@@ -827,7 +844,9 @@ function completeMergedLaneAchievement(state, lane, prData = null) {
       return true;
     }
   }
-  const claim = gateLaneLiveClaim(state, lane, 'post-merge-achievement');
+  const claim = gateLaneLiveClaim(state, lane, 'post-merge-achievement', {
+    allowPostMergeBranchDeletion: authorization.ok,
+  });
   if (!claim.ok) {
     emitLiveClaimBlock(lane, claim, 'post-merge-achievement');
     return true;
