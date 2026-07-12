@@ -8,7 +8,7 @@ A valid claim has all of these:
 
 ```text
 origin/<change_id> exists
-issue has status:claimed or status:in-progress
+issue has status:claimed, status:in-progress, or status:in-review
 issue has the claiming assignee
 latest OpenSpec Buddy Claim comment records claim_id, branch, base_sha, and lease_until
 claim_branch == change_id

@@ -107,6 +107,30 @@ cat > "$tmp_dir/issue-ready.json" <<'JSON'
 {"number":42,"state":"open","labels":[{"name":"status:ready"}],"assignees":[]}
 JSON
 
+cat > "$tmp_dir/issue-in-progress.json" <<'JSON'
+{"number":42,"state":"open","labels":[{"name":"status:in-progress"}],"assignees":[{"login":"agent-a"}]}
+JSON
+
+cat > "$tmp_dir/issue-in-review.json" <<'JSON'
+{"number":42,"state":"open","labels":[{"name":"status:in-review"}],"assignees":[{"login":"agent-a"}]}
+JSON
+
+for status in backlog stale-claim blocked; do
+  printf '{"number":42,"state":"open","labels":[{"name":"status:%s"}],"assignees":[{"login":"agent-a"}]}\n' "$status" > "$tmp_dir/issue-$status.json"
+done
+
+cat > "$tmp_dir/issue-no-assignee.json" <<'JSON'
+{"number":42,"state":"open","labels":[{"name":"status:claimed"}],"assignees":[]}
+JSON
+
+cat > "$tmp_dir/issue-other-assignee.json" <<'JSON'
+{"number":42,"state":"open","labels":[{"name":"status:claimed"}],"assignees":[{"login":"agent-a"},{"login":"agent-b"}]}
+JSON
+
+cat > "$tmp_dir/issue-foreign-claim.json" <<'JSON'
+{"number":42,"state":"open","labels":[{"name":"status:claimed"}],"assignees":[{"login":"agent-b"}]}
+JSON
+
 cat > "$tmp_dir/comments-owned.json" <<JSON
 [{"created_at":"2026-07-12T11:00:00Z","body":"OpenSpec Buddy Claim\\n\\nclaim_id: claim-owned\\nstate: active\\nagent: @agent-a\\nchange_id: demo-change\\nbranch: demo-change\\nlease_until: 2026-07-12T13:00:00Z\\nworktree_alias: dev1\\nworktree_path_hash: $path_hash\\ncoordination_branch: dev1"}]
 JSON
@@ -153,10 +177,27 @@ assert_status() {
 run_probe "$tmp_dir/issue-claimed.json" "$tmp_dir/comments-owned.json" > "$tmp_dir/owned.json"
 assert_status owned "$tmp_dir/owned.json"
 
+run_probe "$tmp_dir/issue-in-progress.json" "$tmp_dir/comments-owned.json" > "$tmp_dir/in-progress.json"
+assert_status owned "$tmp_dir/in-progress.json"
+
+run_probe "$tmp_dir/issue-in-review.json" "$tmp_dir/comments-owned.json" > "$tmp_dir/in-review.json"
+assert_status owned "$tmp_dir/in-review.json"
+
 run_probe "$tmp_dir/issue-ready.json" "$tmp_dir/comments-empty.json" > "$tmp_dir/missing.json"
 assert_status missing "$tmp_dir/missing.json"
 
-run_probe "$tmp_dir/issue-claimed.json" "$tmp_dir/comments-foreign.json" > "$tmp_dir/foreign.json"
+for status in ready backlog stale-claim blocked; do
+  run_probe "$tmp_dir/issue-$status.json" "$tmp_dir/comments-owned.json" > "$tmp_dir/invalid-$status.json"
+  assert_status invalid "$tmp_dir/invalid-$status.json"
+done
+
+run_probe "$tmp_dir/issue-no-assignee.json" "$tmp_dir/comments-owned.json" > "$tmp_dir/missing-assignee.json"
+assert_status invalid "$tmp_dir/missing-assignee.json"
+
+run_probe "$tmp_dir/issue-other-assignee.json" "$tmp_dir/comments-owned.json" > "$tmp_dir/other-assignee.json"
+assert_status foreign "$tmp_dir/other-assignee.json"
+
+run_probe "$tmp_dir/issue-foreign-claim.json" "$tmp_dir/comments-foreign.json" > "$tmp_dir/foreign.json"
 assert_status foreign "$tmp_dir/foreign.json"
 
 run_probe "$tmp_dir/issue-claimed.json" "$tmp_dir/comments-expired.json" > "$tmp_dir/expired.json"

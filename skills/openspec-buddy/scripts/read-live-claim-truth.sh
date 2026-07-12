@@ -64,6 +64,21 @@ const nowValue = process.env.OPENSPEC_BUDDY_NOW || '';
 const now = nowValue ? Date.parse(nowValue) : Date.now();
 const checkedAt = new Date().toISOString();
 
+function labelsOf(value) {
+  const list = Array.isArray(value) ? value : value?.nodes || [];
+  return list
+    .map((label) => typeof label === 'string' ? label : label?.name)
+    .filter(Boolean)
+    .map((name) => name.replace(/^status:\s+/, 'status:'));
+}
+
+function assigneesOf(value) {
+  const list = Array.isArray(value) ? value : value?.nodes || [];
+  return list
+    .map((assignee) => typeof assignee === 'string' ? assignee : assignee?.login)
+    .filter(Boolean);
+}
+
 const result = {
   issue: String(issue.number || issueNumber),
   issueState: String(issue.state || '').toUpperCase(),
@@ -103,12 +118,27 @@ if (result.issueState !== 'OPEN') {
   } else if (lease <= now) {
     result.status = 'expired';
   } else {
-    if (boundBranch && !result.coordinationBranch) {
+    const statusLabels = labelsOf(issue.labels).filter((name) => name.startsWith('status:'));
+    const activeStatus = new Set(['status:claimed', 'status:in-progress', 'status:in-review']);
+    const claimStatus = statusLabels[0] || '';
+    const claimAgent = result.agent.replace(/^@/, '');
+    const assigneeLogins = assigneesOf(issue.assignees);
+    if (statusLabels.length !== 1 || !activeStatus.has(claimStatus)) {
+      result.status = 'invalid';
+      result.reason = statusLabels.length === 1
+        ? `issue-status-not-active:${claimStatus || 'missing'}`
+        : 'issue-status-label-invalid';
+    } else if (!assigneeLogins.includes(claimAgent)) {
+      result.status = 'invalid';
+      result.reason = 'claim-assignee-missing';
+    } else if (assigneeLogins.some((login) => login !== claimAgent)) {
+      result.status = 'foreign';
+      result.reason = `claim-assignee-mismatch:${assigneeLogins.filter((login) => login !== claimAgent).join(',')}`;
+    } else if (boundBranch && !result.coordinationBranch) {
       result.status = 'invalid';
       result.reason = 'claim-missing-coordination-branch';
     } else {
       const mismatches = [];
-      const claimAgent = result.agent.replace(/^@/, '');
       if (claimAgent !== viewer) mismatches.push('agent');
       if (result.worktreeAlias && result.worktreeAlias !== String(identity.alias || '')) mismatches.push('worktree_alias');
       if (result.worktreePathHash && result.worktreePathHash !== String(identity.path_hash || '')) mismatches.push('worktree_path_hash');

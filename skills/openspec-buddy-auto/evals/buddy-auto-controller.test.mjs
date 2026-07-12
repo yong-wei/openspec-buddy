@@ -698,6 +698,7 @@ echo "unexpected gh invocation: $*" >&2
 exit 99
 `);
   makeExecutable(path.join(coreDir, 'verify-claim-worktree.sh'), `#!/usr/bin/env bash\necho "verify-claim $*" >> ${JSON.stringify(envInfo.logFile)}\n`);
+  makeExecutable(path.join(coreDir, 'read-live-claim-truth.sh'), `#!/usr/bin/env bash\nprintf '%s\\n' '{"status":"owned","source":"github-rest"}'\n`);
   makeExecutable(path.join(coreDir, 'verify-current-head-review-request.sh'), `#!/usr/bin/env bash\necho "verify-request $*" >> ${JSON.stringify(envInfo.logFile)}\n`);
   makeExecutable(path.join(coreDir, 'mark-review.sh'), `#!/usr/bin/env bash\necho "mark-review $*" >> ${JSON.stringify(envInfo.logFile)}\n`);
   makeExecutable(path.join(coreDir, 'verify-review-clear.sh'), `#!/usr/bin/env bash
