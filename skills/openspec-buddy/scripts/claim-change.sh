@@ -149,7 +149,7 @@ if (unfinished.length > 0) {
   fi
 fi
 
-buddy_open_issues_rest 200 > "$issues_file"
+buddy_open_issues_rest "all" > "$issues_file"
 node "$script_dir/find-coupling-conflicts.mjs" "$issues_file" "$issue_number" "$coupling_group" > /dev/null
 
 git fetch origin "$base_branch" >/dev/null

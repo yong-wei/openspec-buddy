@@ -12,6 +12,7 @@ const parser = path.join(skillDir, "scripts/parse-issue-metadata.mjs");
 const selector = path.join(skillDir, "scripts/select-claim-issue.mjs");
 const builder = path.join(skillDir, "scripts/build-open-issue-metadata.mjs");
 const claimIssue = path.join(skillDir, "scripts/claim-issue.sh");
+const claimChange = path.join(skillDir, "scripts/claim-change.sh");
 const couplingConflicts = path.join(skillDir, "scripts/find-coupling-conflicts.mjs");
 
 process.env.OPENSPEC_BUDDY_BASE_BRANCH = "integration";
@@ -83,8 +84,11 @@ Human-readable issue description stays visible.
 
 {
   const claimScript = fs.readFileSync(claimIssue, "utf8");
+  const claimChangeScript = fs.readFileSync(claimChange, "utf8");
   assert.match(claimScript, /buddy_write_minimal_claim_lock .*\$tmp_dir\/adopted-body\.md/);
   assert.match(claimScript, /buddy_open_issues_rest "\$\{OPENSPEC_BUDDY_CLAIM_ISSUE_LIMIT:-200\}" > "\$tmp_dir\/issues\.json"/);
+  assert.match(claimScript, /buddy_open_issues_rest "all" > "\$tmp_dir\/issues-for-coupling\.json"/);
+  assert.match(claimChangeScript, /buddy_open_issues_rest "all" > "\$issues_file"/);
   assert.doesNotMatch(claimScript, /issue list[\s\S]*--limit/);
   assert.doesNotMatch(claimScript, /gh issue create/);
 }

@@ -56,9 +56,9 @@ JSON
   exit 0
 fi
 
-if [[ "$1" == "api" && "$2" == "--paginate" && "$3" == "--slurp" && "$4" == "repos/owner/repo/issues?state=open&per_page=100" ]]; then
+if [[ "$1" == "api" && "$2" == repos/owner/repo/issues\?state=open\&per_page=* ]]; then
   cat <<'JSON'
-[[
+[
   {
     "number": 11,
     "title": "Ready change",
@@ -81,7 +81,7 @@ if [[ "$1" == "api" && "$2" == "--paginate" && "$3" == "--slurp" && "$4" == "rep
     ],
     "body": ""
   }
-]]
+]
 JSON
   exit 0
 fi
@@ -169,8 +169,8 @@ if grep -F 'issue view 11 --json body' "$GH_CALL_LOG" >/dev/null; then
   exit 1
 fi
 
-if ! grep -F 'api --paginate --slurp repos/owner/repo/issues?state=open&per_page=100' "$GH_CALL_LOG" >/dev/null; then
-  echo "expected complete paginated open issue scan" >&2
+if ! grep -F 'api repos/owner/repo/issues?state=open&per_page=50&page=1' "$GH_CALL_LOG" >/dev/null; then
+  echo "expected bounded REST open issue scan" >&2
   exit 1
 fi
 
@@ -229,7 +229,7 @@ PY
   exit 0
 fi
 
-if [[ "$1" == "api" && "$2" == "--paginate" && "$3" == "--slurp" && "$4" == "repos/owner/repo/issues?state=open&per_page=100" ]]; then
+if [[ "$1" == "api" && "$2" == repos/owner/repo/issues\?state=open\&per_page=* ]]; then
   python3 - <<'PY'
 import json
 issues = []
@@ -255,7 +255,7 @@ for number in range(1, 31):
             "---",
         ]),
     })
-print(json.dumps([issues]))
+print(json.dumps(issues))
 PY
   exit 0
 fi
@@ -341,6 +341,14 @@ if [[ "$limit_count" != "2" ]]; then
 fi
 if grep -F '"number": 3' "$batch_dir/output-limit.json" >/dev/null; then
   echo "explicit ready-scan limit must not include issues beyond the requested limit" >&2
+  exit 1
+fi
+if ! grep -F 'api repos/owner/repo/issues?state=open&per_page=2&page=1' "$batch_dir/gh-limit.log" >/dev/null; then
+  echo "numeric limit should size the REST page" >&2
+  exit 1
+fi
+if grep -F '&page=2' "$batch_dir/gh-limit.log" >/dev/null; then
+  echo "numeric limit must not request unnecessary REST pages" >&2
   exit 1
 fi
 

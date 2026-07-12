@@ -156,7 +156,7 @@ if (blockers.length > 0) {
   exit 1
 fi
 
-buddy_open_issues_rest "${OPENSPEC_BUDDY_CLAIM_ISSUE_LIMIT:-200}" > "$tmp_dir/issues-for-coupling.json"
+buddy_open_issues_rest "all" > "$tmp_dir/issues-for-coupling.json"
 node "$script_dir/find-coupling-conflicts.mjs" "$tmp_dir/issues-for-coupling.json" "$issue_number" "$coupling_group" > /dev/null
 
 git fetch origin "$base_branch" >/dev/null
