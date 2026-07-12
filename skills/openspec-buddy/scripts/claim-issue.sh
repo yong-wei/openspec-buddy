@@ -133,7 +133,7 @@ viewer="$(gh api user --jq .login)"
 buddy_preflight_claim_truth_check "$issue_number" "$change_id" "$claim_branch" "$viewer" "$repo_nwo" "$tmp_dir/preflight-before-relationships"
 
 blocked_by_file="$tmp_dir/blocked-by.json"
-buddy_issue_relationships_graphql "$owner" "$repo_name" "$issue_number" > "$blocked_by_file"
+OPENSPEC_BUDDY_CACHE_REFRESH=1 buddy_issue_relationships_graphql "$owner" "$repo_name" "$issue_number" > "$blocked_by_file"
 
 if ! node -e '
 const fs = require("fs");

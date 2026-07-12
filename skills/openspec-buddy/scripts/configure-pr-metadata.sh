@@ -48,8 +48,8 @@ pr_label_file="$tmp_dir/pr-labels.txt"
 body_file="$tmp_dir/body.md"
 development_link_file="$tmp_dir/development-link.json"
 
-buddy_issue_json "$issue_number" "$cache_dir" "$issue_file"
-buddy_pr_json "$pr_ref" "$cache_dir" "$pr_file"
+buddy_live_issue_json "$issue_number" "$cache_dir" "$issue_file"
+buddy_live_pr_json "$pr_ref" "$cache_dir" "$pr_file"
 
 issue_url="$(node -e 'const fs=require("fs"); const issue=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(issue.url);' "$issue_file")"
 pr_url="$(node -e 'const fs=require("fs"); const pr=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(pr.url);' "$pr_file")"

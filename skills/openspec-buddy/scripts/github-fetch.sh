@@ -56,6 +56,28 @@ buddy_cache_is_stale() {
   [[ "$(buddy_cache_tool stale "$file" "$ttl_seconds" "$repo_nwo" "$object_type" "$key")" == "true" ]]
 }
 
+buddy_cache_refresh_call() {
+  local had_refresh=0
+  local previous_refresh=""
+  if [[ "${OPENSPEC_BUDDY_CACHE_REFRESH+x}" == "x" ]]; then
+    had_refresh=1
+    previous_refresh="$OPENSPEC_BUDDY_CACHE_REFRESH"
+  fi
+  export OPENSPEC_BUDDY_CACHE_REFRESH=1
+  local status
+  if "$@"; then
+    status=0
+  else
+    status=$?
+  fi
+  if [[ "$had_refresh" == "1" ]]; then
+    export OPENSPEC_BUDDY_CACHE_REFRESH="$previous_refresh"
+  else
+    unset OPENSPEC_BUDDY_CACHE_REFRESH
+  fi
+  return "$status"
+}
+
 buddy_cache_data_to_file() {
   local cache_file="$1"
   local output_file="$2"
@@ -328,6 +350,10 @@ buddy_issue_json() {
   buddy_cache_data_to_file "$cache_file" "$output_file" issue "$parsed_key"
 }
 
+buddy_live_issue_json() {
+  buddy_cache_refresh_call buddy_issue_json "$@"
+}
+
 buddy_pr_json() {
   local pr_ref="$1"
   local cache_dir="$2"
@@ -358,6 +384,10 @@ buddy_pr_json() {
   buddy_cache_data_to_file "$cache_file" "$output_file" pr "$parsed_key"
 }
 
+buddy_live_pr_json() {
+  buddy_cache_refresh_call buddy_pr_json "$@"
+}
+
 buddy_subject_json() {
   local ref="$1"
   local cache_dir="$2"
@@ -366,6 +396,16 @@ buddy_subject_json() {
     buddy_pr_json "$ref" "$cache_dir" "$output_file"
   else
     buddy_issue_json "$ref" "$cache_dir" "$output_file"
+  fi
+}
+
+buddy_live_subject_json() {
+  local ref="$1"
+  shift
+  if [[ "$ref" == http://*"/pull/"* || "$ref" == https://*"/pull/"* ]]; then
+    buddy_live_pr_json "$ref" "$@"
+  else
+    buddy_live_issue_json "$ref" "$@"
   fi
 }
 
@@ -428,6 +468,10 @@ process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   fi
 
   buddy_cache_data_to_file "$cache_file" "$output_file" project "$project_cache_key"
+}
+
+buddy_live_project_metadata_json() {
+  buddy_cache_refresh_call buddy_project_metadata_json "$@"
 }
 
 buddy_project_item_id_from_subject_file() {

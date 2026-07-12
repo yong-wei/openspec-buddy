@@ -53,8 +53,8 @@ cache_dir="$(buddy_cache_dir)"
 subject_file="$tmp_dir/subject.json"
 project_file="$tmp_dir/project.json"
 
-buddy_subject_json "$issue_ref" "$cache_dir" "$subject_file"
-buddy_project_metadata_json "$cache_dir" "$project_file"
+buddy_live_subject_json "$issue_ref" "$cache_dir" "$subject_file"
+buddy_live_project_metadata_json "$cache_dir" "$project_file"
 
 issue_url="$(node -e 'const fs=require("node:fs"); const subject=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(subject.url || "");' "$subject_file")"
 project_id="$(node -e 'const fs=require("node:fs"); const project=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(project.id || "");' "$project_file")"

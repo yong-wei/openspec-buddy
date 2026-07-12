@@ -81,10 +81,8 @@ if [[ -n "$provided_pr_file" || -n "$provided_reviews_file" || -n "$provided_com
   cp "$provided_issue_comments_file" "$issue_comments_file"
   cp "$provided_review_comments_file" "$review_comments_file"
 else
-  if [[ "${OPENSPEC_BUDDY_REUSE_PR_REST_CACHE:-}" != "1" ]]; then
-    buddy_invalidate_pr_rest_bundle_cache "$cache_dir" "$pr_number"
-  fi
-  buddy_pr_rest_bundle "$repo_nwo" "$pr_number" "$cache_dir"
+  buddy_invalidate_pr_rest_bundle_cache "$cache_dir" "$pr_number"
+  OPENSPEC_BUDDY_CACHE_REFRESH=1 buddy_pr_rest_bundle "$repo_nwo" "$pr_number" "$cache_dir"
   cp "$BUDDY_PR_REST_FILE" "$pr_rest_file"
   cp "$BUDDY_REVIEWS_FILE" "$reviews_file"
   cp "$BUDDY_COMMITS_FILE" "$commits_file"

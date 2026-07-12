@@ -313,6 +313,22 @@ if grep -F 'project item-list' "$GH_LOG_FILE" >/dev/null; then
   exit 1
 fi
 
+fresh_cache="$tmp_dir/cache-force-refresh"
+mkdir -p "$fresh_cache/issues"
+fresh_now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+printf '%s\n' "{\"fetchedAt\":\"$fresh_now\",\"source\":\"rest\",\"repo\":\"owner/repo\",\"objectType\":\"issue\",\"key\":\"123\",\"data\":{\"number\":123,\"url\":\"https://github.com/owner/repo/issues/123\",\"projectItems\":[{\"id\":\"ITEM_ISSUE_123\",\"title\":\"Major LTE\"}]}}" > "$fresh_cache/issues/123.json"
+printf '%s\n' "{\"fetchedAt\":\"$fresh_now\",\"source\":\"gh-project\",\"repo\":\"owner/repo\",\"objectType\":\"project\",\"key\":\"owner:1:Status:Start:End\",\"data\":{\"id\":\"CACHED_PROJECT\",\"number\":1,\"owner\":\"owner\",\"title\":\"Major LTE\",\"statusField\":{\"id\":\"CACHED_FIELD\",\"name\":\"Status\",\"options\":[{\"id\":\"CACHED_TODO\",\"name\":\"Todo\"}]},\"dateFields\":{}}}" > "$fresh_cache/project.json"
+: > "$GH_LOG_FILE"
+OPENSPEC_BUDDY_GH_CACHE_DIR="$fresh_cache" "$repo_root/skills/openspec-buddy/scripts/set-project-status.sh" 123 status:ready > /dev/null
+if ! grep -F 'issue view 123' "$GH_LOG_FILE" >/dev/null; then
+  echo "Project write must refresh the live subject instead of using a fresh-looking issue cache" >&2
+  exit 1
+fi
+if ! grep -F 'project view 1 --owner owner --format json' "$GH_LOG_FILE" >/dev/null; then
+  echo "Project write must refresh project metadata instead of using a fresh-looking project cache" >&2
+  exit 1
+fi
+
 mkdir -p "$tmp_dir/cache-project-mismatch"
 printf '%s\n' '{"fetchedAt":"2026-06-12T00:00:00Z","source":"gh-project","repo":"unknown","objectType":"project","key":"owner:99:Status:Start:End","data":{"id":"STALE_PROJECT","number":99,"owner":"owner","title":"Old Project","statusField":{"id":"OLD_FIELD","name":"Status","options":[{"id":"OLD_TODO","name":"Todo"}]},"dateFields":{}}}' > "$tmp_dir/cache-project-mismatch/project.json"
 : > "$GH_LOG_FILE"
