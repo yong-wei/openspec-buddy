@@ -186,12 +186,12 @@ fi
 node -e '
 const fs = require("node:fs");
 const lines = fs.readFileSync(process.argv[1], "utf8").trim().split(/\r?\n/);
+if (lines.length !== 1) {
+  throw new Error(`--json output must contain exactly one line, got ${lines.length}`);
+}
 const probe = JSON.parse(lines[0]);
 if (probe.status !== "owned" || probe.source !== "github-rest") {
   throw new Error(`unexpected probe: ${JSON.stringify(probe)}`);
-}
-if (!lines.some((line) => line.includes("Claim worktree verified"))) {
-  throw new Error("verify output is missing the human-readable success line");
 }
 ' "$tmp_dir/verify-json.out"
 

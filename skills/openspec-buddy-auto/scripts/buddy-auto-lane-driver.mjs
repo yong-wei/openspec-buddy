@@ -807,13 +807,34 @@ function completeMergedLaneAchievement(state, lane, prData = null) {
   const truthData = mergedTruth.data || mergedTruth;
   const authorization = matchingMergeAuthorization(lane, truthData);
   if (!authorization.ok) return blockUnauthorizedMergedLane(state, lane, truthData, authorization.reason);
+  ensureBoundBranch();
+  const preClaimVerify = verifyAchievedTruth(lane);
+  if (preClaimVerify.status === 0) {
+    const preClaimParsed = parseJsonResult(preClaimVerify.stdout, 'verify-achieved-truth.mjs did not return JSON');
+    if (preClaimParsed.ok && preClaimParsed.data?.achieved === true) {
+      lane.stage = 'done';
+      lane.lastResult = 'achieved';
+      lane.blockedReason = '';
+      clearRetryableState(lane);
+      lane.updatedAt = new Date().toISOString();
+      writeLaneState(state);
+      emitDone([
+        ['stage', 'lane-done'],
+        ['lane', lane.id],
+        ['issue', lane.issue],
+        ['pr', lane.pr],
+      ], preClaimVerify.stdout);
+      return true;
+    }
+  }
   const claim = gateLaneLiveClaim(state, lane, 'post-merge-achievement');
   if (!claim.ok) {
     emitLiveClaimBlock(lane, claim, 'post-merge-achievement');
     return true;
   }
   ensureBoundBranch();
-  const verify = verifyAchievedTruth(lane);
+  let verify = preClaimVerify;
+  if (verify.status !== 0) verify = verifyAchievedTruth(lane);
   if (verify.status !== 0) {
     const reason = verify.stderr || verify.stdout || 'verify-achieved-truth.mjs failed during post-merge achievement';
     markLaneFailure(state, lane, reason, {

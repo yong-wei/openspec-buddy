@@ -212,6 +212,7 @@ if [[ "$json_output" == "1" ]]; then
     exit 55
   fi
   cat "$live_claim_file"
+  exit 0
 fi
 
 printf 'Claim worktree verified'
