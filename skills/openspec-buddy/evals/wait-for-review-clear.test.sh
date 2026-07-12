@@ -193,6 +193,11 @@ printf '%s\n' \
   '  echo "- No review found from chatgpt-codex-connector." >&2' \
   '  exit 1' \
   'fi' \
+  'if [[ "${VERIFY_MODE:-clean}" == "unavailable" ]]; then' \
+  '  echo "review_outcome: unavailable" >&2' \
+  '  echo "Review response is unavailable because Codex review quota is exhausted." >&2' \
+  '  exit 1' \
+  'fi' \
   'if [[ "${VERIFY_MODE:-clean}" == "mixed-stale-unresolved" ]]; then' \
   '  echo "Review clearance verification failed:" >&2' \
   '  echo "- Latest review targets old-head, not current head head-1." >&2' \
@@ -295,6 +300,35 @@ if [[ "$mixed_status" -eq 0 || "$mixed_status" -eq 124 ]]; then
   exit 1
 fi
 grep -F 'unresolved review thread THREAD_1' "$tmp_dir/mixed-err.txt" >/dev/null
+
+export VERIFY_MODE=unavailable
+export VERIFY_LOG_FILE="$tmp_dir/verify-unavailable.log"
+export OPENSPEC_BUDDY_REVIEW_INITIAL_WAIT_SECONDS=0
+export OPENSPEC_BUDDY_REVIEW_POLL_SECONDS=1
+export OPENSPEC_BUDDY_REVIEW_MAX_WAIT_SECONDS=2
+export GH_COMMENT_LOG_FILE="$tmp_dir/comment-unavailable.log"
+rm -f "$GH_COMMENT_LOG_FILE"
+set +e
+timeout 8s "$helper" 123 > "$tmp_dir/unavailable-output.txt" 2> "$tmp_dir/unavailable-err.txt"
+unavailable_status="$?"
+set -e
+unset VERIFY_MODE
+if [[ "$unavailable_status" -ne 4 ]]; then
+  echo "wait-for-review-clear.sh should stop with unavailable status 4 (status=$unavailable_status)" >&2
+  cat "$tmp_dir/unavailable-output.txt" >&2
+  cat "$tmp_dir/unavailable-err.txt" >&2
+  exit 1
+fi
+if ! grep -F 'Review response is unavailable because Codex review quota is exhausted.' "$tmp_dir/unavailable-err.txt" >/dev/null; then
+  echo "wait-for-review-clear.sh should preserve unavailable review evidence" >&2
+  cat "$tmp_dir/unavailable-err.txt" >&2
+  exit 1
+fi
+if [[ -e "$GH_COMMENT_LOG_FILE" ]]; then
+  echo "wait-for-review-clear.sh must not request a retry after unavailable review capacity" >&2
+  cat "$GH_COMMENT_LOG_FILE" >&2
+  exit 1
+fi
 
 printf '%s\n' \
   '#!/bin/bash' \
