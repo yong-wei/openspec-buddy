@@ -266,7 +266,7 @@ const env = {
   fs.mkdirSync(recoveryCoreDir, { recursive: true });
   makeExecutable(path.join(recoveryCoreDir, 'claim-issue.sh'), `#!/usr/bin/env bash\necho "claim-issue $*" >> ${JSON.stringify(recoveryLogFile)}\n`);
   makeExecutable(path.join(recoveryCoreDir, 'find-issue-pr.sh'), `#!/usr/bin/env bash\necho "find-issue-pr $*" >> ${JSON.stringify(recoveryLogFile)}\nprintf '%s\\n' '{"issue":916,"pr":null,"reason":"no exact PR"}'\n`);
-  makeExecutable(path.join(recoveryCoreDir, 'read-live-claim-truth.sh'), `#!/usr/bin/env bash\necho "live-claim $*" >> ${JSON.stringify(recoveryLogFile)}\ncase "\${LIVE_CLAIM_STATUS:-missing}" in\n  owned) printf '%s\\n' '{"status":"owned","source":"github-rest","claimId":"claim-916"}' ;;\n  missing) printf '%s\\n' '{"status":"missing","source":"github-rest","claimId":""}' ;;\n  expired) printf '%s\\n' '{"status":"expired","source":"github-rest","claimId":"claim-916"}' ;;\n  foreign) printf '%s\\n' '{"status":"foreign","source":"github-rest","claimId":"claim-916"}' ;;\n  failure) echo 'simulated live claim probe failure' >&2; exit 2 ;;\n  *) echo 'unknown live claim status' >&2; exit 2 ;;\nesac\n`);
+  makeExecutable(path.join(recoveryCoreDir, 'read-live-claim-truth.sh'), `#!/usr/bin/env bash\necho "live-claim $*" >> ${JSON.stringify(recoveryLogFile)}\ncase "\${LIVE_CLAIM_STATUS:-missing}" in\n  owned) printf '%s\\n' '{"status":"owned","source":"github-rest","claimId":"claim-916"}' ;;\n  missing) printf '%s\\n' '{"status":"missing","source":"github-rest","claimId":""}' ;;\n  expired) printf '%s\\n' '{"status":"expired","issueStatus":"status:claimed","source":"github-rest","claimId":"claim-916"}' ;;\n  expired-active) printf '%s\\n' '{"status":"expired","issueStatus":"status:in-progress","source":"github-rest","claimId":"claim-916"}' ;;\n  foreign) printf '%s\\n' '{"status":"foreign","source":"github-rest","claimId":"claim-916"}' ;;\n  failure) echo 'simulated live claim probe failure' >&2; exit 2 ;;\n  *) echo 'unknown live claim status' >&2; exit 2 ;;\nesac\n`);
 
   seedClaimReceipt(recoveryStateDir);
   const missing = run(['--issue', '916'], {
@@ -281,6 +281,20 @@ const env = {
   assert.doesNotMatch(fs.readFileSync(recoveryLogFile, 'utf8'), /find-issue-pr 916/);
   assert.match(missing.stdout, /stage: claim-issue/);
 
+  const claimCountBeforeExpiredActive = (fs.readFileSync(recoveryLogFile, 'utf8').match(/claim-issue 916/g) || []).length;
+  const expiredActive = run(['--issue', '916'], {
+    env: {
+      OPENSPEC_BUDDY_AUTO_STATE_DIR: recoveryStateDir,
+      OPENSPEC_BUDDY_CORE_SCRIPT_DIR: recoveryCoreDir,
+      LIVE_CLAIM_STATUS: 'expired-active',
+    },
+  });
+  assert.equal(expiredActive.status, 0, expiredActive.stderr);
+  assert.match(expiredActive.stdout, /^BLOCKED/m);
+  assert.match(expiredActive.stdout, /status:in-progress/);
+  const claimCountAfterExpiredActive = (fs.readFileSync(recoveryLogFile, 'utf8').match(/claim-issue 916/g) || []).length;
+  assert.equal(claimCountAfterExpiredActive, claimCountBeforeExpiredActive);
+
   const changedWorktree = run(['--issue', '916'], {
     env: {
       OPENSPEC_BUDDY_AUTO_STATE_DIR: recoveryStateDir,
@@ -293,7 +307,7 @@ const env = {
   assert.match(changedWorktree.stdout, /^BLOCKED/m);
   assert.match(changedWorktree.stdout, /foreign/);
   const recoveryLog = fs.readFileSync(recoveryLogFile, 'utf8');
-  assert.equal((recoveryLog.match(/live-claim 916 --json/g) || []).length, 2);
+  assert.equal((recoveryLog.match(/live-claim 916 --json/g) || []).length, 3);
 
   const ownedStateDir = path.join(recoveryRoot, 'owned-state');
   const ownedLogFile = path.join(recoveryRoot, 'owned.log');

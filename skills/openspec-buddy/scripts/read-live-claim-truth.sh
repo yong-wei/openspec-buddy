@@ -94,6 +94,7 @@ function assigneesOf(value) {
 const result = {
   issue: String(issue.number || issueNumber),
   issueState: String(issue.state || '').toUpperCase(),
+  issueStatus: '',
   status: 'missing',
   claimId: '',
   agent: '',
@@ -107,6 +108,8 @@ const result = {
   source: 'github-rest',
   checkedAt,
 };
+const statusLabels = labelsOf(issue.labels).filter((name) => name.startsWith('status:'));
+result.issueStatus = statusLabels.length === 1 ? statusLabels[0] : '';
 
 if (result.issueState !== 'OPEN') {
   result.status = 'invalid';
@@ -132,7 +135,6 @@ if (result.issueState !== 'OPEN') {
   } else if (lease <= now) {
     result.status = 'expired';
   } else {
-    const statusLabels = labelsOf(issue.labels).filter((name) => name.startsWith('status:'));
     const activeStatus = new Set(['status:claimed', 'status:in-progress', 'status:in-review']);
     const claimStatus = statusLabels[0] || '';
     const claimAgent = result.agent.replace(/^@/, '');

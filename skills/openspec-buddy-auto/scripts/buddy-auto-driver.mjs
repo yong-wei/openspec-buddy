@@ -595,7 +595,7 @@ function commandFor(opts, state, runtime = {}) {
         reason: `Live claim belongs to another identity (${runtime.liveClaim.reason || 'foreign claim'}); do not take over the issue automatically.`,
       };
     }
-    if (runtime.liveClaim.status === 'missing' || runtime.liveClaim.status === 'expired') {
+    if (runtime.liveClaim.status === 'missing') {
       recordCacheMetric('coordination', 'live-claim', 'stale_recovery', { issue: opts.issue, status: runtime.liveClaim.status });
       return {
         stage: 'claim-issue',
@@ -603,6 +603,28 @@ function commandFor(opts, state, runtime = {}) {
         reason: `Live claim is ${runtime.liveClaim.status}; reacquire the remote claim before issue/PR lookup.`,
         records: ['claimed'],
         claimRecovery: true,
+      };
+    }
+    if (runtime.liveClaim.status === 'expired') {
+      if (runtime.liveClaim.issueStatus === 'status:claimed') {
+        recordCacheMetric('coordination', 'live-claim', 'stale_recovery', { issue: opts.issue, status: runtime.liveClaim.status });
+        return {
+          stage: 'claim-issue',
+          command: [path.join(coreScriptDir, 'claim-issue.sh'), opts.issue],
+          reason: 'Live claim is expired while issue remains status:claimed; recover the remote claim before issue/PR lookup.',
+          records: ['claimed'],
+          claimRecovery: true,
+        };
+      }
+      recordCacheMetric('coordination', 'live-claim', 'stale_recovery', {
+        issue: opts.issue,
+        status: runtime.liveClaim.status,
+        issueStatus: runtime.liveClaim.issueStatus || 'unknown',
+      });
+      return {
+        stage: 'blocked',
+        command: [],
+        reason: `Live claim is expired while issue status is '${runtime.liveClaim.issueStatus || 'unknown'}'; reconcile the active issue state before retrying claim recovery.`,
       };
     }
     if (!claimedReceiptIsUsable(state, opts, runtime.liveClaim)) {
