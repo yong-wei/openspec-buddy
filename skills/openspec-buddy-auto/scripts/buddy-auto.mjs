@@ -179,8 +179,16 @@ function runReviewTruthHelper(helper, pr, env) {
   });
 }
 
+function hasReviewInterrupt(state) {
+  if (state.reviewFix?.pending) return true;
+  const interrupt = state.interrupt;
+  if (!interrupt) return false;
+  return ['waiting_review', 'request_missing', 'review-fix', 'review_fix'].includes(String(interrupt.stage || ''))
+    || String(interrupt.blockedCode || '') === 'request_missing';
+}
+
 function readFreshReviewTruth(state, controllerRunId) {
-  if (!state.reviewFix?.pending && !state.interrupt) return null;
+  if (!hasReviewInterrupt(state)) return null;
   const lane = reviewLaneForState(state);
   if (!lane?.pr || !lane.head) return null;
 
@@ -195,6 +203,12 @@ function readFreshReviewTruth(state, controllerRunId) {
     OPENSPEC_BUDDY_REVIEW_REQUESTED_AT: '',
     OPENSPEC_BUDDY_REUSE_PR_REST_CACHE: '0',
   };
+  const review = runReviewTruthHelper(path.join(coreScriptDir, 'check-review-clear-once.sh'), lane.pr, env);
+  const threadState = review.status === 0
+    ? 'clear'
+    : review.status === 3
+      ? 'actionable'
+      : 'unknown';
   const probe = runReviewTruthHelper(path.join(coreScriptDir, 'probe-review-state.sh'), lane.pr, env);
   if (probe.status !== 0) return null;
 
@@ -207,12 +221,6 @@ function readFreshReviewTruth(state, controllerRunId) {
   const head = String(probeData.head || probeData.headRefOid || '');
   if (!head) return null;
 
-  const review = runReviewTruthHelper(path.join(coreScriptDir, 'check-review-clear-once.sh'), lane.pr, env);
-  const threadState = review.status === 0
-    ? 'clear'
-    : review.status === 3
-      ? 'actionable'
-      : 'unknown';
   const fetchedAt = new Date().toISOString();
   const threadTruthFresh = threadState !== 'unknown';
   return normalizeReviewTruth({
