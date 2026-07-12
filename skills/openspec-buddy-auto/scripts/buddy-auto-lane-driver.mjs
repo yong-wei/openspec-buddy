@@ -231,6 +231,11 @@ function upsertLane(state, lanePatch) {
     blockedReason: '',
     retryableSince: '',
     retryAttempts: 0,
+    responseOutcome: 'unknown',
+    reviewRequestId: '',
+    reviewResponseId: '',
+    reviewResponseAt: '',
+    reviewResponseUrl: '',
     updatedAt,
     ...lanePatch,
     id,
@@ -514,6 +519,40 @@ function checkLaneReview(lane) {
   return run(path.join(coreScriptDir, 'check-review-clear-once.sh'), [String(lane.pr)], { allowFailure: true });
 }
 
+function reviewEvidenceValue(output, key) {
+  const match = String(output || '').match(new RegExp(`^${key}:\\s*(.+)$`, 'im'));
+  return match ? match[1].trim() : '';
+}
+
+function enterReviewUnavailable(state, lane, output = '') {
+  lane.stage = 'review_unavailable';
+  lane.responseOutcome = 'unavailable';
+  lane.reviewRequestId = reviewEvidenceValue(output, 'review_request_id') || lane.reviewRequestId || '';
+  lane.reviewResponseId = reviewEvidenceValue(output, 'review_response_id') || lane.reviewResponseId || '';
+  lane.reviewResponseAt = reviewEvidenceValue(output, 'review_response_at') || lane.reviewResponseAt || '';
+  lane.reviewResponseUrl = reviewEvidenceValue(output, 'review_response_url') || lane.reviewResponseUrl || '';
+  lane.reviewRetryCount = 0;
+  lane.reviewRequestedAt = '';
+  lane.lastResult = 'review-unavailable';
+  lane.blockedReason = 'Latest Codex review response is unavailable; wait for quota/service recovery, then explicitly request a new current-head review.';
+  clearRetryableState(lane);
+  lane.updatedAt = new Date().toISOString();
+  writeLaneState(state);
+  emitBlocked([
+    ['stage', 'review-unavailable'],
+    ['lane', lane.id],
+    ['issue', lane.issue],
+    ['pr', lane.pr],
+    ['reason', lane.blockedReason],
+    ['response_outcome', lane.responseOutcome],
+    ['review_request_id', lane.reviewRequestId],
+    ['review_response_id', lane.reviewResponseId],
+    ['review_response_url', lane.reviewResponseUrl],
+    ['required_action', 'After quota/service recovery, authorize a new current-head review request and rerun the controller.'],
+  ], output);
+  return true;
+}
+
 function verifyAchievedTruth(lane) {
   return run(path.join(coreScriptDir, 'verify-achieved-truth.mjs'), [String(lane.issue), String(lane.pr)], { allowFailure: true });
 }
@@ -763,6 +802,40 @@ function reconcileRecoverableLanes(state) {
       ]);
       return true;
     }
+  }
+  return false;
+}
+
+function reconcileReviewUnavailableLanes(state) {
+  for (const lane of state.lanes.filter((candidate) => candidate.stage === 'review_unavailable' && candidate.pr)) {
+    const probe = probeLane(lane);
+    if (probe.status !== 0) continue;
+    const parsed = parseJsonResult(probe.stdout, 'probe-review-state.sh returned invalid JSON');
+    if (!parsed.ok) continue;
+    const nextHead = String(parsed.data?.head || lane.head || '');
+    const nextSignature = String(parsed.data?.signature || lane.lastSignature || '');
+    const changed = Boolean(
+      (nextHead && nextHead !== lane.head)
+      || (nextSignature && nextSignature !== lane.lastSignature),
+    );
+    if (!changed) continue;
+    lane.stage = 'waiting_review';
+    lane.head = nextHead;
+    lane.lastSignature = nextSignature;
+    lane.lastRequestState = 'missing-current-head';
+    lane.responseOutcome = 'unknown';
+    lane.reviewRequestId = '';
+    lane.reviewResponseId = '';
+    lane.reviewResponseAt = '';
+    lane.reviewResponseUrl = '';
+    lane.reviewRequestedAt = '';
+    lane.reviewRetryCount = 0;
+    lane.lastResult = 'review-unavailable-state-changed';
+    lane.blockedReason = '';
+    clearRetryableState(lane);
+    lane.updatedAt = new Date().toISOString();
+    writeLaneState(state);
+    return true;
   }
   return false;
 }
@@ -1492,6 +1565,7 @@ function advanceResumedLane(state, lane) {
       writeLaneState(state);
       return false;
     }
+    if (check.status === 4) return enterReviewUnavailable(state, lane, check.stdout || check.stderr);
     if (check.status !== 3) {
       const reason = check.stderr || check.stdout || 'check-review-clear-once.sh failed after review-fix handoff';
       markLaneFailure(state, lane, reason, {
@@ -1667,6 +1741,7 @@ function runDeepReviewCheck(state, lane, source = 'deep-check-review', { resetWa
     return false;
   }
   if (check.status === 3) return enterReviewFix(state, lane, check.stdout || check.stderr);
+  if (check.status === 4) return enterReviewUnavailable(state, lane, check.stdout || check.stderr);
   const reason = check.stderr || check.stdout || 'check-review-clear-once.sh failed';
   const retryable = isTransientFailure(reason);
   if (resetWait && retryable) {
@@ -1890,6 +1965,7 @@ function runScheduler(opts) {
     let state = readLaneState({ maxLanes });
     state.maxLanes = maxLanes;
     writeLaneState(state);
+    if (reconcileReviewUnavailableLanes(state)) state = readLaneState({ maxLanes });
 
     if (opts.releaseLaneIssue) {
       const args = [String(opts.releaseLaneIssue), '--clear-lane'];
@@ -1912,6 +1988,7 @@ function runScheduler(opts) {
     }
 
     if (opts.reconcile) {
+      if (reconcileReviewUnavailableLanes(state)) state = readLaneState({ maxLanes });
       if (reconcileRecoverableLanes(state)) return;
       if (reconcileWaitingReviewPrTruth(state)) return;
       const refreshed = readLaneState({ maxLanes });
@@ -1977,6 +2054,9 @@ function runScheduler(opts) {
           lane.stage = 'waiting_review';
           lane.updatedAt = new Date().toISOString();
           writeLaneState(state);
+        } else if (check.status === 4) {
+          enterReviewUnavailable(state, lane, check.stdout || check.stderr);
+          return;
         } else {
           emitBlocked([
             ['stage', 'check-review-clear-once'],
@@ -1996,6 +2076,7 @@ function runScheduler(opts) {
     const retryableBlockedBeforeEarlyReconcile = state.lanes.some((lane) => lane.stage === 'retryable_blocked');
     if (reconcileRecoverableLanes(state)) return;
     state = readLaneState({ maxLanes });
+    if (reconcileReviewUnavailableLanes(state)) state = readLaneState({ maxLanes });
     if (retryableBlockedBeforeEarlyReconcile && JSON.stringify(state.lanes || []) !== beforeEarlyReconcile) {
       if (emitBlockedLaneSummaryIfTerminal(state)) return;
       const branch = currentBranch();
@@ -2022,6 +2103,7 @@ function runScheduler(opts) {
 
     while (true) {
       state = readLaneState({ maxLanes });
+      if (reconcileReviewUnavailableLanes(state)) state = readLaneState({ maxLanes });
       if (reconcileRecoverableLanes(state)) return;
       state = readLaneState({ maxLanes });
       if (emitBlockedLaneSummaryIfTerminal(state)) return;

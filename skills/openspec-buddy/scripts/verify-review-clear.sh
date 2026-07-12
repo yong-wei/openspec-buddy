@@ -115,6 +115,7 @@ const output = {
   headRefOid: pr.head?.sha || "",
   reviews: reviews.map((review, index) => ({
     __index: index,
+    id: review.id || review.node_id || "",
     author: review.user,
     user: review.user,
     state: review.state,
@@ -124,6 +125,7 @@ const output = {
     commit_id: review.commit_id || "",
   })),
   comments: comments.map((comment) => ({
+    id: comment.id || comment.node_id || "",
     author: comment.user,
     user: comment.user,
     body: comment.body || "",

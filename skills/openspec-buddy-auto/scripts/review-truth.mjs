@@ -26,6 +26,14 @@ export const threadStates = new Set([
   'actionable',
 ]);
 
+export const responseOutcomes = new Set([
+  'unknown',
+  'pending',
+  'clear',
+  'actionable',
+  'unavailable',
+]);
+
 export function nowIso(clock = () => new Date()) {
   return clock().toISOString();
 }
@@ -43,6 +51,9 @@ export function normalizeReviewTruth(input = {}) {
   const actionableState = threadStates.has(String(input.actionableState || ''))
     ? String(input.actionableState || '')
     : threadState;
+  const responseOutcome = responseOutcomes.has(String(input.responseOutcome || ''))
+    ? String(input.responseOutcome || '')
+    : 'unknown';
   return {
     pr: String(input.pr || ''),
     head: String(input.head || ''),
@@ -54,6 +65,11 @@ export function normalizeReviewTruth(input = {}) {
     threadsFreshAt: String(input.threadsFreshAt || ''),
     threadsHead: String(input.threadsHead || ''),
     signature: String(input.signature || ''),
+    responseOutcome,
+    reviewRequestId: String(input.reviewRequestId || ''),
+    reviewResponseId: String(input.reviewResponseId || ''),
+    reviewResponseAt: String(input.reviewResponseAt || ''),
+    reviewResponseUrl: String(input.reviewResponseUrl || ''),
   };
 }
 
@@ -84,6 +100,11 @@ export function classifyProbe(probe = {}, { previousHead = '', previousSignature
     signature,
     probeState,
     requestState,
+    responseOutcome: probe.responseOutcome,
+    reviewRequestId: probe.reviewRequestId,
+    reviewResponseId: probe.reviewResponseId,
+    reviewResponseAt: probe.reviewResponseAt,
+    reviewResponseUrl: probe.reviewResponseUrl,
     restFreshAt: nowIso(clock),
   });
 }
@@ -92,6 +113,10 @@ export function mergeReviewTruth(existing = {}, patch = {}) {
   const current = normalizeReviewTruth(existing);
   const normalizedPatch = normalizeReviewTruth(patch);
   const threadPatchIsFresh = Boolean(normalizedPatch.threadsFreshAt || normalizedPatch.threadsHead || normalizedPatch.threadState !== 'unknown');
+  const headChanged = Boolean(patch.head && String(patch.head) !== current.head);
+  const requestChanged = Object.hasOwn(patch, 'reviewRequestId')
+    && String(patch.reviewRequestId || '') !== current.reviewRequestId;
+  const responseInvalidated = headChanged || requestChanged;
   const next = normalizeReviewTruth({
     ...current,
     ...patch,
@@ -100,6 +125,13 @@ export function mergeReviewTruth(existing = {}, patch = {}) {
       actionableState: current.actionableState,
       threadsFreshAt: current.threadsFreshAt,
       threadsHead: current.threadsHead,
+    } : {}),
+    ...(responseInvalidated ? {
+      responseOutcome: 'unknown',
+      reviewRequestId: '',
+      reviewResponseId: '',
+      reviewResponseAt: '',
+      reviewResponseUrl: '',
     } : {}),
   });
   if (next.head && current.threadsHead && current.threadsHead !== next.head && !patch.threadsHead) {
@@ -144,6 +176,11 @@ export function laneReviewTruth(lane = {}) {
     threadsFreshAt: lane.threadsFreshAt || '',
     threadsHead: lane.threadsHead || '',
     signature: lane.lastSignature || lane.signature || '',
+    responseOutcome: lane.responseOutcome || '',
+    reviewRequestId: lane.reviewRequestId || '',
+    reviewResponseId: lane.reviewResponseId || '',
+    reviewResponseAt: lane.reviewResponseAt || '',
+    reviewResponseUrl: lane.reviewResponseUrl || '',
   });
 }
 
@@ -160,6 +197,11 @@ export function applyReviewTruthToLane(lane, truth = {}, { updatedAt = nowIso() 
   lane.restFreshAt = normalized.restFreshAt || lane.restFreshAt || '';
   lane.threadsFreshAt = normalized.threadsFreshAt || lane.threadsFreshAt || '';
   lane.threadsHead = normalized.threadsHead || lane.threadsHead || '';
+  lane.responseOutcome = normalized.responseOutcome || 'unknown';
+  lane.reviewRequestId = normalized.reviewRequestId || '';
+  lane.reviewResponseId = normalized.reviewResponseId || '';
+  lane.reviewResponseAt = normalized.reviewResponseAt || '';
+  lane.reviewResponseUrl = normalized.reviewResponseUrl || '';
   lane.updatedAt = updatedAt;
   return lane;
 }

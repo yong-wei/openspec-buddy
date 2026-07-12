@@ -295,7 +295,8 @@ function normalizedLane(overrides) {
     reviewRequestedAt: '', reviewRetryCount: 0, lastProbeAt: '', lastSignature: '',
     lastRequestState: '', lastResult: '', probeState: '', requestState: '', actionableState: '',
     threadState: '', restFreshAt: '', threadsFreshAt: '', threadsHead: '',
-    reviewStatusSyncedAt: '', blockedReason: '', retryableStage: '', retryableHead: '',
+    reviewStatusSyncedAt: '', responseOutcome: 'unknown', reviewRequestId: '', reviewResponseId: '',
+    reviewResponseAt: '', reviewResponseUrl: '', blockedReason: '', retryableStage: '', retryableHead: '',
     retryableSince: '', retryAttempts: 0, updatedAt: '', ...overrides,
   };
 }
@@ -2575,6 +2576,62 @@ console.log('stage: achieved');
   assert.match(result.stdout, /retry window expired/);
   const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
   assert.equal(state.lanes[0].stage, 'blocked');
+}
+
+{
+  const envInfo = makeEnv('review-unavailable-no-retry');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 1,
+    lanes: [
+      normalizedLane({
+        id: 'issue-675',
+        issue: '675',
+        change: 'change-675',
+        branch: 'change-675',
+        pr: '707',
+        head: 'head-1',
+        stage: 'waiting_review',
+        reviewRetryCount: 0,
+        lastSignature: 'sig',
+        lastRequestState: 'present-current-head',
+      }),
+    ],
+  }));
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '1',
+    CURRENT_BRANCH: 'change-675',
+    PROBE_STATE_707: 'review_returned',
+    CHECK_REVIEW_STATUS: '4',
+    CHECK_REVIEW_STDERR: 'review_outcome: unavailable\nreview_request_id: request-2\nreview_response_id: quota-2\nreview_response_at: 2026-06-30T00:04:00Z\nreview_response_url: https://example.test/quota-2\nReview response is unavailable',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /BLOCKED/);
+  assert.match(result.stdout, /review-unavailable/);
+  let state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  assert.equal(state.lanes[0].stage, 'review_unavailable');
+  assert.equal(state.lanes[0].lastResult, 'review-unavailable');
+  assert.equal(state.lanes[0].responseOutcome, 'unavailable');
+  assert.equal(state.lanes[0].reviewRequestId, 'request-2');
+  assert.equal(state.lanes[0].reviewResponseId, 'quota-2');
+  assert.equal(state.lanes[0].reviewResponseUrl, 'https://example.test/quota-2');
+  assert.equal((fs.readFileSync(envInfo.logFile, 'utf8').match(/^request 707/mg) || []).length, 0);
+
+  const second = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '1',
+    CURRENT_BRANCH: 'change-675',
+    PROBE_STATE_707: 'review_returned',
+    CHECK_REVIEW_STATUS: '4',
+    CHECK_REVIEW_STDERR: 'review_outcome: unavailable\nReview response is unavailable',
+  });
+  assert.equal(second.status, 0, second.stderr);
+  state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  assert.equal(state.lanes[0].stage, 'review_unavailable');
+  assert.equal((fs.readFileSync(envInfo.logFile, 'utf8').match(/^request 707/mg) || []).length, 0);
 }
 
 console.log('buddy-auto-lane-driver tests passed');

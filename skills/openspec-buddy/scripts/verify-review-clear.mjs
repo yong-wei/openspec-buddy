@@ -179,6 +179,16 @@ const latestReview = cycle.source === 'review' ? cycle.response : null;
 
 if (cycle.outcome !== 'clear') {
   errors.push(`review_outcome: ${cycle.outcome}`);
+  if (cycle.request?.id || cycle.request?.node_id) errors.push(`review_request_id: ${cycle.request.id || cycle.request.node_id}`);
+  if (cycle.response?.id || cycle.response?.node_id) errors.push(`review_response_id: ${cycle.response.id || cycle.response.node_id}`);
+  const responseAt = cycle.response?.createdAt
+    || cycle.response?.created_at
+    || cycle.response?.submittedAt
+    || cycle.response?.submitted_at
+    || '';
+  const responseUrl = cycle.response?.url || cycle.response?.html_url || '';
+  if (responseAt) errors.push(`review_response_at: ${responseAt}`);
+  if (responseUrl) errors.push(`review_response_url: ${responseUrl}`);
   if (cycle.outcome === 'unavailable') {
     errors.push(`Review response is unavailable from ${reviewer}; Codex review capacity or service is unavailable.`);
   } else if (!cycle.request) {

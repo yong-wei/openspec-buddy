@@ -35,6 +35,22 @@ assert.equal(laneState.normalizeMaxLanes(undefined), 2);
 assert.equal(laneState.normalizeMaxLanes('3'), 3);
 assert.throws(() => laneState.normalizeMaxLanes('4'), /1 to 3/);
 
+const unavailableLane = laneState.normalizeLane({
+  id: 'review-unavailable',
+  issue: '9',
+  pr: '99',
+  stage: 'review_unavailable',
+  responseOutcome: 'unavailable',
+  reviewRequestId: 'request-9',
+  reviewResponseId: 'response-9',
+  reviewResponseAt: '2026-06-30T00:00:00.000Z',
+  reviewResponseUrl: 'https://example.test/response-9',
+});
+assert.equal(unavailableLane.responseOutcome, 'unavailable');
+assert.equal(unavailableLane.reviewRequestId, 'request-9');
+assert.equal(laneState.laneReservesCapacity(unavailableLane), true);
+assert.equal(laneState.laneBlocksGoalCompletion(unavailableLane), true);
+
 const empty = laneState.emptyLaneState({ cwd: repoDir, maxLanes: 2 });
 assert.equal(empty.worktree.alias, 'dev1');
 assert.equal(empty.worktree.boundBranch, 'dev1');

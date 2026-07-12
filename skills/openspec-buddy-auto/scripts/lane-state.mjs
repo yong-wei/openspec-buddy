@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { responseOutcomes } from './review-truth.mjs';
 
 export const allowedLaneStages = new Set([
   'claiming',
@@ -15,13 +16,14 @@ export const allowedLaneStages = new Set([
   'review_returned',
   'review_fix',
   'merge_ready',
+  'review_unavailable',
   'achieving',
   'done',
   'blocked',
   'retryable_blocked',
 ]);
 
-export const blockedLikeStages = new Set(['blocked', 'retryable_blocked']);
+export const blockedLikeStages = new Set(['blocked', 'retryable_blocked', 'review_unavailable']);
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -257,6 +259,13 @@ export function normalizeLane(lane) {
     threadsFreshAt: String(lane.threadsFreshAt || ''),
     threadsHead: String(lane.threadsHead || ''),
     reviewStatusSyncedAt: String(lane.reviewStatusSyncedAt || ''),
+    responseOutcome: responseOutcomes.has(String(lane.responseOutcome || ''))
+      ? String(lane.responseOutcome || '')
+      : 'unknown',
+    reviewRequestId: String(lane.reviewRequestId || ''),
+    reviewResponseId: String(lane.reviewResponseId || ''),
+    reviewResponseAt: String(lane.reviewResponseAt || ''),
+    reviewResponseUrl: String(lane.reviewResponseUrl || ''),
     blockedReason: String(lane.blockedReason || ''),
     retryableStage: String(lane.retryableStage || ''),
     retryableHead: String(lane.retryableHead || ''),
@@ -337,6 +346,7 @@ export function selectorExcludedIssues(state) {
 
 export function laneNeedsReconciliation(lane) {
   if (!lane || lane.stage === 'done') return false;
+  if (lane.stage === 'review_unavailable') return false;
   if (lane.stage === 'blocked' && lane.lastResult === 'resume-branch-restore-failed') return false;
   return lane.stage === 'retryable_blocked'
     || (lane.stage === 'blocked' && Boolean(lane.issue || lane.pr || lane.branch || lane.claimId));
