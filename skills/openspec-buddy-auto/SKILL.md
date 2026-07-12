@@ -85,8 +85,8 @@ openspec/.buddy-cache/auto-state/
 openspec/.buddy-cache/auto-lanes/
 ```
 
-These files do not replace GitHub truth; they only prevent skipped sequence and
-recover from handoff, blocked, or review-fix interruption.
+These files do not replace GitHub truth; live remote reads control claim, review,
+merge, archive, and Project decisions while caches and receipts only recover sequence.
 
 ## Recovery Commands
 

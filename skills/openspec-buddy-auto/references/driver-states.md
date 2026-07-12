@@ -120,6 +120,8 @@ threadState
 restFreshAt
 threadsFreshAt
 threadsHead
+reviewRunId
+reviewTruthSource
 lastSignature
 ```
 
@@ -127,6 +129,11 @@ lastSignature
 keep a lane waiting or trigger a deeper check, but they do not prove review
 clearance. `threadState` and `actionableState` come from the review-thread truth
 path and are valid only for the matching `threadsHead`.
+
+They are also valid only while `threadsFreshAt` is within the short review
+truth TTL and `reviewRunId` matches the current controller run. A persisted
+`threadState: clear` without current-run truth cannot clear a review interrupt
+or authorize merge recovery.
 
 The scheduler remains single-writer. It may park a clean lane only after commit,
 push, current-head review request, matching PR head, clean worktree, and
@@ -165,6 +172,24 @@ openspec/.buddy-cache/auto-state/
 Receipts are local state-machine evidence, not GitHub truth. They only prove
 that a deterministic internal helper passed at a given phase. GitHub truth still
 controls claim, PR, review, Project, merge, and achievement decisions.
+
+In particular, a valid `claimed` receipt never skips
+`read-live-claim-truth.sh`; a live `owned` result is required before the issue
+can proceed to PR lookup.
+
+## Cache Policy
+
+Issue and PR reads use a ten-minute cache, relationship and ready scans use a
+two-minute cache, and Project metadata uses a twenty-four-hour cache. These
+limits are performance controls, not coordination leases. The claim, review,
+merge, archive, and Project write paths force a fresh read. Metrics are stored
+as best-effort JSONL under `openspec/.buddy-cache/cache-metrics.jsonl` and can be
+summarized with:
+
+```bash
+<openspec-buddy-auto-skill-dir>/../openspec-buddy/scripts/cache-metrics.mjs \
+  summary openspec/.buddy-cache
+```
 
 `merge_authorized` is recorded immediately before the controller-owned merge
 mutation. It is bound to the exact repository, issue, PR, full head SHA, clear

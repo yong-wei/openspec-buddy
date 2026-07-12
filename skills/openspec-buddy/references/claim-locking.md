@@ -16,6 +16,18 @@ claim_branch == change_id
 
 The branch lock is created before issue status is changed. If status update or claim comment fails, the claim script removes the just-created remote branch. For ordinary open issues, `claim-issue.sh` writes the hidden metadata block after the branch lock succeeds and before marking the issue claimed.
 
+The local claim receipt and cache are not part of this proof. Before reusing a
+claim after restart, worktree switching, or timeout recovery, query the live
+claim truth:
+
+```bash
+<openspec-buddy-skill-dir>/scripts/read-live-claim-truth.sh <issue-number> --json
+```
+
+Only `status: owned` authorizes continuation. `missing` and `expired` return to
+the claim path, `foreign` refuses takeover, and a REST failure blocks because
+it is not evidence that the claim is absent.
+
 ## Stale Claim Recovery
 
 Do not reclaim automatically unless every condition is true:
@@ -38,3 +50,8 @@ OPENSPEC_BUDDY_CLAIM_TTL_HOURS=12 <openspec-buddy-skill-dir>/scripts/claim-issue
 ```
 
 Long-running auto workflows should refresh the issue with progress comments after major transitions rather than silently holding a stale branch.
+
+Issue, PR, relationship, and Project read caches remain performance aids. They
+must be force-refreshed before claim dependency acceptance or any coordination
+write; they never authorize a claim or replace the remote issue, comment, branch,
+or lease truth.
