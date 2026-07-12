@@ -263,6 +263,20 @@ function stateDir() {
   return process.env.OPENSPEC_BUDDY_AUTO_STATE_DIR || path.join(gitRoot(), 'openspec/.buddy-cache/auto-state');
 }
 
+function recordCacheMetric(kind, surface, outcome, context = {}) {
+  const metricsTool = path.join(coreScriptDir, 'cache-metrics.mjs');
+  if (!fs.existsSync(metricsTool)) return;
+  const cacheDir = process.env.OPENSPEC_BUDDY_CACHE_DIR
+    || process.env.OPENSPEC_BUDDY_GH_CACHE_DIR
+    || path.dirname(stateDir());
+  spawnSync(process.execPath, [metricsTool, 'event', cacheDir, kind, surface, outcome, JSON.stringify(context)], {
+    cwd: process.cwd(),
+    env: process.env,
+    encoding: 'utf8',
+    stdio: 'ignore',
+  });
+}
+
 function stateKey(opts) {
   if (opts.pr) return `pr-${opts.pr}`;
   if (opts.issue) return `issue-${opts.issue}`;
@@ -551,6 +565,7 @@ function commandFor(opts, state, runtime = {}) {
       };
     }
     if (runtime.liveClaim.status === 'foreign') {
+      recordCacheMetric('coordination', 'live-claim', 'stale_recovery', { issue: opts.issue, status: runtime.liveClaim.status });
       return {
         stage: 'blocked',
         command: [],
@@ -558,6 +573,7 @@ function commandFor(opts, state, runtime = {}) {
       };
     }
     if (runtime.liveClaim.status === 'missing' || runtime.liveClaim.status === 'expired') {
+      recordCacheMetric('coordination', 'live-claim', 'stale_recovery', { issue: opts.issue, status: runtime.liveClaim.status });
       return {
         stage: 'claim-issue',
         command: [path.join(coreScriptDir, 'claim-issue.sh'), opts.issue],
@@ -567,6 +583,7 @@ function commandFor(opts, state, runtime = {}) {
       };
     }
     if (!claimedReceiptIsUsable(state, opts, runtime.liveClaim)) {
+      recordCacheMetric('coordination', 'live-claim', 'stale_recovery', { issue: opts.issue, status: runtime.liveClaim.status });
       return {
         stage: 'blocked',
         command: [],

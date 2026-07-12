@@ -309,10 +309,30 @@ function readLiveClaimTruth(issue) {
   };
 }
 
+function recordCacheMetric(kind, surface, outcome, context = {}) {
+  const metricsTool = path.join(coreScriptDir, 'cache-metrics.mjs');
+  if (!fs.existsSync(metricsTool)) return;
+  const cacheDir = process.env.OPENSPEC_BUDDY_CACHE_DIR
+    || process.env.OPENSPEC_BUDDY_GH_CACHE_DIR
+    || path.dirname(laneStateDir());
+  spawnSync(process.execPath, [metricsTool, 'event', cacheDir, kind, surface, outcome, JSON.stringify(context)], {
+    cwd: process.cwd(),
+    env: process.env,
+    encoding: 'utf8',
+    stdio: 'ignore',
+  });
+}
+
 function gateLaneLiveClaim(state, lane, source = 'live-claim') {
   if (!lane.issue) return { ok: true, status: 'not-applicable' };
   const truth = readLiveClaimTruth(lane.issue);
   if (truth.ok) return truth;
+  if (['missing', 'expired', 'foreign', 'invalid'].includes(truth.status)) {
+    recordCacheMetric('coordination', 'live-claim', 'stale_recovery', {
+      issue: lane.issue,
+      status: truth.status,
+    });
+  }
   const lastResult = truth.status === 'foreign' ? 'foreign-claim' : truth.status === 'unavailable' && isTransientFailure(truth.reason)
     ? 'live-claim-probe'
     : 'stale-claim';
@@ -2073,6 +2093,7 @@ function processWaitingLane(state, lane) {
   const result = parsedProbe.data;
   const previousHead = lane.head || '';
   const previousSignature = lane.lastSignature || '';
+  const previousThreadState = lane.threadState || '';
   const truth = classifyProbe({
     ...result,
     pr: lane.pr,
@@ -2083,6 +2104,13 @@ function processWaitingLane(state, lane) {
     previousHead,
     previousSignature,
   });
+  if (previousThreadState === 'clear' && truth.threadState !== 'clear') {
+    recordCacheMetric('coordination', 'live-review', 'stale_recovery', {
+      issue: lane.issue,
+      pr: lane.pr,
+      reason: 'persisted-thread-clear-rejected-by-live-probe',
+    });
+  }
   applyReviewTruthToLane(lane, mergeReviewTruth(laneReviewTruth(lane), truth));
   lane.lastProbeAt = lane.restFreshAt;
 

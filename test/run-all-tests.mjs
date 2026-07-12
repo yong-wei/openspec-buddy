@@ -24,6 +24,7 @@ const commands = [
   node('skills/openspec-buddy/evals/buddy-driver.test.mjs'),
   node('skills/openspec-buddy/evals/classify-review-response.test.mjs'),
   bash('skills/openspec-buddy/evals/cache-signal.test.sh'),
+  bash('skills/openspec-buddy/evals/cache-metrics.test.sh'),
   bash('skills/openspec-buddy/evals/bound-worktree-guard.test.sh'),
   bash('skills/openspec-buddy/evals/claim-race-gate.test.sh'),
   bash('skills/openspec-buddy/evals/claim-worktree-guard.test.sh'),

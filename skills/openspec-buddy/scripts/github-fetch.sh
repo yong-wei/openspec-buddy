@@ -18,6 +18,17 @@ buddy_cache_tool() {
   node "$github_fetch_script_dir/buddy-cache.mjs" "$@"
 }
 
+buddy_metrics_event() {
+  local cache_dir="$1"
+  local kind="$2"
+  local surface="$3"
+  local outcome="$4"
+  local context="${5:-}"
+  local metrics_tool="$github_fetch_script_dir/cache-metrics.mjs"
+  [[ -f "$metrics_tool" ]] || return 0
+  node "$metrics_tool" event "$cache_dir" "$kind" "$surface" "$outcome" "$context" >/dev/null 2>&1 || true
+}
+
 buddy_cache_dir() {
   local fallback_dir="${1:-}"
   local cache_dir="${OPENSPEC_BUDDY_CACHE_DIR:-${OPENSPEC_BUDDY_GH_CACHE_DIR:-$fallback_dir}}"
@@ -277,6 +288,7 @@ buddy_repo_json() {
   if buddy_cache_is_stale "$cache_file" "$buddy_project_cache_ttl_seconds" repo repo; then
     local raw_file
     raw_file="$(mktemp)"
+    buddy_metrics_event "$cache_dir" github rest managed_request '{"surface":"repo"}'
     gh repo view --json nameWithOwner,defaultBranchRef > "$raw_file"
     local normalized_file
     normalized_file="$(mktemp)"
@@ -336,6 +348,7 @@ buddy_issue_json() {
   if buddy_cache_is_stale "$cache_file" "$buddy_issue_cache_ttl_seconds" issue "$parsed_key"; then
     local raw_file
     raw_file="$(mktemp)"
+    buddy_metrics_event "$cache_dir" github rest managed_request "{\"surface\":\"issue\",\"key\":\"$parsed_key\"}"
     gh issue view "$issue_ref" --json id,number,title,url,state,body,labels,assignees,projectItems,updatedAt > "$raw_file"
     local number
     number="$(node -e 'const fs=require("node:fs"); const issue=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(String(issue.number || ""));' "$raw_file")"
@@ -370,6 +383,7 @@ buddy_pr_json() {
   if buddy_cache_is_stale "$cache_file" "$buddy_pr_cache_ttl_seconds" pr "$parsed_key"; then
     local raw_file
     raw_file="$(mktemp)"
+    buddy_metrics_event "$cache_dir" github rest managed_request "{\"surface\":\"pr\",\"key\":\"$parsed_key\"}"
     gh pr view "$pr_ref" --json id,number,url,body,baseRefName,labels,isDraft,assignees,projectItems,closingIssuesReferences,files,comments,headRefOid,updatedAt > "$raw_file"
     local number
     number="$(node -e 'const fs=require("node:fs"); const pr=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(String(pr.number || ""));' "$raw_file")"
@@ -425,6 +439,7 @@ buddy_project_metadata_json() {
     fields_file="$(mktemp)"
     normalized_file="$(mktemp)"
 
+    buddy_metrics_event "$cache_dir" github rest managed_request '{"surface":"project-metadata"}'
     gh project view "$project_number" \
       --owner "$project_owner" \
       --format json > "$project_file"
@@ -581,6 +596,7 @@ buddy_open_issues_rest() {
   fi
   local repo
   repo="$(buddy_repo_nwo)"
+  buddy_metrics_event "$(buddy_cache_dir)" github rest managed_request '{"surface":"open-issues"}'
   unset OPENSPEC_BUDDY_OPEN_ISSUES_NEEDS_BODY
   if [[ "$limit" == "all" ]]; then
     gh api --paginate --slurp "repos/$repo/issues?state=open&per_page=100" | node -e '
@@ -742,6 +758,7 @@ buddy_graphql_api() {
   if ! buddy_graphql_guard; then
     return 1
   fi
+  buddy_metrics_event "$(buddy_cache_dir)" github graphql managed_request '{"surface":"graphql"}'
   gh api graphql "$@"
 }
 
@@ -1107,6 +1124,7 @@ buddy_open_ready_scan_cache_file() {
 
 buddy_gh_api_paginated_array() {
   local endpoint="$1"
+  buddy_metrics_event "$(buddy_cache_dir)" github rest managed_request '{"surface":"paginated-rest"}'
   gh api --paginate --slurp "$endpoint" | node -e '
 const fs = require("node:fs");
 const input = JSON.parse(fs.readFileSync(0, "utf8"));
@@ -1128,6 +1146,7 @@ buddy_pr_rest_bundle() {
   export BUDDY_ISSUE_COMMENTS_FILE="$cache_dir/issue-comments-${pr_number}.json"
   export BUDDY_REVIEW_COMMENTS_FILE="$cache_dir/review-comments-${pr_number}.json"
 
+  buddy_metrics_event "$cache_dir" github rest managed_request "{\"surface\":\"pr-rest-bundle\",\"key\":\"$pr_number\"}"
   [[ -f "$BUDDY_PR_REST_FILE" && "${OPENSPEC_BUDDY_CACHE_REFRESH:-}" != "1" ]] || gh api "repos/$repo_nwo/pulls/$pr_number" > "$BUDDY_PR_REST_FILE"
   [[ -f "$BUDDY_REVIEWS_FILE" && "${OPENSPEC_BUDDY_CACHE_REFRESH:-}" != "1" ]] || buddy_gh_api_paginated_array "repos/$repo_nwo/pulls/$pr_number/reviews?per_page=100" > "$BUDDY_REVIEWS_FILE"
   [[ -f "$BUDDY_COMMITS_FILE" && "${OPENSPEC_BUDDY_CACHE_REFRESH:-}" != "1" ]] || buddy_gh_api_paginated_array "repos/$repo_nwo/pulls/$pr_number/commits?per_page=100" > "$BUDDY_COMMITS_FILE"
@@ -1184,6 +1203,7 @@ buddy_issue_status_rest() {
   mkdir -p "$cache_dir"
   export BUDDY_ISSUE_STATUS_FILE="$cache_dir/issue-status-${issue_number}.json"
 
+  buddy_metrics_event "$cache_dir" github rest managed_request "{\"surface\":\"issue-status\",\"key\":\"$issue_number\"}"
   gh api "repos/$repo_nwo/issues/$issue_number" | node -e '
 const fs = require("node:fs");
 const issue = JSON.parse(fs.readFileSync(0, "utf8"));
