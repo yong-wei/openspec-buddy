@@ -67,6 +67,13 @@ if [[ "$1" == "-C" && "$3" == "config" ]]; then
   fi
   exit 1
 fi
+if [[ "$1" == "ls-remote" && "$2" == "--heads" && "$3" == origin ]]; then
+  if [[ "${BUDDY_TEST_BRANCH_MISSING:-0}" == "1" ]]; then
+    exit 0
+  fi
+  printf 'abc123\trefs/heads/%s\n' "${4:-demo-change}"
+  exit 0
+fi
 if [[ "$1" == "worktree" && "$2" == "list" && "$3" == "--porcelain" ]]; then
   cat "$BUDDY_TEST_WORKTREES_FILE"
   exit 0
@@ -132,11 +139,11 @@ cat > "$tmp_dir/issue-foreign-claim.json" <<'JSON'
 JSON
 
 cat > "$tmp_dir/comments-owned.json" <<JSON
-[{"created_at":"2026-07-12T11:00:00Z","body":"OpenSpec Buddy Claim\\n\\nclaim_id: claim-owned\\nstate: active\\nagent: @agent-a\\nchange_id: demo-change\\nbranch: demo-change\\nlease_until: 2026-07-12T13:00:00Z\\nworktree_alias: dev1\\nworktree_path_hash: $path_hash\\ncoordination_branch: dev1"}]
+[{"created_at":"2026-07-12T11:00:00Z","body":"OpenSpec Buddy Claim\\n\\nclaim_id: claim-owned\\nstate: active\\nagent: @agent-a\\nchange_id: demo-change\\nbranch: demo-change\\nbase_sha: abc123\\nlease_until: 2026-07-12T13:00:00Z\\nworktree_alias: dev1\\nworktree_path_hash: $path_hash\\ncoordination_branch: dev1"}]
 JSON
 
 cat > "$tmp_dir/comments-foreign.json" <<'JSON'
-[{"created_at":"2026-07-12T11:00:00Z","body":"OpenSpec Buddy Claim\n\nclaim_id: claim-foreign\nstate: active\nagent: @agent-b\nchange_id: demo-change\nbranch: demo-change\nlease_until: 2026-07-12T13:00:00Z\nworktree_alias: dev2\nworktree_path_hash: foreign-hash\ncoordination_branch: dev2"}]
+[{"created_at":"2026-07-12T11:00:00Z","body":"OpenSpec Buddy Claim\n\nclaim_id: claim-foreign\nstate: active\nagent: @agent-b\nchange_id: demo-change\nbranch: demo-change\nbase_sha: abc123\nlease_until: 2026-07-12T13:00:00Z\nworktree_alias: dev2\nworktree_path_hash: foreign-hash\ncoordination_branch: dev2"}]
 JSON
 
 cat > "$tmp_dir/comments-expired.json" <<JSON
@@ -149,6 +156,14 @@ JSON
 
 cat > "$tmp_dir/comments-missing-coordination.json" <<JSON
 [{"created_at":"2026-07-12T11:00:00Z","body":"OpenSpec Buddy Claim\\n\\nclaim_id: claim-missing-coordination\\nstate: active\\nagent: @agent-a\\nchange_id: demo-change\\nbranch: demo-change\\nlease_until: 2026-07-12T13:00:00Z\\nworktree_alias: dev1\\nworktree_path_hash: $path_hash"}]
+JSON
+
+cat > "$tmp_dir/comments-missing-base-sha.json" <<JSON
+[{"created_at":"2026-07-12T11:00:00Z","body":"OpenSpec Buddy Claim\\n\\nclaim_id: claim-missing-base-sha\\nstate: active\\nagent: @agent-a\\nchange_id: demo-change\\nbranch: demo-change\\nlease_until: 2026-07-12T13:00:00Z\\nworktree_alias: dev1\\nworktree_path_hash: $path_hash\\ncoordination_branch: dev1"}]
+JSON
+
+cat > "$tmp_dir/comments-mismatched-branch.json" <<JSON
+[{"created_at":"2026-07-12T11:00:00Z","body":"OpenSpec Buddy Claim\\n\\nclaim_id: claim-mismatched-branch\\nstate: active\\nagent: @agent-a\\nchange_id: demo-change\\nbranch: other-change\\nbase_sha: abc123\\nlease_until: 2026-07-12T13:00:00Z\\nworktree_alias: dev1\\nworktree_path_hash: $path_hash\\ncoordination_branch: dev1"}]
 JSON
 
 cat > "$tmp_dir/comments-empty.json" <<'JSON'
@@ -208,6 +223,15 @@ assert_status invalid "$tmp_dir/invalid.json"
 
 run_probe "$tmp_dir/issue-claimed.json" "$tmp_dir/comments-missing-coordination.json" > "$tmp_dir/missing-coordination.json"
 assert_status invalid "$tmp_dir/missing-coordination.json"
+
+run_probe "$tmp_dir/issue-claimed.json" "$tmp_dir/comments-missing-base-sha.json" > "$tmp_dir/missing-base-sha.json"
+assert_status invalid "$tmp_dir/missing-base-sha.json"
+
+run_probe "$tmp_dir/issue-claimed.json" "$tmp_dir/comments-mismatched-branch.json" > "$tmp_dir/mismatched-branch.json"
+assert_status invalid "$tmp_dir/mismatched-branch.json"
+
+BUDDY_TEST_BRANCH_MISSING=1 run_probe "$tmp_dir/issue-claimed.json" "$tmp_dir/comments-owned.json" > "$tmp_dir/missing-branch-lock.json"
+assert_status invalid "$tmp_dir/missing-branch-lock.json"
 
 set +e
 BUDDY_TEST_FAIL=1 run_probe "$tmp_dir/issue-claimed.json" "$tmp_dir/comments-owned.json" > "$tmp_dir/failure.out" 2> "$tmp_dir/failure.err"

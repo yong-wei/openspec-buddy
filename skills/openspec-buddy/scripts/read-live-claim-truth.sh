@@ -29,6 +29,7 @@ issue_file="$tmp_dir/issue.json"
 comments_file="$tmp_dir/comments.json"
 active_file="$tmp_dir/active-claim.json"
 identity_file="$tmp_dir/identity.json"
+remote_branch_file="$tmp_dir/remote-branch.txt"
 
 if ! buddy_claim_issue_rest "$repo_nwo" "$issue_number" "$issue_file"; then
   echo "Live claim truth unavailable: could not read issue #$issue_number from GitHub." >&2
@@ -47,19 +48,30 @@ if ! buddy_worktree_identity_json "$cache_dir" > "$identity_file"; then
   exit 2
 fi
 
+claim_change_id="$(node -e 'const fs=require("node:fs"); const active=JSON.parse(fs.readFileSync(process.argv[1], "utf8")); process.stdout.write(active?.change_id || "");' "$active_file")"
+if [[ -n "$claim_change_id" ]]; then
+  if ! git ls-remote --heads origin "$claim_change_id" > "$remote_branch_file"; then
+    echo "Live claim truth unavailable: could not verify origin/$claim_change_id." >&2
+    exit 2
+  fi
+else
+  : > "$remote_branch_file"
+fi
+
 viewer="$(gh api user --jq .login 2>/dev/null || true)"
 if [[ -z "$viewer" ]]; then
   echo "Live claim truth unavailable: could not determine the current GitHub viewer." >&2
   exit 2
 fi
 
-node - "$issue_file" "$active_file" "$identity_file" "$issue_number" "$viewer" "$bound_branch" <<'NODE'
+node - "$issue_file" "$active_file" "$identity_file" "$remote_branch_file" "$issue_number" "$viewer" "$bound_branch" <<'NODE'
 const fs = require('node:fs');
 
-const [issueFile, activeFile, identityFile, issueNumber, viewer, boundBranch] = process.argv.slice(2);
+const [issueFile, activeFile, identityFile, remoteBranchFile, issueNumber, viewer, boundBranch] = process.argv.slice(2);
 const issue = JSON.parse(fs.readFileSync(issueFile, 'utf8'));
 const active = JSON.parse(fs.readFileSync(activeFile, 'utf8'));
 const identity = JSON.parse(fs.readFileSync(identityFile, 'utf8'));
+const remoteBranch = fs.readFileSync(remoteBranchFile, 'utf8');
 const nowValue = process.env.OPENSPEC_BUDDY_NOW || '';
 const now = nowValue ? Date.parse(nowValue) : Date.now();
 const checkedAt = new Date().toISOString();
@@ -87,6 +99,7 @@ const result = {
   agent: '',
   changeId: '',
   branch: '',
+  baseSha: '',
   leaseUntil: '',
   worktreeAlias: '',
   worktreePathHash: '',
@@ -103,6 +116,7 @@ if (result.issueState !== 'OPEN') {
   result.agent = String(active.agent || '');
   result.changeId = String(active.change_id || '');
   result.branch = String(active.branch || '');
+  result.baseSha = String(active.base_sha || '');
   result.leaseUntil = String(active.lease_until || '');
   result.worktreeAlias = String(active.worktree_alias || '');
   result.worktreePathHash = String(active.worktree_path_hash || '');
@@ -123,7 +137,17 @@ if (result.issueState !== 'OPEN') {
     const claimStatus = statusLabels[0] || '';
     const claimAgent = result.agent.replace(/^@/, '');
     const assigneeLogins = assigneesOf(issue.assignees);
-    if (statusLabels.length !== 1 || !activeStatus.has(claimStatus)) {
+    const remoteBranchExists = remoteBranch
+      .split(/\r?\n/)
+      .map((line) => line.trim().split(/\s+/))
+      .some((fields) => fields[1] === `refs/heads/${result.changeId}`);
+    if (!result.changeId || !result.branch || !result.baseSha || result.branch !== result.changeId) {
+      result.status = 'invalid';
+      result.reason = 'claim-branch-proof-incomplete';
+    } else if (!remoteBranchExists) {
+      result.status = 'invalid';
+      result.reason = 'claim-branch-lock-missing';
+    } else if (statusLabels.length !== 1 || !activeStatus.has(claimStatus)) {
       result.status = 'invalid';
       result.reason = statusLabels.length === 1
         ? `issue-status-not-active:${claimStatus || 'missing'}`

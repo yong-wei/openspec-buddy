@@ -123,6 +123,39 @@ function seedClaimReceipt(stateDir, {
   fs.writeFileSync(path.join(stateDir, `issue-${issue}.json`), `${JSON.stringify(state, null, 2)}\n`);
 }
 
+function seedReviewRequestedState(stateDir, {
+  issue = '675',
+  pr = '707',
+  head = 'exact-head',
+  repository = 'owner/repo',
+} = {}) {
+  const state = {
+    version: 1,
+    key: `pr-${pr}`,
+    issue: String(issue),
+    pr: String(pr),
+    change: '',
+    head,
+    repository,
+    stages: {},
+  };
+  const base = {
+    at: '2026-07-12T00:00:00.000Z',
+    head,
+    repository,
+    issue: String(issue),
+    pr: String(pr),
+    command: 'seed-review-requested-state',
+    source: 'buddy-auto-driver/run-next',
+  };
+  for (const stage of ['mark_review_passed', 'review_requested']) {
+    state.stages[stage] = { ...base };
+    state.stages[stage].signature = signReceipt(state, stage, state.stages[stage], { stateDir });
+  }
+  fs.mkdirSync(stateDir, { recursive: true });
+  fs.writeFileSync(path.join(stateDir, `pr-${pr}.json`), `${JSON.stringify(state, null, 2)}\n`);
+}
+
 function run(args, options = {}) {
   const env = { ...process.env };
   for (const key of Object.keys(env)) {
@@ -530,6 +563,44 @@ echo "mark-review $*" >> ${JSON.stringify(prClaimLogFile)}
   assert.match(result.stdout, /expired/);
   const log = fs.existsSync(prClaimLogFile) ? fs.readFileSync(prClaimLogFile, 'utf8') : '';
   assert.doesNotMatch(log, /mark-review/);
+}
+
+{
+  const refreshStateDir = path.join(tmp, 'state-live-claim-refresh-after-wait');
+  const refreshCoreDir = path.join(tmp, 'core-live-claim-refresh-after-wait');
+  const refreshLogFile = path.join(tmp, 'commands-live-claim-refresh-after-wait.log');
+  const refreshMarker = path.join(tmp, 'live-claim-expired-after-wait.marker');
+  fs.mkdirSync(refreshCoreDir, { recursive: true });
+  seedReviewRequestedState(refreshStateDir);
+  makeExecutable(path.join(refreshCoreDir, 'read-live-claim-truth.sh'), `#!/usr/bin/env bash
+set -euo pipefail
+if [[ -f ${JSON.stringify(refreshMarker)} ]]; then
+  printf '%s\\n' '{"status":"expired","source":"github-rest","claimId":"claim-675"}'
+else
+  printf '%s\\n' '{"status":"owned","source":"github-rest","claimId":"claim-675"}'
+fi
+`);
+  makeExecutable(path.join(refreshCoreDir, 'wait-for-review-clear.sh'), `#!/usr/bin/env bash
+set -euo pipefail
+echo "wait-review $*" >> ${JSON.stringify(refreshLogFile)}
+touch ${JSON.stringify(refreshMarker)}
+printf '%s\\n' 'review_outcome: clear' 'review_request_id: request-1' 'review_response_id: response-1' >&2
+`);
+  makeExecutable(path.join(refreshCoreDir, 'verify-review-clear.sh'), `#!/usr/bin/env bash
+echo "verify-review $*" >> ${JSON.stringify(refreshLogFile)}
+`);
+  const result = run(['--issue', '675', '--pr', '707', '--head', 'exact-head'], {
+    env: {
+      OPENSPEC_BUDDY_AUTO_STATE_DIR: refreshStateDir,
+      OPENSPEC_BUDDY_CORE_SCRIPT_DIR: refreshCoreDir,
+    },
+  });
+  assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}`);
+  assert.match(result.stdout, /^BLOCKED/m);
+  assert.match(result.stdout, /expired/);
+  const log = fs.existsSync(refreshLogFile) ? fs.readFileSync(refreshLogFile, 'utf8') : '';
+  assert.match(log, /wait-review 707/);
+  assert.doesNotMatch(log, /verify-review 707/);
 }
 
 {

@@ -556,7 +556,7 @@ function commandFor(opts, state, runtime = {}) {
         records: ['claimed'],
       };
     }
-    runtime.liveClaim ||= readLiveClaimTruth(opts.issue);
+    runtime.liveClaim = readLiveClaimTruth(opts.issue);
     if (!runtime.liveClaim.ok) {
       return {
         stage: 'blocked',
@@ -631,7 +631,7 @@ function commandFor(opts, state, runtime = {}) {
     };
   }
 
-  runtime.liveClaim ||= readLiveClaimTruth(opts.issue);
+  runtime.liveClaim = readLiveClaimTruth(opts.issue);
   if (!runtime.liveClaim.ok) {
     return {
       stage: 'blocked',
