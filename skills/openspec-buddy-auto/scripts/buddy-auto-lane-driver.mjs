@@ -1003,7 +1003,9 @@ function reconcileReviewUnavailableLanes(state) {
     lane.stage = 'waiting_review';
     lane.head = nextHead;
     lane.lastSignature = nextSignature;
-    lane.lastRequestState = 'missing-current-head';
+    const nextRequestState = String(parsed.data?.requestState || 'missing-current-head');
+    lane.lastRequestState = nextRequestState;
+    lane.requestState = nextRequestState;
     lane.responseOutcome = 'unknown';
     lane.reviewRequestId = '';
     lane.reviewResponseId = '';

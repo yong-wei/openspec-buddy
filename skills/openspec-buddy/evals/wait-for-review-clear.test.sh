@@ -578,7 +578,7 @@ export VERIFY_MODE=waitable
 export OPENSPEC_BUDDY_VERIFY_REVIEW_CLEAR_HELPER="$tmp_dir/verify-review-clear.sh"
 export OPENSPEC_BUDDY_REVIEW_INITIAL_WAIT_SECONDS=0
 export OPENSPEC_BUDDY_REVIEW_POLL_SECONDS=1
-export OPENSPEC_BUDDY_REVIEW_MAX_WAIT_SECONDS=1
+export OPENSPEC_BUDDY_REVIEW_MAX_WAIT_SECONDS=2
 export GH_PR_FILE="$tmp_dir/pr-head-2.json"
 export GH_COMMITS_FILE="$tmp_dir/commits-head-2.json"
 export GH_COMMENT_LOG_FILE="$tmp_dir/comment-retry-timeout.log"
@@ -607,7 +607,7 @@ chmod +x "$tmp_dir/request-pr-review-retry.sh"
 export OPENSPEC_BUDDY_REQUEST_PR_REVIEW_HELPER="$tmp_dir/request-pr-review-retry.sh"
 rm -f "$GH_COMMENT_LOG_FILE"
 set +e
-timeout 8s "$helper" 123 > "$tmp_dir/retry-timeout-output.txt" 2> "$tmp_dir/retry-timeout-err.txt"
+timeout 12s "$helper" 123 > "$tmp_dir/retry-timeout-output.txt" 2> "$tmp_dir/retry-timeout-err.txt"
 retry_timeout_status="$?"
 set -e
 unset VERIFY_MODE

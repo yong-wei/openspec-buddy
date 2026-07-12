@@ -2711,4 +2711,43 @@ console.log('stage: achieved');
   assert.equal((fs.readFileSync(envInfo.logFile, 'utf8').match(/^request 707/mg) || []).length, 0);
 }
 
+{
+  const envInfo = makeEnv('review-unavailable-restores-request-state');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 1,
+    lanes: [
+      normalizedLane({
+        id: 'issue-675',
+        issue: '675',
+        change: 'change-675',
+        branch: 'change-675',
+        pr: '707',
+        head: 'head-1',
+        stage: 'review_unavailable',
+        responseOutcome: 'unavailable',
+        lastSignature: 'old-sig',
+        lastRequestState: 'missing-current-head',
+        requestState: 'missing-current-head',
+      }),
+    ],
+  }));
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '1',
+    CURRENT_BRANCH: 'change-675',
+    PROBE_SIGNATURE_707: 'new-sig',
+    PROBE_REQUEST_STATE_707: 'present-current-head',
+    PROBE_STATE_707: 'waiting',
+  }, ['--reconcile']);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^DONE/m);
+  const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  assert.equal(state.lanes[0].stage, 'waiting_review');
+  assert.equal(state.lanes[0].lastRequestState, 'present-current-head');
+  assert.equal(state.lanes[0].requestState, 'present-current-head');
+}
+
 console.log('buddy-auto-lane-driver tests passed');
