@@ -63,8 +63,16 @@ interrupt or terminal state:
 ```text
 goal-select -> claim-issue -> issue-pr-bridge -> implement-handoff
 issue-pr-bridge -> pr-coordination -> review-wait -> merge-gates -> achieved-truth
-achieved-truth -> merge-pr-handoff
-achieved-truth -> post-merge-achieve -> achieved
+achieved-truth -> controller-owned merge -> merge_authorized -> merged
+merged -> post-merge-achieve -> achieved
+
+Review and merge interrupts are fail-closed:
+
+```text
+review request -> latest response unavailable -> BLOCKED(review-unavailable)
+review request -> latest response clear -> merge gates -> controller merge
+remote merged without merge_authorized -> BLOCKED(unauthorized-merge)
+```
 ```
 
 Review-fix continuation is stateful:
@@ -95,6 +103,8 @@ implementing
 waiting_review
 review_fix
 merge_ready
+review_unavailable
+unauthorized_merge
 done
 blocked
 retryable_blocked
@@ -155,3 +165,10 @@ openspec/.buddy-cache/auto-state/
 Receipts are local state-machine evidence, not GitHub truth. They only prove
 that a deterministic internal helper passed at a given phase. GitHub truth still
 controls claim, PR, review, Project, merge, and achievement decisions.
+
+`merge_authorized` is recorded immediately before the controller-owned merge
+mutation. It is bound to the exact repository, issue, PR, full head SHA, clear
+review request/response IDs, and a unique merge attempt. `merged` is recorded
+only after the helper refreshes GitHub truth and verifies the merged PR and
+merge commit. A remotely merged PR without a matching receipt enters the
+persistent `unauthorized_merge` blocker; normal reruns cannot clear it.

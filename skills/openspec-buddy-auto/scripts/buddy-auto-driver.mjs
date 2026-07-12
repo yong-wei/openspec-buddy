@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readControllerState } from './controller-state.mjs';
+import { signReceipt, validSignedReceipt } from './receipt-truth.mjs';
 
 const autoScriptDir = path.dirname(fileURLToPath(import.meta.url));
 const defaultCoreScriptDir = path.resolve(autoScriptDir, '../../openspec-buddy/scripts');
@@ -20,6 +21,7 @@ const stages = new Set([
   'review_response_gate_passed',
   'review_clear',
   'merge_gates_passed',
+  'merge_authorized',
   'post_merge_achieved',
   'merged',
   'achieved',
@@ -57,6 +59,7 @@ function parseArgs(argv) {
     targetPrLocked: Boolean(targetPr),
     targetIssueValue: targetIssue,
     targetPrValue: targetPr,
+    repository: process.env.OPENSPEC_BUDDY_REPO_NWO || '',
   };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -134,6 +137,15 @@ function shellQuote(value) {
 
 function commandLine(command) {
   return command.map(shellQuote).join(' ');
+}
+
+function repositoryIdentity() {
+  const configured = process.env.OPENSPEC_BUDDY_REPO_NWO || '';
+  if (configured) return configured;
+  const remote = run('git', ['remote', 'get-url', 'origin'], { optional: true });
+  const url = remote.replace(/^git@github\.com:/, 'https://github.com/').replace(/\.git$/, '');
+  if (url.startsWith('https://github.com/')) return url.slice('https://github.com/'.length);
+  return '';
 }
 
 function controllerChildMode() {
@@ -235,6 +247,7 @@ function inferIssueFromPrBody(pr = '') {
 
 function inferContext(opts) {
   const inferred = { ...opts };
+  inferred.repository ||= repositoryIdentity();
   if (inferred.targetPrLocked) inferred.issue = '';
   if (!inferred.pr && !inferred.explicitIssue && !inferred.goal) inferred.pr = inferCurrentPr();
   if (inferred.pr && !inferred.issue) inferred.issue = inferIssueFromPrBody(inferred.pr);
@@ -261,51 +274,8 @@ function statePath(opts) {
   return path.join(stateDir(), `${stateKey(opts)}.json`);
 }
 
-function secretPath() {
-  return path.join(stateDir(), '.receipt-secret');
-}
-
-function receiptSecret({ create = false } = {}) {
-  const file = secretPath();
-  if (fs.existsSync(file)) return fs.readFileSync(file, 'utf8').trim();
-  if (!create) return '';
-  fs.mkdirSync(stateDir(), { recursive: true });
-  const secret = crypto.randomBytes(32).toString('hex');
-  fs.writeFileSync(file, `${secret}\n`, { mode: 0o600 });
-  return secret;
-}
-
-function receiptPayload(state, stage, receipt) {
-  return [
-    state.key || '',
-    state.issue || '',
-    state.pr || '',
-    state.change || '',
-    stage,
-    receipt.at || '',
-    receipt.head || '',
-    receipt.command || '',
-    receipt.source || '',
-  ].join('\0');
-}
-
-function signReceipt(state, stage, receipt) {
-  const secret = receiptSecret({ create: true });
-  return crypto.createHmac('sha256', secret).update(receiptPayload(state, stage, receipt)).digest('hex');
-}
-
-function validReceipt(state, stage) {
-  const receipt = state.stages?.[stage];
-  if (!receipt?.signature || receipt.source !== 'buddy-auto-driver/run-next') return false;
-  if (state.pr && receipt.head !== state.head) return false;
-  const secret = receiptSecret();
-  if (!secret) return false;
-  const expected = crypto.createHmac('sha256', secret).update(receiptPayload(state, stage, receipt)).digest('hex');
-  try {
-    return crypto.timingSafeEqual(Buffer.from(receipt.signature), Buffer.from(expected));
-  } catch {
-    return false;
-  }
+function validReceipt(state, stage, options = {}) {
+  return validSignedReceipt(state, stage, { ...options, stateDir: stateDir() });
 }
 
 function stateMatchesContext(opts, state) {
@@ -313,16 +283,18 @@ function stateMatchesContext(opts, state) {
   if ((opts.issue || '') !== (state.issue || '')) return false;
   if ((opts.pr || '') !== (state.pr || '')) return false;
   if ((opts.change || '') !== (state.change || '')) return false;
+  if (opts.repository && state.repository && opts.repository !== state.repository) return false;
   return true;
 }
 
 function readState(opts) {
   const file = statePath(opts);
   if (!fs.existsSync(file)) {
-    return { version: 1, key: stateKey(opts), issue: opts.issue || '', pr: opts.pr || '', change: opts.change || '', head: opts.head || '', stages: {} };
+    return { version: 1, key: stateKey(opts), issue: opts.issue || '', pr: opts.pr || '', change: opts.change || '', head: opts.head || '', repository: opts.repository || repositoryIdentity(), stages: {} };
   }
   const state = JSON.parse(fs.readFileSync(file, 'utf8'));
   state.head = opts.head || '';
+  state.repository ||= opts.repository || repositoryIdentity();
   return state;
 }
 
@@ -338,14 +310,18 @@ function recordStage(opts, stage, command = [], extras = {}) {
   state.pr ||= opts.pr || '';
   state.change ||= opts.change || '';
   state.head = opts.head || '';
+  state.repository ||= opts.repository || repositoryIdentity();
   const receipt = {
     at: new Date().toISOString(),
     head: opts.head || '',
+    repository: state.repository || '',
+    issue: state.issue || '',
+    pr: state.pr || '',
     command: command.length ? commandLine(command) : '',
     source: 'buddy-auto-driver/run-next',
     ...extras,
   };
-  receipt.signature = signReceipt(state, stage, receipt);
+  receipt.signature = signReceipt(state, stage, receipt, { stateDir: stateDir() });
   state.stages[stage] = receipt;
   writeState(opts, state);
   return state;
@@ -382,6 +358,104 @@ function parseJsonOutput(stdout, fallbackReason) {
   } catch {
     return { error: fallbackReason };
   }
+}
+
+function parseKeyValueOutput(output) {
+  const values = {};
+  for (const line of String(output || '').split(/\r?\n/)) {
+    const match = line.match(/^([a-z][a-z0-9_]*):\s*(.*)$/i);
+    if (match) values[match[1]] = match[2].trim();
+  }
+  return values;
+}
+
+function reviewEvidenceFromOutput(output) {
+  const values = parseKeyValueOutput(output);
+  return {
+    responseOutcome: values.review_outcome || '',
+    requestId: values.review_request_id || '',
+    responseId: values.review_response_id || '',
+    responseUrl: values.review_response_url || '',
+    responseAt: values.review_response_at || '',
+  };
+}
+
+function reviewEvidenceFromReceipt(state) {
+  const receipt = state.stages?.review_clear || {};
+  return {
+    requestId: receipt.requestId || '',
+    responseId: receipt.responseId || '',
+    responseUrl: receipt.responseUrl || '',
+    responseAt: receipt.responseAt || '',
+    responseOutcome: receipt.responseOutcome || 'clear',
+  };
+}
+
+function controllerMergeAuthorizationValid(opts, state, { requireMerged = false } = {}) {
+  const clear = state.stages?.review_clear || {};
+  const authorization = state.stages?.merge_authorized || {};
+  if (!validReceipt(state, 'merge_authorized', {
+    require: ['repository', 'issue', 'pr', 'head', 'requestId', 'responseId', 'mergeAttemptId'],
+  })) return false;
+  if (!validReceipt(state, 'review_clear', {
+    require: ['repository', 'issue', 'pr', 'head', 'requestId', 'responseId'],
+  })) return false;
+  if (
+    clear.responseOutcome !== 'clear'
+    || authorization.requestId !== clear.requestId
+    || authorization.responseId !== clear.responseId
+    || authorization.repository !== state.repository
+    || authorization.pr !== String(opts.pr || '')
+    || authorization.head !== String(opts.head || '')
+  ) return false;
+  if (requireMerged) {
+    const merged = state.stages?.merged || {};
+    if (!validReceipt(state, 'merged', {
+      require: ['repository', 'issue', 'pr', 'head', 'requestId', 'responseId', 'mergeAttemptId'],
+    })) return false;
+    if (
+      merged.requestId !== authorization.requestId
+      || merged.responseId !== authorization.responseId
+      || merged.mergeAttemptId !== authorization.mergeAttemptId
+    ) return false;
+  }
+  return true;
+}
+
+function freshRemotePrTruth(state, pr) {
+  const repository = state.repository || repositoryIdentity();
+  if (!repository || !pr) return null;
+  const result = spawnSync('gh', ['api', `repos/${repository}/pulls/${pr}`], {
+    cwd: process.cwd(),
+    env: process.env,
+    encoding: 'utf8',
+    stdio: 'pipe',
+    timeout: Number(process.env.OPENSPEC_BUDDY_COMMAND_TIMEOUT_MS || 5000),
+  });
+  if (result.status !== 0) return null;
+  try {
+    return JSON.parse(result.stdout || '{}');
+  } catch {
+    return null;
+  }
+}
+
+function remotePrIsMerged(truth) {
+  return Boolean(truth && (
+    String(truth.state || '').toUpperCase() === 'MERGED'
+    || truth.merged_at
+    || truth.mergedAt
+  ));
+}
+
+function emitUnauthorizedMerge(opts, reason) {
+  emitBlocked({
+    stage: 'unauthorized-merge',
+    reason,
+    command: [],
+    output: `issue: ${opts.issue}\npr: ${opts.pr}\nhead: ${opts.head}`,
+  });
+  process.exit(1);
 }
 
 function commandFor(opts, state) {
@@ -456,6 +530,17 @@ function commandFor(opts, state) {
   const reviewResponseGatePassed = contextMatches && validReceipt(state, 'review_response_gate_passed');
   const reviewClear = contextMatches && validReceipt(state, 'review_clear');
   const mergeGatesPassed = contextMatches && validReceipt(state, 'merge_gates_passed');
+  const merged = contextMatches && validReceipt(state, 'merged', {
+    require: ['repository', 'requestId', 'responseId', 'mergeAttemptId'],
+  });
+
+  if (merged) {
+    return {
+      stage: 'achieved-truth',
+      command: [path.join(coreScriptDir, 'verify-achieved-truth.mjs'), opts.issue, opts.pr],
+      reason: 'Controller-owned merge was verified for this exact head; read archive and achievement truth.',
+    };
+  }
 
   if (truthy(process.env.OPENSPEC_BUDDY_REVIEW_FIX_CONTEXT) && !reviewResponseGatePassed) {
     return {
@@ -521,6 +606,100 @@ function runProcess(command) {
     env: process.env,
     encoding: 'utf8',
     stdio: 'pipe',
+  });
+}
+
+function runControllerOwnedMerge(opts) {
+  const mergeCommand = [path.join(coreScriptDir, 'merge-pr-after-gates.sh'), opts.issue, opts.pr, opts.head];
+  const beforeState = readState(opts);
+  const remoteTruth = freshRemotePrTruth(beforeState, opts.pr);
+  if (remotePrIsMerged(remoteTruth)) {
+    if (!controllerMergeAuthorizationValid(opts, beforeState)) {
+      emitUnauthorizedMerge(opts, 'PR is already merged without a matching controller merge authorization receipt.');
+    }
+    if (!validReceipt(beforeState, 'merged', {
+      require: ['repository', 'issue', 'pr', 'head', 'requestId', 'responseId', 'mergeAttemptId'],
+    })) {
+      const authorization = beforeState.stages.merge_authorized;
+      recordStage(opts, 'merged', mergeCommand, {
+        repository: beforeState.repository,
+        requestId: authorization.requestId,
+        responseId: authorization.responseId,
+        responseUrl: authorization.responseUrl || '',
+        responseAt: authorization.responseAt || '',
+        responseOutcome: 'clear',
+        mergeAttemptId: authorization.mergeAttemptId,
+        mergeCommit: remoteTruth.merge_commit_sha || remoteTruth.mergeCommitSha || '',
+        mergedHead: remoteTruth.head?.sha || remoteTruth.headRefOid || opts.head,
+      });
+    }
+    return;
+  }
+  const evidence = reviewEvidenceFromReceipt(beforeState);
+  if (!beforeState.repository || !evidence.requestId || !evidence.responseId) {
+    emitBlocked({
+      stage: 'merge-pr',
+      reason: 'Cannot authorize merge without exact repository, current-head review request, and clear response evidence.',
+      command: [],
+    });
+    process.exit(1);
+  }
+  const mergeAttemptId = crypto.randomUUID();
+  recordStage(opts, 'merge_authorized', mergeCommand, {
+    repository: beforeState.repository,
+    requestId: evidence.requestId,
+    responseId: evidence.responseId,
+    responseUrl: evidence.responseUrl,
+    responseAt: evidence.responseAt,
+    responseOutcome: 'clear',
+    mergeAttemptId,
+  });
+
+  const result = runProcess(mergeCommand);
+  if (result.status !== 0) {
+    emitBlocked({
+      stage: 'merge-pr',
+      reason: `${mergeCommand[0]} exited with status ${result.status ?? 1}`,
+      command: [],
+      output: compactOutput(result),
+    });
+    process.exit(result.status ?? 1);
+  }
+  const merged = parseJsonOutput(result.stdout || '', 'merge-pr-after-gates.sh did not return JSON.');
+  if (merged.error || merged.merged !== true) {
+    emitBlocked({
+      stage: 'merge-pr',
+      reason: merged.error || 'Controller-owned merge did not return merged: true.',
+      command: [],
+      output: compactOutput(result),
+    });
+    process.exit(1);
+  }
+  if (
+    String(merged.pr || '') !== String(opts.pr)
+    || String(merged.head || '') !== String(opts.head)
+    || String(merged.reviewRequestId || '') !== evidence.requestId
+    || String(merged.reviewResponseId || '') !== evidence.responseId
+    || (evidence.responseUrl && String(merged.reviewResponseUrl || '') !== evidence.responseUrl)
+  ) {
+    emitBlocked({
+      stage: 'merge-pr',
+      reason: 'Controller-owned merge evidence does not match the authorized repository, PR, head, request, or response.',
+      command: [],
+      output: compactOutput(result),
+    });
+    process.exit(1);
+  }
+  recordStage(opts, 'merged', mergeCommand, {
+    repository: beforeState.repository,
+    requestId: merged.reviewRequestId,
+    responseId: merged.reviewResponseId,
+    responseUrl: merged.reviewResponseUrl || evidence.responseUrl,
+    responseAt: evidence.responseAt,
+    responseOutcome: 'clear',
+    mergeAttemptId,
+    mergeCommit: merged.mergeCommit || '',
+    mergedHead: merged.head || '',
   });
 }
 
@@ -727,6 +906,10 @@ function runDriver(opts) {
         process.exit(1);
       }
       if (truth.achieved === true) {
+        const currentState = readState(opts);
+        if (!controllerMergeAuthorizationValid(opts, currentState, { requireMerged: true })) {
+          emitUnauthorizedMerge(opts, 'Achievement truth is terminal for a merged PR, but no matching controller merge authorization receipt exists.');
+        }
         recordStage(opts, 'achieved', next.command);
         emitDone({
           stage: 'achieved',
@@ -737,16 +920,15 @@ function runDriver(opts) {
         return;
       }
       if (truth.next === 'mark-achieved-post-merge') {
+        if (!controllerMergeAuthorizationValid(opts, readState(opts), { requireMerged: true })) {
+          emitUnauthorizedMerge(opts, 'Post-merge achievement was requested for a merged PR without a matching controller merge authorization receipt.');
+        }
         runPostMergeAchievement(opts, truth, next.command);
         return;
       }
       if (truth.next === 'merge-pr') {
-        emitHandoff({
-          stage: 'merge-pr',
-          reason: truth.reason || 'PR is not merged. Merge the PR through the allowed project workflow, then rerun the driver.',
-          command: [],
-        });
-        return;
+        runControllerOwnedMerge(opts);
+        continue;
       }
       emitBlocked({
         stage: next.stage,
@@ -758,7 +940,19 @@ function runDriver(opts) {
     }
 
     for (const stage of next.records || []) {
-      recordStage(opts, stage, next.command);
+      const extras = stage === 'review_clear'
+        ? (() => {
+          const evidence = reviewEvidenceFromOutput(`${result.stdout || ''}\n${result.stderr || ''}`);
+          return {
+            responseOutcome: evidence.responseOutcome || 'clear',
+            requestId: evidence.requestId,
+            responseId: evidence.responseId,
+            responseUrl: evidence.responseUrl,
+            responseAt: evidence.responseAt,
+          };
+        })()
+        : {};
+      recordStage(opts, stage, next.command, extras);
     }
 
     if (next.stage === 'wait-review' && process.env.OPENSPEC_BUDDY_AUTO_REVIEW_WAIT_MODE === 'verify-once') {

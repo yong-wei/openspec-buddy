@@ -245,6 +245,10 @@ if (errors.length > 0) {
 }
 
 const lines = [`Review clearance verified for PR #${pr.number || 'unknown'} using reviewer ${reviewer}.`];
+lines.push(`review_outcome: clear`);
+if (cycle.request?.id || cycle.request?.node_id) lines.push(`review_request_id: ${cycle.request.id || cycle.request.node_id}`);
+if (cycle.response?.id || cycle.response?.node_id) lines.push(`review_response_id: ${cycle.response.id || cycle.response.node_id}`);
+if (cycle.response?.url || cycle.response?.html_url) lines.push(`review_response_url: ${cycle.response.url || cycle.response.html_url}`);
 if (topLevelClearUsed && cycle.response) {
   lines.push('Clearance source: top-level PR comment after a current-head review request.');
   lines.push(`Review request createdAt: ${cycle.request?.createdAt || cycle.request?.created_at || 'unknown'}`);

@@ -89,6 +89,33 @@ write the missing reply. If the resolve mutation fails or a fresh GraphQL read
 still shows the thread unresolved, stop and set `status:needs-human` rather than
 opening another review round.
 
+## Unavailable Codex Review
+
+The exact Codex quota or service-limit response is a persistent
+`review_unavailable` blocker. Adding credits or waiting for capacity does not
+reuse an old request or clear an old response. After capacity returns, obtain
+explicit recovery and let the controller create a new current-head review
+request; only a later clear response in that request cycle can reopen merge
+gates. An unchanged unavailable signature must not trigger a review-request
+storm.
+
+## Unauthorized Merge
+
+If GitHub reports a merged PR without a matching controller
+`merge_authorized` receipt, the lane enters `unauthorized_merge` and normal
+reruns remain blocked. Do not run achievement helpers or synthesize a clean
+receipt. Recovery requires a user-approved controller action with an audit
+reason:
+
+```bash
+<openspec-buddy-auto-skill-dir>/scripts/buddy-auto.mjs \
+  --recover-unauthorized-merge \
+  --reason "<user-approved recovery reason>"
+```
+
+The controller records the violation and recovery reason before allowing
+post-merge achievement synchronization. Agents must never run `gh pr merge`.
+
 ## Resume Or Branch Drift
 
 After a resume, compaction, or manual branch operation, verify the current

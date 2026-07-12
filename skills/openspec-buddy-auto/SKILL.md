@@ -96,9 +96,10 @@ explicitly asks for recovery:
 ```bash
 <openspec-buddy-auto-skill-dir>/scripts/buddy-auto.mjs --reset-controller-state
 <openspec-buddy-auto-skill-dir>/scripts/buddy-auto.mjs --reset-lane-state --reason "<why>"
+<openspec-buddy-auto-skill-dir>/scripts/buddy-auto.mjs --recover-unauthorized-merge --reason "<user-approved reason>"
 ```
 
-Both require a clean git worktree. `--reset-controller-state` clears only the
+The reset commands require a clean git worktree. `--reset-controller-state` clears only the
 controller file for this worktree. `--reset-lane-state` moves this worktree's
 local lane cache to a `.bak` file and clears controller state; it does not
 modify GitHub, branches, OpenSpec files, or claims.
@@ -123,7 +124,8 @@ The controller must enforce:
 - review-fix commits pass independent review, same-thread reply, response gate,
   and current-head review request before another wait
 - merge and achievement require current review clearance, PR coordination,
-  archived tasks, and worktree claim ownership
+  archived tasks, worktree claim ownership, and matching controller merge authorization
+- quota/service-limit responses enter `review_unavailable`; remote merges without authorization enter `unauthorized_merge`
 
 ## Local-Only Exception
 
@@ -137,11 +139,10 @@ instead.
 - direct deterministic helper invocation during normal auto flow
 - manual `sleep` or time checks during review wait
 - manual `gh pr view --comments` review clearance
-- direct review request, review wait, response gate, merge, or achievement sync
+- direct review request, review wait, response gate, merge, achievement sync, or `gh pr merge`
 - takeover of a claim owned by another worktree unless the user explicitly
   requests a takeover workflow
 
 ## Final Report
 
-Report the controller stages, issue, change id, branch, PR, review rounds,
-verification commands, and any blocker or reusable workflow gap.
+Report controller stages, issue, change id, branch, PR, review rounds, verification commands, and blockers.

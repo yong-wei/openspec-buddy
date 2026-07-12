@@ -38,6 +38,7 @@ const commands = [
   bash('skills/openspec-buddy/evals/mark-achieved-post-merge.test.sh'),
   bash('skills/openspec-buddy/evals/mark-in-progress.test.sh'),
   bash('skills/openspec-buddy/evals/mark-review.test.sh'),
+  bash('skills/openspec-buddy/evals/merge-pr-after-gates.test.sh'),
   node('skills/openspec-buddy/evals/open-issue-claim.test.mjs'),
   node('skills/openspec-buddy/evals/propose-default-artifacts.test.mjs'),
   node('skills/openspec-buddy/evals/propose-acceptance-gates.test.mjs'),

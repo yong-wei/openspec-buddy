@@ -17,13 +17,14 @@ export const allowedLaneStages = new Set([
   'review_fix',
   'merge_ready',
   'review_unavailable',
+  'unauthorized_merge',
   'achieving',
   'done',
   'blocked',
   'retryable_blocked',
 ]);
 
-export const blockedLikeStages = new Set(['blocked', 'retryable_blocked', 'review_unavailable']);
+export const blockedLikeStages = new Set(['blocked', 'retryable_blocked', 'review_unavailable', 'unauthorized_merge']);
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -266,6 +267,8 @@ export function normalizeLane(lane) {
     reviewResponseId: String(lane.reviewResponseId || ''),
     reviewResponseAt: String(lane.reviewResponseAt || ''),
     reviewResponseUrl: String(lane.reviewResponseUrl || ''),
+    unauthorizedMergeRecoveredAt: String(lane.unauthorizedMergeRecoveredAt || ''),
+    unauthorizedMergeRecoveryReason: String(lane.unauthorizedMergeRecoveryReason || ''),
     blockedReason: String(lane.blockedReason || ''),
     retryableStage: String(lane.retryableStage || ''),
     retryableHead: String(lane.retryableHead || ''),
@@ -346,7 +349,7 @@ export function selectorExcludedIssues(state) {
 
 export function laneNeedsReconciliation(lane) {
   if (!lane || lane.stage === 'done') return false;
-  if (lane.stage === 'review_unavailable') return false;
+  if (lane.stage === 'review_unavailable' || lane.stage === 'unauthorized_merge') return false;
   if (lane.stage === 'blocked' && lane.lastResult === 'resume-branch-restore-failed') return false;
   return lane.stage === 'retryable_blocked'
     || (lane.stage === 'blocked' && Boolean(lane.issue || lane.pr || lane.branch || lane.claimId));
