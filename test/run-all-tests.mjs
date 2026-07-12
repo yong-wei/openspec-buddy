@@ -27,6 +27,7 @@ const commands = [
   bash('skills/openspec-buddy/evals/bound-worktree-guard.test.sh'),
   bash('skills/openspec-buddy/evals/claim-race-gate.test.sh'),
   bash('skills/openspec-buddy/evals/claim-worktree-guard.test.sh'),
+  bash('skills/openspec-buddy/evals/read-live-claim-truth.test.sh'),
   bash('skills/openspec-buddy/evals/close-completed-series-parent.test.sh'),
   bash('skills/openspec-buddy/evals/github-cli-compat.test.sh'),
   bash('skills/openspec-buddy/evals/github-fetch-graphql-guard.test.sh'),

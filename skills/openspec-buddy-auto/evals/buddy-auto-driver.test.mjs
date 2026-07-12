@@ -93,6 +93,36 @@ function seedControllerMergeReceipt(stateDir, {
   fs.writeFileSync(path.join(stateDir, `pr-${pr}.json`), `${JSON.stringify(state, null, 2)}\n`);
 }
 
+function seedClaimReceipt(stateDir, {
+  issue = '916',
+  repository = 'owner/repo',
+  head = '',
+} = {}) {
+  const state = {
+    version: 1,
+    key: `issue-${issue}`,
+    issue: String(issue),
+    pr: '',
+    change: '',
+    head,
+    repository,
+    stages: {},
+  };
+  const receipt = {
+    at: '2026-07-12T00:00:00.000Z',
+    head,
+    repository,
+    issue: String(issue),
+    pr: '',
+    command: 'claim-issue.sh',
+    source: 'buddy-auto-driver/run-next',
+  };
+  receipt.signature = signReceipt(state, 'claimed', receipt, { stateDir });
+  state.stages.claimed = receipt;
+  fs.mkdirSync(stateDir, { recursive: true });
+  fs.writeFileSync(path.join(stateDir, `issue-${issue}.json`), `${JSON.stringify(state, null, 2)}\n`);
+}
+
 function run(args, options = {}) {
   const env = { ...process.env };
   for (const key of Object.keys(env)) {
@@ -143,6 +173,98 @@ const env = {
   OPENSPEC_BUDDY_CORE_SCRIPT_DIR: coreDir,
   OPENSPEC_BUDDY_AUTO_HEAD: 'abc123',
 };
+
+{
+  const recoveryRoot = path.join(tmp, 'claim-truth-recovery');
+  const recoveryStateDir = path.join(recoveryRoot, 'state');
+  const recoveryCoreDir = path.join(recoveryRoot, 'core');
+  const recoveryLogFile = path.join(recoveryRoot, 'commands.log');
+  fs.mkdirSync(recoveryCoreDir, { recursive: true });
+  makeExecutable(path.join(recoveryCoreDir, 'claim-issue.sh'), `#!/usr/bin/env bash\necho "claim-issue $*" >> ${JSON.stringify(recoveryLogFile)}\n`);
+  makeExecutable(path.join(recoveryCoreDir, 'find-issue-pr.sh'), `#!/usr/bin/env bash\necho "find-issue-pr $*" >> ${JSON.stringify(recoveryLogFile)}\nprintf '%s\\n' '{"issue":916,"pr":null,"reason":"no exact PR"}'\n`);
+  makeExecutable(path.join(recoveryCoreDir, 'read-live-claim-truth.sh'), `#!/usr/bin/env bash\necho "live-claim $*" >> ${JSON.stringify(recoveryLogFile)}\ncase "\${LIVE_CLAIM_STATUS:-missing}" in\n  owned) printf '%s\\n' '{"status":"owned","source":"github-rest","claimId":"claim-916"}' ;;\n  missing) printf '%s\\n' '{"status":"missing","source":"github-rest","claimId":""}' ;;\n  expired) printf '%s\\n' '{"status":"expired","source":"github-rest","claimId":"claim-916"}' ;;\n  foreign) printf '%s\\n' '{"status":"foreign","source":"github-rest","claimId":"claim-916"}' ;;\n  failure) echo 'simulated live claim probe failure' >&2; exit 2 ;;\n  *) echo 'unknown live claim status' >&2; exit 2 ;;\nesac\n`);
+
+  seedClaimReceipt(recoveryStateDir);
+  const missing = run(['--issue', '916'], {
+    env: {
+      OPENSPEC_BUDDY_AUTO_STATE_DIR: recoveryStateDir,
+      OPENSPEC_BUDDY_CORE_SCRIPT_DIR: recoveryCoreDir,
+      LIVE_CLAIM_STATUS: 'missing',
+    },
+  });
+  assert.equal(missing.status, 0, missing.stderr);
+  assert.match(fs.readFileSync(recoveryLogFile, 'utf8'), /claim-issue 916/);
+  assert.doesNotMatch(fs.readFileSync(recoveryLogFile, 'utf8'), /find-issue-pr 916/);
+  assert.match(missing.stdout, /stage: claim-issue/);
+
+  const changedWorktree = run(['--issue', '916'], {
+    env: {
+      OPENSPEC_BUDDY_AUTO_STATE_DIR: recoveryStateDir,
+      OPENSPEC_BUDDY_CORE_SCRIPT_DIR: recoveryCoreDir,
+      LIVE_CLAIM_STATUS: 'foreign',
+      OPENSPEC_BUDDY_WORKTREE_ALIAS: 'dev2',
+    },
+  });
+  assert.equal(changedWorktree.status, 0, changedWorktree.stderr);
+  assert.match(changedWorktree.stdout, /^BLOCKED/m);
+  assert.match(changedWorktree.stdout, /foreign/);
+  const recoveryLog = fs.readFileSync(recoveryLogFile, 'utf8');
+  assert.equal((recoveryLog.match(/live-claim 916 --json/g) || []).length, 2);
+
+  const ownedStateDir = path.join(recoveryRoot, 'owned-state');
+  const ownedLogFile = path.join(recoveryRoot, 'owned.log');
+  const ownedCoreDir = path.join(recoveryRoot, 'owned-core');
+  fs.mkdirSync(ownedCoreDir, { recursive: true });
+  makeExecutable(path.join(ownedCoreDir, 'claim-issue.sh'), `#!/usr/bin/env bash\necho "claim-issue $*" >> ${JSON.stringify(ownedLogFile)}\n`);
+  makeExecutable(path.join(ownedCoreDir, 'find-issue-pr.sh'), `#!/usr/bin/env bash\necho "find-issue-pr $*" >> ${JSON.stringify(ownedLogFile)}\nprintf '%s\\n' '{"issue":916,"pr":null,"reason":"no exact PR"}'\n`);
+  makeExecutable(path.join(ownedCoreDir, 'read-live-claim-truth.sh'), `#!/usr/bin/env bash\nprintf '%s\\n' '{"status":"owned","source":"github-rest","claimId":"claim-916"}'\n`);
+  seedClaimReceipt(ownedStateDir);
+  const owned = run(['--issue', '916'], {
+    env: {
+      OPENSPEC_BUDDY_AUTO_STATE_DIR: ownedStateDir,
+      OPENSPEC_BUDDY_CORE_SCRIPT_DIR: ownedCoreDir,
+    },
+  });
+  assert.equal(owned.status, 0, owned.stderr);
+  assert.doesNotMatch(fs.existsSync(ownedLogFile) ? fs.readFileSync(ownedLogFile, 'utf8') : '', /claim-issue 916/);
+  assert.match(fs.readFileSync(ownedLogFile, 'utf8'), /find-issue-pr 916/);
+
+  const foreignStateDir = path.join(recoveryRoot, 'foreign-state');
+  const foreignLogFile = path.join(recoveryRoot, 'foreign.log');
+  const foreignCoreDir = path.join(recoveryRoot, 'foreign-core');
+  fs.mkdirSync(foreignCoreDir, { recursive: true });
+  makeExecutable(path.join(foreignCoreDir, 'claim-issue.sh'), `#!/usr/bin/env bash\necho "claim-issue $*" >> ${JSON.stringify(foreignLogFile)}\n`);
+  makeExecutable(path.join(foreignCoreDir, 'read-live-claim-truth.sh'), `#!/usr/bin/env bash\nprintf '%s\\n' '{"status":"foreign","source":"github-rest","claimId":"claim-916"}'\n`);
+  seedClaimReceipt(foreignStateDir);
+  const foreign = run(['--issue', '916'], {
+    env: {
+      OPENSPEC_BUDDY_AUTO_STATE_DIR: foreignStateDir,
+      OPENSPEC_BUDDY_CORE_SCRIPT_DIR: foreignCoreDir,
+    },
+  });
+  assert.equal(foreign.status, 0, foreign.stderr);
+  assert.match(foreign.stdout, /^BLOCKED/m);
+  assert.match(foreign.stdout, /foreign/);
+  assert.doesNotMatch(fs.existsSync(foreignLogFile) ? fs.readFileSync(foreignLogFile, 'utf8') : '', /claim-issue 916/);
+
+  const failureStateDir = path.join(recoveryRoot, 'failure-state');
+  const failureLogFile = path.join(recoveryRoot, 'failure.log');
+  const failureCoreDir = path.join(recoveryRoot, 'failure-core');
+  fs.mkdirSync(failureCoreDir, { recursive: true });
+  makeExecutable(path.join(failureCoreDir, 'claim-issue.sh'), `#!/usr/bin/env bash\necho "claim-issue $*" >> ${JSON.stringify(failureLogFile)}\n`);
+  makeExecutable(path.join(failureCoreDir, 'read-live-claim-truth.sh'), '#!/usr/bin/env bash\necho "probe unavailable" >&2\nexit 2\n');
+  seedClaimReceipt(failureStateDir);
+  const failure = run(['--issue', '916'], {
+    env: {
+      OPENSPEC_BUDDY_AUTO_STATE_DIR: failureStateDir,
+      OPENSPEC_BUDDY_CORE_SCRIPT_DIR: failureCoreDir,
+    },
+  });
+  assert.equal(failure.status, 0, failure.stderr);
+  assert.match(failure.stdout, /^BLOCKED/m);
+  assert.match(failure.stdout, /live claim truth|probe/i);
+  assert.doesNotMatch(fs.existsSync(failureLogFile) ? fs.readFileSync(failureLogFile, 'utf8') : '', /claim-issue 916/);
+}
 
 {
   const noContextStateDir = path.join(tmp, 'state-no-context');
@@ -288,6 +410,7 @@ const env = {
   fs.mkdirSync(targetIssueBinDir, { recursive: true });
   makeExecutable(path.join(targetIssueCoreDir, 'claim-issue.sh'), `#!/usr/bin/env bash\necho "claim $*" >> ${JSON.stringify(targetIssueLogFile)}\n`);
   makeExecutable(path.join(targetIssueCoreDir, 'find-issue-pr.sh'), `#!/usr/bin/env bash\necho "find-pr $*" >> ${JSON.stringify(targetIssueLogFile)}\nprintf '%s\\n' '{"issue":693,"pr":null,"reason":"no exact PR"}'\n`);
+  makeExecutable(path.join(targetIssueCoreDir, 'read-live-claim-truth.sh'), `#!/usr/bin/env bash\nprintf '%s\\n' '{"status":"owned","source":"github-rest","claimId":"claim-693"}'\n`);
   makeExecutable(path.join(targetIssueBinDir, 'gh'), `#!/usr/bin/env bash\necho "$*" >> ${JSON.stringify(targetIssueGhLogFile)}\nif [[ "$*" == "pr view --json number --jq .number" ]]; then echo 448; exit 0; fi\nexit 1\n`);
   const result = run([], {
     env: {

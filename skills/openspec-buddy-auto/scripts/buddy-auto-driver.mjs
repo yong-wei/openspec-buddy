@@ -278,6 +278,39 @@ function validReceipt(state, stage, options = {}) {
   return validSignedReceipt(state, stage, { ...options, stateDir: stateDir() });
 }
 
+function readLiveClaimTruth(issue, options = {}) {
+  const command = [path.join(coreScriptDir, 'read-live-claim-truth.sh'), String(issue), '--json'];
+  const result = spawnSync(command[0], command.slice(1), {
+    cwd: options.cwd || process.cwd(),
+    env: process.env,
+    encoding: 'utf8',
+    stdio: 'pipe',
+    timeout: Number(process.env.OPENSPEC_BUDDY_COMMAND_TIMEOUT_MS || 5000),
+  });
+  if (result.error || result.status !== 0) {
+    const detail = result.error?.message || result.stderr?.trim() || `exit status ${result.status ?? 1}`;
+    return { ok: false, error: `Live claim truth probe failed: ${detail}`, command };
+  }
+  let liveClaim;
+  try {
+    liveClaim = JSON.parse(result.stdout || '{}');
+  } catch {
+    return { ok: false, error: 'Live claim truth probe returned malformed JSON.', command };
+  }
+  const statuses = new Set(['owned', 'missing', 'foreign', 'expired', 'invalid']);
+  if (!statuses.has(liveClaim.status) || liveClaim.source !== 'github-rest') {
+    return { ok: false, error: 'Live claim truth probe returned an invalid result.', command };
+  }
+  return { ok: true, ...liveClaim, command };
+}
+
+function claimedReceiptIsUsable(state, opts, liveClaim) {
+  return stateMatchesContext(opts, state)
+    && validReceipt(state, 'claimed')
+    && liveClaim?.ok === true
+    && liveClaim.status === 'owned';
+}
+
 function stateMatchesContext(opts, state) {
   if ((state.key || '') !== stateKey(opts)) return false;
   if ((opts.issue || '') !== (state.issue || '')) return false;
@@ -466,7 +499,7 @@ function emitUnauthorizedMerge(opts, reason) {
   process.exit(1);
 }
 
-function commandFor(opts, state) {
+function commandFor(opts, state, runtime = {}) {
   if (opts.noPr) {
     if (opts.issue || opts.pr || !opts.change) {
       return {
@@ -500,13 +533,44 @@ function commandFor(opts, state) {
 
   if (!opts.pr) {
     const contextMatches = stateMatchesContext(opts, state);
-    const claimed = contextMatches && validReceipt(state, 'claimed');
-    if (!claimed) {
+    const localClaimed = contextMatches && validReceipt(state, 'claimed');
+    if (!localClaimed) {
       return {
         stage: 'claim-issue',
         command: [path.join(coreScriptDir, 'claim-issue.sh'), opts.issue],
         reason: 'Explicit issue target must be claimed by the driver before implementation or PR work.',
         records: ['claimed'],
+      };
+    }
+    runtime.liveClaim ||= readLiveClaimTruth(opts.issue);
+    if (!runtime.liveClaim.ok) {
+      return {
+        stage: 'blocked',
+        command: [],
+        reason: runtime.liveClaim.error,
+      };
+    }
+    if (runtime.liveClaim.status === 'foreign') {
+      return {
+        stage: 'blocked',
+        command: [],
+        reason: `Live claim belongs to another identity (${runtime.liveClaim.reason || 'foreign claim'}); do not take over the issue automatically.`,
+      };
+    }
+    if (runtime.liveClaim.status === 'missing' || runtime.liveClaim.status === 'expired') {
+      return {
+        stage: 'claim-issue',
+        command: [path.join(coreScriptDir, 'claim-issue.sh'), opts.issue],
+        reason: `Live claim is ${runtime.liveClaim.status}; reacquire the remote claim before issue/PR lookup.`,
+        records: ['claimed'],
+        claimRecovery: true,
+      };
+    }
+    if (!claimedReceiptIsUsable(state, opts, runtime.liveClaim)) {
+      return {
+        stage: 'blocked',
+        command: [],
+        reason: `Live claim status '${runtime.liveClaim.status}' cannot authorize issue/PR lookup.`,
       };
     }
     return {
@@ -795,7 +859,7 @@ function runPostMergeAchievement(opts, truth, command) {
 
 function printNext(opts) {
   const state = readState(opts);
-  const next = commandFor(opts, state);
+  const next = commandFor(opts, state, {});
   emitHandoff({ stage: next.stage, reason: next.reason, command: next.command });
   if (!stateMatchesContext(opts, state)) {
     console.log('- state_context: invalid');
@@ -809,9 +873,10 @@ function printNext(opts) {
 
 function runDriver(opts) {
   let lastStage = '';
+  const runtime = {};
   for (let i = 0; i < 8; i += 1) {
     const state = readState(opts);
-    const next = commandFor(opts, state);
+    const next = commandFor(opts, state, runtime);
     lastStage = next.stage;
     if (next.stage === 'blocked') {
       emitBlocked({ stage: next.stage, reason: next.reason, command: next.command });
@@ -964,6 +1029,28 @@ function runDriver(opts) {
         })()
         : {};
       recordStage(opts, stage, next.command, extras);
+    }
+
+    if (next.stage === 'claim-issue') {
+      if (next.claimRecovery) {
+        emitDone({
+          stage: next.stage,
+          command: next.command,
+          state: opts,
+          next: {
+            stage: 'issue-pr-bridge',
+            reason: 'Remote claim was reacquired. Rerun the controller to verify the new live claim before looking up an issue-bound PR.',
+            command: [path.join(coreScriptDir, 'find-issue-pr.sh'), opts.issue],
+          },
+        });
+        return;
+      }
+      runtime.liveClaim = {
+        ok: true,
+        status: 'owned',
+        source: 'claim-issue',
+        checkedAt: new Date().toISOString(),
+      };
     }
 
     if (next.stage === 'wait-review' && process.env.OPENSPEC_BUDDY_AUTO_REVIEW_WAIT_MODE === 'verify-once') {
