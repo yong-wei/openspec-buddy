@@ -68,6 +68,23 @@ issue has no new assignee or status change after the stale claim
 
 Otherwise stop. Do not force-push or delete another agent's branch.
 
+On every restart, worktree switch, lane resume, and timeout recovery, read the
+live claim first:
+
+```bash
+<openspec-buddy-skill-dir>/scripts/read-live-claim-truth.sh <issue-number> --json
+```
+
+The result is `owned`, `missing`, `foreign`, `expired`, or `invalid`. A local
+receipt, lane entry, or controller timestamp cannot turn `missing`, `expired`,
+or `invalid` into an active claim. `foreign` means another identity owns the
+claim and is never an automatic takeover path. A GitHub read failure is a
+blocker; it must not be converted to `missing`.
+
+After recovery, rerun the controller so it verifies the newly written remote
+claim before issue-to-PR lookup. Do not continue from the same stale local
+receipt.
+
 ## Unresolved Review Thread
 
 If the controller blocks because unresolved actionable Codex review threads
@@ -146,6 +163,19 @@ Do not commit implementation work on a coordination branch. If a coordination
 branch contains already committed skill or documentation updates that should
 land before the claimed change, merge those updates to `$OPENSPEC_BUDDY_BASE_BRANCH`
 first, then fast-forward or rebase the claim branch onto the updated base branch.
+
+## Cache And Live Truth Diagnostics
+
+The cache system remains enabled for bounded read performance. Inspect the
+observed counters when deciding whether a cache is worth retaining:
+
+```bash
+<openspec-buddy-skill-dir>/scripts/cache-metrics.mjs summary openspec/.buddy-cache
+```
+
+The counters distinguish cache hits, misses, forced refreshes, managed GitHub
+request batches, and stale recovery. They are observational and do not
+authorize a state transition.
 
 ## Project Status Script Recovery
 

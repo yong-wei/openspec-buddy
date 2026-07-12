@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -28,6 +29,9 @@ const singleDriver = process.env.OPENSPEC_BUDDY_AUTO_SINGLE_DRIVER || path.join(
 const laneSwitchGate = path.join(autoScriptDir, 'lane-switch-gate.mjs');
 const prTruthCache = new Map();
 let justSafeYieldedLane = null;
+const reviewRunId = process.env.OPENSPEC_BUDDY_AUTO_CONTROLLER_RUN_ID
+  || process.env.OPENSPEC_BUDDY_AUTO_REVIEW_RUN_ID
+  || crypto.randomUUID();
 
 function truthy(value) {
   return ['1', 'true', 'yes', 'on'].includes(String(value || '').toLowerCase());
@@ -277,6 +281,93 @@ function runSingleDriverForIssue(issue, selected = {}) {
 function verifyCurrentWorktreeClaim(issue) {
   if (!issue) return { status: 1, stdout: '', stderr: 'missing issue' };
   return run(path.join(coreScriptDir, 'verify-claim-worktree.sh'), ['--issue', String(issue)], { allowFailure: true });
+}
+
+function readLiveClaimTruth(issue) {
+  const helper = path.join(coreScriptDir, 'read-live-claim-truth.sh');
+  if (!fs.existsSync(helper)) {
+    return { ok: true, status: 'legacy-fallback', source: 'verify-claim-worktree' };
+  }
+  const result = run(helper, [String(issue), '--json'], { allowFailure: true });
+  if (result.status !== 0) {
+    return {
+      ok: false,
+      status: 'unavailable',
+      reason: result.stderr || result.stdout || 'live claim truth probe failed',
+    };
+  }
+  const parsed = parseJsonResult(result.stdout, 'live claim truth probe returned invalid JSON');
+  if (!parsed.ok) return { ok: false, status: 'invalid', reason: parsed.reason };
+  const status = String(parsed.data?.status || 'invalid');
+  if (status === 'owned' && parsed.data?.source === 'github-rest') {
+    return { ok: true, ...parsed.data };
+  }
+  return {
+    ok: false,
+    status,
+    reason: parsed.data?.reason || `live claim status is ${status}`,
+  };
+}
+
+function recordCacheMetric(kind, surface, outcome, context = {}) {
+  const metricsTool = path.join(coreScriptDir, 'cache-metrics.mjs');
+  if (!fs.existsSync(metricsTool)) return;
+  const cacheDir = process.env.OPENSPEC_BUDDY_CACHE_DIR
+    || process.env.OPENSPEC_BUDDY_GH_CACHE_DIR
+    || path.dirname(laneStateDir());
+  spawnSync(process.execPath, [metricsTool, 'event', cacheDir, kind, surface, outcome, JSON.stringify(context)], {
+    cwd: process.cwd(),
+    env: process.env,
+    encoding: 'utf8',
+    stdio: 'ignore',
+  });
+}
+
+function gateLaneLiveClaim(state, lane, source = 'live-claim', options = {}) {
+  if (!lane.issue) return { ok: true, status: 'not-applicable' };
+  const truth = readLiveClaimTruth(lane.issue);
+  if (truth.ok) return truth;
+  if (
+    options.allowPostMergeBranchDeletion === true
+    && truth.status === 'invalid'
+    && ['claim-branch-lock-missing', 'issue-closed'].includes(truth.reason)
+  ) {
+    recordCacheMetric('coordination', 'live-claim', 'stale_recovery', {
+      issue: lane.issue,
+      status: truth.status,
+      authorization: 'controller-merge-receipt',
+    });
+    return {
+      ok: true,
+      status: 'merged-receipt',
+      source: 'controller-merge-receipt',
+      reason: 'Remote claim branch was deleted by the verified merge; controller merge receipt authorizes post-merge achievement recovery.',
+    };
+  }
+  if (['missing', 'expired', 'foreign', 'invalid'].includes(truth.status)) {
+    recordCacheMetric('coordination', 'live-claim', 'stale_recovery', {
+      issue: lane.issue,
+      status: truth.status,
+    });
+  }
+  const lastResult = truth.status === 'foreign' ? 'foreign-claim' : truth.status === 'unavailable' && isTransientFailure(truth.reason)
+    ? 'live-claim-probe'
+    : 'stale-claim';
+  markLaneFailure(state, lane, truth.reason || `live claim gate failed before ${source}`, {
+    retryable: lastResult === 'live-claim-probe',
+    source: lastResult,
+  });
+  return { ...truth, ok: false, lastResult };
+}
+
+function emitLiveClaimBlock(lane, truth, stage = 'live-claim') {
+  emitBlocked([
+    ['stage', truth.lastResult || stage],
+    ['lane', lane.id],
+    ['issue', lane.issue],
+    ['pr', lane.pr],
+    ['reason', truth.reason || 'live claim truth did not authorize this lane action'],
+  ]);
 }
 
 function runSingleDriverForLane(lane) {
@@ -662,6 +753,7 @@ function probeLane(lane) {
       OPENSPEC_BUDDY_REVIEW_PREVIOUS_REQUEST_STATE: lane.lastRequestState || '',
       OPENSPEC_BUDDY_REVIEW_REQUESTED_AT: lane.reviewRequestedAt || '',
       OPENSPEC_BUDDY_REVIEW_RETRY_COUNT: String(lane.reviewRetryCount || 0),
+      OPENSPEC_BUDDY_AUTO_CONTROLLER_RUN_ID: reviewRunId,
     },
   });
 }
@@ -733,7 +825,35 @@ function completeMergedLaneAchievement(state, lane, prData = null) {
   const authorization = matchingMergeAuthorization(lane, truthData);
   if (!authorization.ok) return blockUnauthorizedMergedLane(state, lane, truthData, authorization.reason);
   ensureBoundBranch();
-  const verify = verifyAchievedTruth(lane);
+  const preClaimVerify = verifyAchievedTruth(lane);
+  if (preClaimVerify.status === 0) {
+    const preClaimParsed = parseJsonResult(preClaimVerify.stdout, 'verify-achieved-truth.mjs did not return JSON');
+    if (preClaimParsed.ok && preClaimParsed.data?.achieved === true) {
+      lane.stage = 'done';
+      lane.lastResult = 'achieved';
+      lane.blockedReason = '';
+      clearRetryableState(lane);
+      lane.updatedAt = new Date().toISOString();
+      writeLaneState(state);
+      emitDone([
+        ['stage', 'lane-done'],
+        ['lane', lane.id],
+        ['issue', lane.issue],
+        ['pr', lane.pr],
+      ], preClaimVerify.stdout);
+      return true;
+    }
+  }
+  const claim = gateLaneLiveClaim(state, lane, 'post-merge-achievement', {
+    allowPostMergeBranchDeletion: authorization.ok,
+  });
+  if (!claim.ok) {
+    emitLiveClaimBlock(lane, claim, 'post-merge-achievement');
+    return true;
+  }
+  ensureBoundBranch();
+  let verify = preClaimVerify;
+  if (verify.status !== 0) verify = verifyAchievedTruth(lane);
   if (verify.status !== 0) {
     const reason = verify.stderr || verify.stdout || 'verify-achieved-truth.mjs failed during post-merge achievement';
     markLaneFailure(state, lane, reason, {
@@ -1145,22 +1265,26 @@ function markLaneInReviewOrBlock(state, lane, source = 'mark-review') {
   if (!lane.issue || !lane.pr) return false;
   const branch = currentBranch();
   if (lane.branch && branch && branch !== lane.branch) {
-    const resumed = resumeLane(lane);
-    if (resumed.status !== 0) {
-      const reason = resumed.stderr || resumed.stdout || 'resume lane failed before mark-review';
-      markLaneFailure(state, lane, reason, {
-        retryable: isTransientFailure(reason),
-        source: `${source}:resume-lane`,
-      });
-      emitBlocked([
-        ['stage', 'mark-review'],
-        ['lane', lane.id],
-        ['issue', lane.issue],
-        ['pr', lane.pr],
-        ['reason', lane.blockedReason],
-      ]);
+    const resumed = resumeLaneOrFail(state, lane, `${source}:resume-lane`);
+    if (!resumed.ok) {
+      if (resumed.claim) {
+        emitLiveClaimBlock(lane, resumed.claim, 'mark-review');
+      } else {
+        emitBlocked([
+          ['stage', 'mark-review'],
+          ['lane', lane.id],
+          ['issue', lane.issue],
+          ['pr', lane.pr],
+          ['reason', resumed.reason],
+        ]);
+      }
       return true;
     }
+  }
+  const claim = gateLaneLiveClaim(state, lane, source);
+  if (!claim.ok) {
+    emitLiveClaimBlock(lane, claim, 'mark-review');
+    return true;
   }
   const statusResult = markIssueInReview(lane.issue, lane.pr);
   if (statusResult.status === 0) {
@@ -1208,6 +1332,8 @@ function syncWaitingReviewStatusBeforeNewClaim(state) {
 }
 
 function resumeLaneOrFail(state, lane, source) {
+  const claim = gateLaneLiveClaim(state, lane, source);
+  if (!claim.ok) return { ok: false, reason: claim.reason, claim };
   const result = resumeLane(lane);
   if (result.status === 0) return { ok: true };
   const reason = result.stderr || result.stdout || `${source} lane resume failed`;
@@ -1465,6 +1591,7 @@ function blockIfForegroundLaneNotParked(state) {
         emitReviewFixHandoff(lane, resumed.reason);
       } else {
         let reason = resumed.reason;
+        const claimBlocked = Boolean(resumed.claim);
         let originalBranchRestored = currentBranch() === originalBranch;
         if (!originalBranchRestored) {
           const restored = run('git', ['switch', originalBranch], { allowFailure: true });
@@ -1475,10 +1602,10 @@ function blockIfForegroundLaneNotParked(state) {
             reason = `${reason}\nfailed to restore original branch ${originalBranch}: ${restoreReason.trim()}`;
           }
         }
-        if (originalBranchRestored) {
+        if (originalBranchRestored && !claimBlocked) {
           for (const key of Object.keys(lane)) delete lane[key];
           Object.assign(lane, laneSnapshot);
-        } else {
+        } else if (!originalBranchRestored) {
           lane.stage = 'blocked';
           lane.blockedReason = reason;
           lane.lastResult = 'resume-branch-restore-failed';
@@ -1487,7 +1614,7 @@ function blockIfForegroundLaneNotParked(state) {
         }
         writeLaneState(state);
         emitBlocked([
-          ['stage', 'resume-lane'],
+          ['stage', claimBlocked ? (resumed.claim.lastResult || 'stale-claim') : 'resume-lane'],
           ['lane', lane.id],
           ['issue', lane.issue],
           ['pr', lane.pr],
@@ -1870,6 +1997,11 @@ function refreshWaitingLanePrTruth(state, lane) {
 }
 
 function enterReviewFix(state, lane, output = '') {
+  const claim = gateLaneLiveClaim(state, lane, 'review-fix');
+  if (!claim.ok) {
+    emitLiveClaimBlock(lane, claim, 'review-fix');
+    return true;
+  }
   const statusResult = markIssueInProgress(lane.issue);
   if (statusResult.status !== 0) {
     const reason = statusResult.stderr || statusResult.stdout || 'mark-in-progress.sh failed before review fix';
@@ -2001,14 +2133,24 @@ function processWaitingLane(state, lane) {
   const result = parsedProbe.data;
   const previousHead = lane.head || '';
   const previousSignature = lane.lastSignature || '';
+  const previousThreadState = lane.threadState || '';
   const truth = classifyProbe({
     ...result,
     pr: lane.pr,
     head: result.state === 'head_changed' ? (result.head || lane.head) : lane.head,
+    runId: reviewRunId,
+    source: 'live-review-probe',
   }, {
     previousHead,
     previousSignature,
   });
+  if (previousThreadState === 'clear' && truth.threadState !== 'clear') {
+    recordCacheMetric('coordination', 'live-review', 'stale_recovery', {
+      issue: lane.issue,
+      pr: lane.pr,
+      reason: 'persisted-thread-clear-rejected-by-live-probe',
+    });
+  }
   applyReviewTruthToLane(lane, mergeReviewTruth(laneReviewTruth(lane), truth));
   lane.lastProbeAt = lane.restFreshAt;
 

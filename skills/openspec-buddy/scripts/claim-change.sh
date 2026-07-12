@@ -112,7 +112,7 @@ else
 fi
 
 blocked_by_file="$tmp_dir/blocked-by.json"
-buddy_issue_relationships_graphql "$owner" "$repo_name" "$issue_number" > "$blocked_by_file"
+OPENSPEC_BUDDY_CACHE_REFRESH=1 buddy_issue_relationships_graphql "$owner" "$repo_name" "$issue_number" > "$blocked_by_file"
 
 if ! node -e '
 const fs = require("fs");

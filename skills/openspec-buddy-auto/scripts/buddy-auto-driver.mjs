@@ -263,6 +263,20 @@ function stateDir() {
   return process.env.OPENSPEC_BUDDY_AUTO_STATE_DIR || path.join(gitRoot(), 'openspec/.buddy-cache/auto-state');
 }
 
+function recordCacheMetric(kind, surface, outcome, context = {}) {
+  const metricsTool = path.join(coreScriptDir, 'cache-metrics.mjs');
+  if (!fs.existsSync(metricsTool)) return;
+  const cacheDir = process.env.OPENSPEC_BUDDY_CACHE_DIR
+    || process.env.OPENSPEC_BUDDY_GH_CACHE_DIR
+    || path.dirname(stateDir());
+  spawnSync(process.execPath, [metricsTool, 'event', cacheDir, kind, surface, outcome, JSON.stringify(context)], {
+    cwd: process.cwd(),
+    env: process.env,
+    encoding: 'utf8',
+    stdio: 'ignore',
+  });
+}
+
 function stateKey(opts) {
   if (opts.pr) return `pr-${opts.pr}`;
   if (opts.issue) return `issue-${opts.issue}`;
@@ -276,6 +290,39 @@ function statePath(opts) {
 
 function validReceipt(state, stage, options = {}) {
   return validSignedReceipt(state, stage, { ...options, stateDir: stateDir() });
+}
+
+function readLiveClaimTruth(issue, options = {}) {
+  const command = [path.join(coreScriptDir, 'read-live-claim-truth.sh'), String(issue), '--json'];
+  const result = spawnSync(command[0], command.slice(1), {
+    cwd: options.cwd || process.cwd(),
+    env: process.env,
+    encoding: 'utf8',
+    stdio: 'pipe',
+    timeout: Number(process.env.OPENSPEC_BUDDY_COMMAND_TIMEOUT_MS || 5000),
+  });
+  if (result.error || result.status !== 0) {
+    const detail = result.error?.message || result.stderr?.trim() || `exit status ${result.status ?? 1}`;
+    return { ok: false, error: `Live claim truth probe failed: ${detail}`, command };
+  }
+  let liveClaim;
+  try {
+    liveClaim = JSON.parse(result.stdout || '{}');
+  } catch {
+    return { ok: false, error: 'Live claim truth probe returned malformed JSON.', command };
+  }
+  const statuses = new Set(['owned', 'missing', 'foreign', 'expired', 'invalid']);
+  if (!statuses.has(liveClaim.status) || liveClaim.source !== 'github-rest') {
+    return { ok: false, error: 'Live claim truth probe returned an invalid result.', command };
+  }
+  return { ok: true, ...liveClaim, command };
+}
+
+function claimedReceiptIsUsable(state, opts, liveClaim) {
+  return stateMatchesContext(opts, state)
+    && validReceipt(state, 'claimed')
+    && liveClaim?.ok === true
+    && liveClaim.status === 'owned';
 }
 
 function stateMatchesContext(opts, state) {
@@ -456,6 +503,29 @@ function remotePrIsMerged(truth) {
   ));
 }
 
+function controllerMergeRecoveryAvailable(opts, state) {
+  if (!stateMatchesContext(opts, state)) return false;
+  if (validReceipt(state, 'merged', {
+    require: ['repository', 'issue', 'pr', 'head', 'requestId', 'responseId', 'mergeAttemptId'],
+  })) return false;
+  if (!controllerMergeAuthorizationValid(opts, state)) return false;
+  const remoteTruth = freshRemotePrTruth(state, opts.pr);
+  if (!remotePrIsMerged(remoteTruth)) return false;
+  const remoteHead = remoteTruth.head?.sha || remoteTruth.headRefOid || '';
+  return !remoteHead || !opts.head || String(remoteHead) === String(opts.head);
+}
+
+function ensureControllerMergedReceipt(opts, state) {
+  if (controllerMergeAuthorizationValid(opts, state, { requireMerged: true })) return true;
+  if (!controllerMergeAuthorizationValid(opts, state)) return false;
+  const remoteTruth = freshRemotePrTruth(state, opts.pr);
+  if (!remotePrIsMerged(remoteTruth)) return false;
+  const remoteHead = remoteTruth.head?.sha || remoteTruth.headRefOid || '';
+  if (remoteHead && opts.head && String(remoteHead) !== String(opts.head)) return false;
+  runControllerOwnedMerge(opts);
+  return controllerMergeAuthorizationValid(opts, readState(opts), { requireMerged: true });
+}
+
 function emitUnauthorizedMerge(opts, reason) {
   emitBlocked({
     stage: 'unauthorized-merge',
@@ -466,7 +536,7 @@ function emitUnauthorizedMerge(opts, reason) {
   process.exit(1);
 }
 
-function commandFor(opts, state) {
+function commandFor(opts, state, runtime = {}) {
   if (opts.noPr) {
     if (opts.issue || opts.pr || !opts.change) {
       return {
@@ -500,13 +570,69 @@ function commandFor(opts, state) {
 
   if (!opts.pr) {
     const contextMatches = stateMatchesContext(opts, state);
-    const claimed = contextMatches && validReceipt(state, 'claimed');
-    if (!claimed) {
+    const localClaimed = contextMatches && validReceipt(state, 'claimed');
+    if (!localClaimed) {
       return {
         stage: 'claim-issue',
         command: [path.join(coreScriptDir, 'claim-issue.sh'), opts.issue],
         reason: 'Explicit issue target must be claimed by the driver before implementation or PR work.',
         records: ['claimed'],
+      };
+    }
+    runtime.liveClaim = readLiveClaimTruth(opts.issue);
+    if (!runtime.liveClaim.ok) {
+      return {
+        stage: 'blocked',
+        command: [],
+        reason: runtime.liveClaim.error,
+      };
+    }
+    if (runtime.liveClaim.status === 'foreign') {
+      recordCacheMetric('coordination', 'live-claim', 'stale_recovery', { issue: opts.issue, status: runtime.liveClaim.status });
+      return {
+        stage: 'blocked',
+        command: [],
+        reason: `Live claim belongs to another identity (${runtime.liveClaim.reason || 'foreign claim'}); do not take over the issue automatically.`,
+      };
+    }
+    if (runtime.liveClaim.status === 'missing') {
+      recordCacheMetric('coordination', 'live-claim', 'stale_recovery', { issue: opts.issue, status: runtime.liveClaim.status });
+      return {
+        stage: 'claim-issue',
+        command: [path.join(coreScriptDir, 'claim-issue.sh'), opts.issue],
+        reason: `Live claim is ${runtime.liveClaim.status}; reacquire the remote claim before issue/PR lookup.`,
+        records: ['claimed'],
+        claimRecovery: true,
+      };
+    }
+    if (runtime.liveClaim.status === 'expired') {
+      if (runtime.liveClaim.issueStatus === 'status:claimed') {
+        recordCacheMetric('coordination', 'live-claim', 'stale_recovery', { issue: opts.issue, status: runtime.liveClaim.status });
+        return {
+          stage: 'claim-issue',
+          command: [path.join(coreScriptDir, 'claim-issue.sh'), opts.issue],
+          reason: 'Live claim is expired while issue remains status:claimed; recover the remote claim before issue/PR lookup.',
+          records: ['claimed'],
+          claimRecovery: true,
+        };
+      }
+      recordCacheMetric('coordination', 'live-claim', 'stale_recovery', {
+        issue: opts.issue,
+        status: runtime.liveClaim.status,
+        issueStatus: runtime.liveClaim.issueStatus || 'unknown',
+      });
+      return {
+        stage: 'blocked',
+        command: [],
+        reason: `Live claim is expired while issue status is '${runtime.liveClaim.issueStatus || 'unknown'}'; reconcile the active issue state before retrying claim recovery.`,
+      };
+    }
+    if (!claimedReceiptIsUsable(state, opts, runtime.liveClaim)) {
+      recordCacheMetric('coordination', 'live-claim', 'stale_recovery', { issue: opts.issue, status: runtime.liveClaim.status });
+      return {
+        stage: 'blocked',
+        command: [],
+        reason: `Live claim status '${runtime.liveClaim.status}' cannot authorize issue/PR lookup.`,
       };
     }
     return {
@@ -547,6 +673,35 @@ function commandFor(opts, state) {
       stage: 'achieved-truth',
       command: [path.join(coreScriptDir, 'verify-achieved-truth.mjs'), opts.issue, opts.pr],
       reason: 'Controller-owned merge was verified for this exact head; read archive and achievement truth.',
+    };
+  }
+
+  if (controllerMergeRecoveryAvailable(opts, state)) {
+    return {
+      stage: 'achieved-truth',
+      command: [path.join(coreScriptDir, 'verify-achieved-truth.mjs'), opts.issue, opts.pr],
+      reason: 'Remote PR is merged and a matching merge authorization receipt exists; recover the missing merged receipt before applying live-claim gates.',
+    };
+  }
+
+  runtime.liveClaim = readLiveClaimTruth(opts.issue);
+  if (!runtime.liveClaim.ok) {
+    return {
+      stage: 'blocked',
+      command: [],
+      reason: runtime.liveClaim.error,
+    };
+  }
+  if (runtime.liveClaim.status !== 'owned') {
+    recordCacheMetric('coordination', 'live-claim', 'stale_recovery', {
+      issue: opts.issue,
+      pr: opts.pr,
+      status: runtime.liveClaim.status,
+    });
+    return {
+      stage: 'blocked',
+      command: [],
+      reason: `Live claim status '${runtime.liveClaim.status}' cannot authorize PR phases.`,
     };
   }
 
@@ -795,7 +950,7 @@ function runPostMergeAchievement(opts, truth, command) {
 
 function printNext(opts) {
   const state = readState(opts);
-  const next = commandFor(opts, state);
+  const next = commandFor(opts, state, {});
   emitHandoff({ stage: next.stage, reason: next.reason, command: next.command });
   if (!stateMatchesContext(opts, state)) {
     console.log('- state_context: invalid');
@@ -809,9 +964,10 @@ function printNext(opts) {
 
 function runDriver(opts) {
   let lastStage = '';
+  const runtime = {};
   for (let i = 0; i < 8; i += 1) {
     const state = readState(opts);
-    const next = commandFor(opts, state);
+    const next = commandFor(opts, state, runtime);
     lastStage = next.stage;
     if (next.stage === 'blocked') {
       emitBlocked({ stage: next.stage, reason: next.reason, command: next.command });
@@ -918,7 +1074,7 @@ function runDriver(opts) {
       }
       if (truth.achieved === true) {
         const currentState = readState(opts);
-        if (!controllerMergeAuthorizationValid(opts, currentState, { requireMerged: true })) {
+        if (!ensureControllerMergedReceipt(opts, currentState)) {
           emitUnauthorizedMerge(opts, 'Achievement truth is terminal for a merged PR, but no matching controller merge authorization receipt exists.');
         }
         recordStage(opts, 'achieved', next.command);
@@ -931,7 +1087,7 @@ function runDriver(opts) {
         return;
       }
       if (truth.next === 'mark-achieved-post-merge') {
-        if (!controllerMergeAuthorizationValid(opts, readState(opts), { requireMerged: true })) {
+        if (!ensureControllerMergedReceipt(opts, readState(opts))) {
           emitUnauthorizedMerge(opts, 'Post-merge achievement was requested for a merged PR without a matching controller merge authorization receipt.');
         }
         runPostMergeAchievement(opts, truth, next.command);
@@ -964,6 +1120,28 @@ function runDriver(opts) {
         })()
         : {};
       recordStage(opts, stage, next.command, extras);
+    }
+
+    if (next.stage === 'claim-issue') {
+      if (next.claimRecovery) {
+        emitDone({
+          stage: next.stage,
+          command: next.command,
+          state: opts,
+          next: {
+            stage: 'issue-pr-bridge',
+            reason: 'Remote claim was reacquired. Rerun the controller to verify the new live claim before looking up an issue-bound PR.',
+            command: [path.join(coreScriptDir, 'find-issue-pr.sh'), opts.issue],
+          },
+        });
+        return;
+      }
+      runtime.liveClaim = {
+        ok: true,
+        status: 'owned',
+        source: 'claim-issue',
+        checkedAt: new Date().toISOString(),
+      };
     }
 
     if (next.stage === 'wait-review' && process.env.OPENSPEC_BUDDY_AUTO_REVIEW_WAIT_MODE === 'verify-once') {

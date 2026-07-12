@@ -6,11 +6,12 @@ pr_ref=""
 expected_branch=""
 allow_coordination_branch=0
 allow_detached=0
+json_output=0
 
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
     -h|--help)
-      echo "Usage: verify-claim-worktree.sh [--issue <number>] [--pr <number-or-url>] [--branch <name>] [--allow-coordination-branch] [--allow-detached]"
+      echo "Usage: verify-claim-worktree.sh [--issue <number>] [--pr <number-or-url>] [--branch <name>] [--allow-coordination-branch] [--allow-detached] [--json]"
       exit 0
       ;;
     --issue)
@@ -33,6 +34,10 @@ while [[ "$#" -gt 0 ]]; do
       allow_detached=1
       shift
       ;;
+    --json)
+      json_output=1
+      shift
+      ;;
     *)
       echo "Unknown option: $1" >&2
       exit 2
@@ -41,7 +46,7 @@ while [[ "$#" -gt 0 ]]; do
 done
 
 if [[ -z "$issue_number" && -z "$pr_ref" && -z "$expected_branch" ]]; then
-  echo "Usage: verify-claim-worktree.sh [--issue <number>] [--pr <number-or-url>] [--branch <name>] [--allow-coordination-branch] [--allow-detached]" >&2
+  echo "Usage: verify-claim-worktree.sh [--issue <number>] [--pr <number-or-url>] [--branch <name>] [--allow-coordination-branch] [--allow-detached] [--json]" >&2
   exit 2
 fi
 
@@ -194,6 +199,20 @@ if (boundBranch && active.coordination_branch !== boundBranch) {
   process.exit(54);
 }
 ' "$issue_file" "$active_file" "$identity_file" "$expected_branch" "$bound_branch"
+fi
+
+if [[ "$json_output" == "1" ]]; then
+  if [[ -z "$issue_number" ]]; then
+    echo "Claim worktree guard failed: --json requires an issue or PR with an origin issue." >&2
+    exit 2
+  fi
+  live_claim_file="$tmp_dir/live-claim-truth.json"
+  if ! "$script_dir/read-live-claim-truth.sh" "$issue_number" --json > "$live_claim_file"; then
+    echo "Claim worktree guard failed: live claim truth is unavailable." >&2
+    exit 55
+  fi
+  cat "$live_claim_file"
+  exit 0
 fi
 
 printf 'Claim worktree verified'

@@ -33,8 +33,8 @@ metadata_file="$tmp_dir/metadata.json"
 labels_file="$tmp_dir/labels.txt"
 pr_labels_file="$tmp_dir/pr-labels.txt"
 
-buddy_issue_json "$issue_number" "$cache_dir" "$issue_file"
-buddy_pr_json "$pr_ref" "$cache_dir" "$pr_file"
+buddy_live_issue_json "$issue_number" "$cache_dir" "$issue_file"
+buddy_live_pr_json "$pr_ref" "$cache_dir" "$pr_file"
 
 node -e 'const fs=require("fs"); const issue=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(issue.body || "");' "$issue_file" > "$body_file"
 node "$script_dir/parse-issue-metadata.mjs" "$body_file" > "$metadata_file"

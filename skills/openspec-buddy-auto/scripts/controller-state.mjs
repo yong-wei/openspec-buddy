@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
@@ -18,6 +19,10 @@ export function controllerStateDir(cwd = process.cwd()) {
     return process.env.OPENSPEC_BUDDY_AUTO_CONTROLLER_STATE_DIR;
   }
   return path.join(gitRoot(cwd), 'openspec/.buddy-cache/auto-controller');
+}
+
+export function createControllerRunId() {
+  return crypto.randomUUID();
 }
 
 export function controllerStatePath(cwd = process.cwd()) {

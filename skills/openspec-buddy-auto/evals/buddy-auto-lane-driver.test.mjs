@@ -339,11 +339,69 @@ function normalizedLane(overrides) {
     reviewRequestedAt: '', reviewRetryCount: 0, lastProbeAt: '', lastSignature: '',
     lastRequestState: '', lastResult: '', probeState: '', requestState: '', actionableState: '',
     threadState: '', restFreshAt: '', threadsFreshAt: '', threadsHead: '',
+    reviewRunId: '', reviewTruthSource: '',
     reviewStatusSyncedAt: '', responseOutcome: 'unknown', reviewRequestId: '', reviewResponseId: '',
     reviewResponseAt: '', reviewResponseUrl: '', unauthorizedMergeRecoveredAt: '', unauthorizedMergeRecoveryReason: '',
     blockedReason: '', retryableStage: '', retryableHead: '',
     retryableSince: '', retryAttempts: 0, updatedAt: '', ...overrides,
   };
+}
+
+{
+  const envInfo = makeEnv('stale-claim-before-mark-review');
+  makeExecutable(path.join(envInfo.coreDir, 'read-live-claim-truth.sh'), `#!/bin/bash
+printf '%s\\n' '{"status":"missing","source":"github-rest","claimId":""}'
+`);
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 2,
+    lanes: [
+      { id: 'issue-916', issue: '916', change: 'change-916', branch: 'change-916', pr: '916', head: 'head-916', stage: 'waiting_review' },
+    ],
+  }));
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '2',
+    CURRENT_BRANCH: 'dev1',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /stale-claim|missing/);
+  const log = fs.existsSync(envInfo.logFile) ? fs.readFileSync(envInfo.logFile, 'utf8') : '';
+  assert.doesNotMatch(log, /mark-review 916/);
+  assert.doesNotMatch(log, /mark-achieved-post-merge/);
+  const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  assert.equal(state.lanes[0].issue, '916');
+  assert.equal(state.lanes[0].stage, 'blocked');
+  assert.equal(state.lanes[0].lastResult, 'stale-claim');
+
+  const foreignEnv = makeEnv('foreign-claim-before-mark-review');
+  makeExecutable(path.join(foreignEnv.coreDir, 'read-live-claim-truth.sh'), `#!/bin/bash
+printf '%s\\n' '{"status":"foreign","source":"github-rest","claimId":"claim-916"}'
+`);
+  fs.mkdirSync(foreignEnv.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(foreignEnv.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: foreignEnv.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 2,
+    lanes: [
+      { id: 'issue-916', issue: '916', change: 'change-916', branch: 'change-916', pr: '916', head: 'head-916', stage: 'waiting_review' },
+    ],
+  }));
+  const foreignResult = run(foreignEnv, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '2',
+    CURRENT_BRANCH: 'dev1',
+  });
+  assert.equal(foreignResult.status, 0, foreignResult.stderr);
+  assert.match(foreignResult.stdout, /foreign-claim|foreign/);
+  const foreignLog = fs.existsSync(foreignEnv.logFile) ? fs.readFileSync(foreignEnv.logFile, 'utf8') : '';
+  assert.doesNotMatch(foreignLog, /mark-review 916/);
+  const foreignState = JSON.parse(fs.readFileSync(path.join(foreignEnv.stateDir, 'dev1.json'), 'utf8'));
+  assert.equal(foreignState.lanes[0].issue, '916');
+  assert.equal(foreignState.lanes[0].stage, 'blocked');
+  assert.equal(foreignState.lanes[0].lastResult, 'foreign-claim');
 }
 
 {
@@ -821,16 +879,15 @@ function normalizedLane(overrides) {
     PROBE_REQUEST_STATE_707: 'missing-current-head',
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /^DONE/m);
+  assert.match(result.stdout, /^HANDOFF/m);
+  assert.match(result.stdout, /^stage: merge-ready$/m);
   const log = fs.readFileSync(envInfo.logFile, 'utf8');
   assert.match(log, /switch change-675/);
   assert.match(log, /verify-claim --issue 675 --pr 707/);
-  assert.match(log, /request 707 --force/);
-  assert.doesNotMatch(log, /check 707/);
+  assert.doesNotMatch(log, /request 707 --force/);
+  assert.match(log, /check 707/);
   const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
-  assert.equal(state.lanes[0].stage, 'waiting_review');
-  assert.equal(state.lanes[0].lastRequestState, 'present-current-head');
-  assert.match(state.lanes[0].reviewRequestedAt, /^\d{4}-\d{2}-\d{2}T/);
+  assert.equal(state.lanes[0].stage, 'merge_ready');
 }
 
 {
@@ -955,6 +1012,110 @@ function normalizedLane(overrides) {
   const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
   assert.equal(state.lanes[0].stage, 'done');
   assert.equal(state.lanes[0].lastResult, 'mark-achieved-post-merge');
+}
+
+{
+  const envInfo = makeEnv('post-merge-branch-deleted-uses-merge-receipt');
+  makeExecutable(path.join(envInfo.coreDir, 'read-live-claim-truth.sh'), `#!/bin/bash
+printf '%s\\n' '{"status":"invalid","source":"github-rest","reason":"claim-branch-lock-missing"}'
+`);
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 1,
+    lanes: [
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'merged-head', stage: 'merge_ready', reviewRetryCount: 1 },
+    ],
+  }));
+  seedControllerMergeReceipt(envInfo);
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '1',
+    CURRENT_BRANCH: 'dev1',
+    PR_707_STATE: 'MERGED',
+    PR_707_HEAD: 'merged-head',
+    PR_707_MERGED_AT: '"2026-06-28T00:00:00Z"',
+    ACHIEVED_TRUTH_NEXT_POST_MERGE: '1',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^DONE/m);
+  assert.match(result.stdout, /^stage: lane-done$/m);
+  const log = fs.readFileSync(envInfo.logFile, 'utf8');
+  assert.match(log, /verify-achieved-truth 675 707/);
+  assert.match(log, /mark-achieved-post-merge 675 openspec\/archive\/change-675 707/);
+  const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  assert.equal(state.lanes[0].stage, 'done');
+  assert.equal(state.lanes[0].lastResult, 'mark-achieved-post-merge');
+}
+
+{
+  const envInfo = makeEnv('post-merge-closed-issue-uses-merge-receipt');
+  makeExecutable(path.join(envInfo.coreDir, 'read-live-claim-truth.sh'), `#!/bin/bash
+printf '%s\\n' '{"status":"invalid","source":"github-rest","reason":"issue-closed"}'
+`);
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 1,
+    lanes: [
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'merged-head', stage: 'merge_ready', reviewRetryCount: 1 },
+    ],
+  }));
+  seedControllerMergeReceipt(envInfo);
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '1',
+    CURRENT_BRANCH: 'dev1',
+    PR_707_STATE: 'MERGED',
+    PR_707_HEAD: 'merged-head',
+    PR_707_MERGED_AT: '"2026-06-28T00:00:00Z"',
+    ACHIEVED_TRUTH_NEXT_POST_MERGE: '1',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^DONE/m);
+  assert.match(result.stdout, /^stage: lane-done$/m);
+  const log = fs.readFileSync(envInfo.logFile, 'utf8');
+  assert.match(log, /verify-achieved-truth 675 707/);
+  assert.match(log, /mark-achieved-post-merge 675 openspec\/archive\/change-675 707/);
+  const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  assert.equal(state.lanes[0].stage, 'done');
+  assert.equal(state.lanes[0].lastResult, 'mark-achieved-post-merge');
+}
+
+{
+  const envInfo = makeEnv('post-merge-terminal-truth-precedes-live-claim');
+  makeExecutable(path.join(envInfo.coreDir, 'read-live-claim-truth.sh'), `#!/bin/bash
+printf '%s\\n' '{"status":"invalid","source":"github-rest","claimId":""}'
+`);
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 1,
+    lanes: [
+      { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'merged-head', stage: 'merge_ready', reviewRetryCount: 1 },
+    ],
+  }));
+  seedControllerMergeReceipt(envInfo);
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '1',
+    CURRENT_BRANCH: 'dev1',
+    PR_707_STATE: 'MERGED',
+    PR_707_HEAD: 'merged-head',
+    PR_707_MERGED_AT: '"2026-06-28T00:00:00Z"',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^DONE/m);
+  assert.match(result.stdout, /^stage: lane-done$/m);
+  const log = fs.readFileSync(envInfo.logFile, 'utf8');
+  assert.match(log, /verify-achieved-truth 675 707/);
+  assert.doesNotMatch(log, /mark-achieved-post-merge/);
+  const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  assert.equal(state.lanes[0].stage, 'done');
+  assert.equal(state.lanes[0].lastResult, 'achieved');
 }
 
 {

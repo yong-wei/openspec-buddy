@@ -259,6 +259,8 @@ export function normalizeLane(lane) {
     restFreshAt: String(lane.restFreshAt || ''),
     threadsFreshAt: String(lane.threadsFreshAt || ''),
     threadsHead: String(lane.threadsHead || ''),
+    reviewRunId: String(lane.reviewRunId || lane.truthRunId || ''),
+    reviewTruthSource: String(lane.reviewTruthSource || lane.truthSource || ''),
     reviewStatusSyncedAt: String(lane.reviewStatusSyncedAt || ''),
     responseOutcome: responseOutcomes.has(String(lane.responseOutcome || ''))
       ? String(lane.responseOutcome || '')

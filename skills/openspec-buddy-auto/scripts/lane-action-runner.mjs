@@ -58,6 +58,33 @@ function refreshPrTruth(runSync, lane, cwd) {
   }
 }
 
+function liveClaimGate(runSync, lane, coreScriptDir, cwd) {
+  if (!lane.issue) return null;
+  const helper = path.join(coreScriptDir, 'read-live-claim-truth.sh');
+  if (!fs.existsSync(helper)) return null;
+  const result = runSync(helper, [String(lane.issue), '--json'], { cwd });
+  if (result.status !== 0) {
+    return structuredBlocked(lane, text(result) || 'live claim truth probe failed', {
+      currentBranch: currentBranch(runSync, cwd),
+      source: 'live-claim',
+    });
+  }
+  let truth;
+  try {
+    truth = JSON.parse(result.stdout || '{}');
+  } catch {
+    return structuredBlocked(lane, 'live claim truth probe returned invalid JSON', {
+      currentBranch: currentBranch(runSync, cwd),
+      source: 'live-claim',
+    });
+  }
+  if (truth.status === 'owned' && truth.source === 'github-rest') return null;
+  return structuredBlocked(lane, truth.reason || `live claim status is ${truth.status || 'invalid'}`, {
+    currentBranch: currentBranch(runSync, cwd),
+    source: truth.status === 'foreign' ? 'foreign-claim' : 'stale-claim',
+  });
+}
+
 export function runLaneAction(state, lane, actionSpec, options = {}) {
   const cwd = options.cwd || process.cwd();
   const runSync = options.runSync || defaultRun;
@@ -74,6 +101,9 @@ export function runLaneAction(state, lane, actionSpec, options = {}) {
 
   const switched = runSync('git', ['switch', String(lane.branch || '')], { cwd });
   if (switched.status !== 0) return structuredBlocked(lane, text(switched) || 'git switch failed', { currentBranch: currentBranch(runSync, cwd) });
+
+  const claimGate = liveClaimGate(runSync, lane, coreScriptDir, cwd);
+  if (claimGate) return claimGate;
 
   const guardArgs = ['--issue', String(lane.issue || '')];
   if (lane.pr) guardArgs.push('--pr', String(lane.pr));

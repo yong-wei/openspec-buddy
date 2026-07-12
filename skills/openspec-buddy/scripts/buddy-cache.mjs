@@ -82,6 +82,39 @@ function readJson(file) {
   return JSON.parse(fs.readFileSync(file, 'utf8'));
 }
 
+function metricsCacheDir(file) {
+  const configured = process.env.OPENSPEC_BUDDY_CACHE_DIR || process.env.OPENSPEC_BUDDY_GH_CACHE_DIR;
+  if (configured) return path.resolve(configured);
+  const absolute = path.resolve(file);
+  const parent = path.basename(path.dirname(absolute));
+  return ['issues', 'prs', 'relationships', 'locks'].includes(parent)
+    ? path.dirname(path.dirname(absolute))
+    : path.dirname(absolute);
+}
+
+function recordMetric(file, surface, outcome, context = {}) {
+  try {
+    const cacheDir = metricsCacheDir(file);
+    fs.mkdirSync(cacheDir, { recursive: true });
+    const event = {
+      ...context,
+      at: new Date().toISOString(),
+      kind: 'cache',
+      surface: surface || 'unknown',
+      outcome,
+      source: 'buddy-cache',
+    };
+    fs.appendFileSync(path.join(cacheDir, 'cache-metrics.jsonl'), `${JSON.stringify(event)}\n`);
+  } catch {
+    // Metrics are observational and must never affect cache reads.
+  }
+}
+
+function printStale(file, value, surface, outcome, context = {}) {
+  recordMetric(file, surface, outcome, context);
+  process.stdout.write(`${value ? 'true' : 'false'}\n`);
+}
+
 function writeJsonFileAtomic(file, value) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tempFile = path.join(
@@ -179,26 +212,26 @@ function main() {
         process.exit(2);
       }
       if (process.env.OPENSPEC_BUDDY_CACHE_REFRESH === '1') {
-        process.stdout.write('true\n');
+        printStale(file, true, expectedObjectType, 'forced_refresh', { key: expectedKey });
         return;
       }
       if (!fs.existsSync(file)) {
-        process.stdout.write('true\n');
+        printStale(file, true, expectedObjectType, 'miss', { key: expectedKey });
         return;
       }
       const ttlSeconds = Number(ttlArg);
       const entry = readJson(file);
       if (!cacheMatches(entry, expectedRepo, expectedObjectType, expectedKey)) {
-        process.stdout.write('true\n');
+        printStale(file, true, expectedObjectType, 'miss', { key: expectedKey, reason: 'identity-mismatch' });
         return;
       }
       const fetchedAt = Date.parse(entry.fetchedAt || '');
       if (!Number.isFinite(fetchedAt) || !Number.isFinite(ttlSeconds)) {
-        process.stdout.write('true\n');
+        printStale(file, true, expectedObjectType, 'miss', { key: expectedKey, reason: 'invalid-freshness' });
         return;
       }
       const stale = Date.now() - fetchedAt >= ttlSeconds * 1000;
-      process.stdout.write(stale ? 'true\n' : 'false\n');
+      printStale(file, stale, expectedObjectType, stale ? 'miss' : 'hit', { key: expectedKey });
       return;
     }
     case 'get': {

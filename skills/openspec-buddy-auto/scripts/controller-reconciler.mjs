@@ -1,7 +1,12 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
 import { readLaneState } from './lane-state.mjs';
-import { laneReviewTruth, threadCacheFreshForHead } from './review-truth.mjs';
+import {
+  defaultReviewTruthMaxAgeSeconds,
+  laneReviewTruth,
+  normalizeReviewTruth,
+  threadCacheFreshForHead,
+} from './review-truth.mjs';
 import { writeControllerState } from './controller-state.mjs';
 
 function defaultGitDirty(cwd = process.cwd()) {
@@ -38,25 +43,41 @@ function findLane(laneState, state) {
   }) || null;
 }
 
-export function canClearReviewInterrupt({ state, lane, dirty = false, allowCachedRestTruth = false } = {}) {
+export function canClearReviewInterrupt({
+  state,
+  lane,
+  dirty = false,
+  allowCachedRestTruth = false,
+  freshTruth = null,
+  now = Date.now(),
+  maxAgeSeconds = defaultReviewTruthMaxAgeSeconds,
+  runId = '',
+} = {}) {
+  void allowCachedRestTruth;
   if (!state || !lane || dirty) return false;
-  const truth = laneReviewTruth(lane);
-  if (truth.threadState === 'actionable' || truth.threadState === 'unresolved' || truth.actionableState === 'actionable') {
+  const persistedTruth = laneReviewTruth(lane);
+  const truth = normalizeReviewTruth(freshTruth || {});
+  if (
+    persistedTruth.threadState === 'actionable'
+    || persistedTruth.threadState === 'unresolved'
+    || persistedTruth.actionableState === 'actionable'
+    || truth.threadState === 'actionable'
+    || truth.threadState === 'unresolved'
+    || truth.actionableState === 'actionable'
+  ) {
     return false;
   }
   const sameReviewFix = state.reviewFix?.pending ? samePrHead(state.reviewFix, lane) : true;
   const sameInterrupt = state.interrupt ? samePrHead(state.interrupt, lane) : true;
   if (!sameReviewFix || !sameInterrupt) return false;
-  if (threadCacheFreshForHead(truth, lane.head) && truth.threadState === 'clear') return true;
-  return Boolean(
-    allowCachedRestTruth
-    && !state.reviewFix?.pending
-    &&
-    truth.restFreshAt
-    && truth.probeState === 'waiting'
-    && truth.requestState === 'present-current-head'
-    && (truth.signature || lane.lastSignature || state.interrupt?.blockedCode === 'request_missing')
-  );
+  if (!freshTruth) return false;
+  if (truth.pr && lane.pr && truth.pr !== String(lane.pr)) return false;
+  if (threadCacheFreshForHead(truth, lane.head, {
+    now,
+    maxAgeSeconds,
+    runId: runId || truth.runId,
+  }) && truth.threadState === 'clear') return true;
+  return false;
 }
 
 function interruptIsReviewWait(interrupt = {}) {
@@ -70,6 +91,10 @@ export function reconcileControllerState(state, {
   laneState = null,
   dirty = defaultGitDirty(cwd),
   allowCachedRestTruth = false,
+  freshTruth = null,
+  now = Date.now(),
+  maxAgeSeconds = defaultReviewTruthMaxAgeSeconds,
+  runId = '',
   writeState = (next) => writeControllerState(next, { cwd }),
 } = {}) {
   if (!state.reviewFix?.pending && !interruptIsReviewWait(state.interrupt)) {
@@ -77,8 +102,22 @@ export function reconcileControllerState(state, {
   }
   const lanes = laneState || readLaneState({ cwd, maxLanes: state.maxLanes || 1 });
   const lane = findLane(lanes, state);
-  if (!canClearReviewInterrupt({ state, lane, dirty, allowCachedRestTruth })) {
-    return { changed: false, state, lane, reason: 'truth not sufficient' };
+  if (!canClearReviewInterrupt({
+    state,
+    lane,
+    dirty,
+    allowCachedRestTruth,
+    freshTruth,
+    now,
+    maxAgeSeconds,
+    runId,
+  })) {
+    return {
+      changed: false,
+      state,
+      lane,
+      reason: freshTruth ? 'truth not sufficient' : 'fresh live review truth not supplied',
+    };
   }
   const next = {
     ...state,

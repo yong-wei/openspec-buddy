@@ -54,6 +54,22 @@ gh() {
     printf '%s\n' '{"number":123,"head":{"ref":"buddy-test-branch","sha":"head-1"},"body":"Origin issue: #42\n<!-- openspec-buddy-origin-issue:42 -->"}'
     return 0
   fi
+  if [[ "$1" == "api" && "$2" == "--paginate" && "$3" == "--slurp" && "$4" == */pulls/123/reviews* ]]; then
+    printf '%s\n' '[[{"user":{"login":"chatgpt-codex-connector"},"state":"COMMENTED","body":"No actionable findings.","submitted_at":"2026-01-01T00:02:00Z","commit_id":"head-1"}]]'
+    return 0
+  fi
+  if [[ "$1" == "api" && "$2" == "--paginate" && "$3" == "--slurp" && "$4" == */pulls/123/commits* ]]; then
+    printf '%s\n' '[[{"sha":"head-1","commit":{"author":{"date":"2026-01-01T00:00:00Z"},"committer":{"date":"2026-01-01T00:00:00Z"}}}]]'
+    return 0
+  fi
+  if [[ "$1" == "api" && "$2" == "--paginate" && "$3" == "--slurp" && "$4" == */pulls/123/comments* ]]; then
+    printf '%s\n' '[[]]'
+    return 0
+  fi
+  if [[ "$1" == "api" && "$2" == "--paginate" && "$3" == "--slurp" && "$4" == */issues/123/comments* ]]; then
+    printf '%s\n' '[[{"user":{"login":"YW"},"body":"@codex review 中文回复，即使没有重大问题也必须给出显式回复","created_at":"2026-01-01T00:01:00Z","html_url":"https://github.com/owner/repo/pull/123#issuecomment-1"}]]'
+    return 0
+  fi
   if [[ "$1" == "api" && "$2" == */issues/42 ]]; then
     printf '{"number":42,"state":"open","labels":[{"name":"status:claimed"}]}\n'
     return 0
@@ -104,8 +120,8 @@ if [[ "$graphql_calls" != "1" ]]; then
   exit 1
 fi
 
-if grep -E 'repos/.*/issues/123/comments|repos/.*/pulls/123/(reviews|comments|commits)' "$GH_LOG_FILE" >/dev/null; then
-  echo "verify-review-clear should reuse cached REST payloads" >&2
+if ! grep -E 'repos/.*/issues/123/comments|repos/.*/pulls/123/(reviews|comments|commits)' "$GH_LOG_FILE" >/dev/null; then
+  echo "verify-review-clear must refresh the raw REST bundle even when reuse is requested" >&2
   exit 1
 fi
 
@@ -139,6 +155,22 @@ gh() {
   printf '%s\n' "$*" >> "$GH_LOG_FILE"
   if [[ "$1" == "api" && "$2" == */pulls/123 ]]; then
     printf '%s\n' '{"number":123,"head":{"ref":"buddy-test-branch","sha":"head-1"},"body":"Origin issue: #42\n<!-- openspec-buddy-origin-issue:42 -->"}'
+    return 0
+  fi
+  if [[ "$1" == "api" && "$2" == "--paginate" && "$3" == "--slurp" && "$4" == */pulls/123/reviews* ]]; then
+    printf '%s\n' '[[{"user":{"login":"chatgpt-codex-connector"},"state":"COMMENTED","body":"No actionable findings.","submitted_at":"2026-01-01T00:02:00Z","commit_id":"head-1"}]]'
+    return 0
+  fi
+  if [[ "$1" == "api" && "$2" == "--paginate" && "$3" == "--slurp" && "$4" == */pulls/123/commits* ]]; then
+    printf '%s\n' '[[{"sha":"head-1","commit":{"author":{"date":"2026-01-01T00:00:00Z"},"committer":{"date":"2026-01-01T00:00:00Z"}}}]]'
+    return 0
+  fi
+  if [[ "$1" == "api" && "$2" == "--paginate" && "$3" == "--slurp" && "$4" == */pulls/123/comments* ]]; then
+    printf '%s\n' '[[]]'
+    return 0
+  fi
+  if [[ "$1" == "api" && "$2" == "--paginate" && "$3" == "--slurp" && "$4" == */issues/123/comments* ]]; then
+    printf '%s\n' '[[{"user":{"login":"YW"},"body":"@codex review 中文回复，即使没有重大问题也必须给出显式回复","created_at":"2026-01-01T00:01:00Z","html_url":"https://github.com/owner/repo/pull/123#issuecomment-1"}]]'
     return 0
   fi
   if [[ "$1" == "api" && "$2" == */issues/42 ]]; then

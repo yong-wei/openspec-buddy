@@ -104,6 +104,7 @@ fs.appendFileSync(${JSON.stringify(logFile)}, JSON.stringify({
   targetIssue: process.env.OPENSPEC_BUDDY_AUTO_TARGET_ISSUE || '',
   targetPr: process.env.OPENSPEC_BUDDY_AUTO_TARGET_PR || '',
   pollOnce: process.env.OPENSPEC_BUDDY_AUTO_LANE_POLL_ONCE || '',
+  reviewFix: process.env.OPENSPEC_BUDDY_REVIEW_FIX_CONTEXT || '',
   controllerChild: process.env.OPENSPEC_BUDDY_AUTO_CONTROLLER_CHILD || ''
 }) + '\\n');
 if (process.env.BUDDY_STUB_STATUS === 'BLOCKED') {
@@ -698,6 +699,7 @@ echo "unexpected gh invocation: $*" >&2
 exit 99
 `);
   makeExecutable(path.join(coreDir, 'verify-claim-worktree.sh'), `#!/usr/bin/env bash\necho "verify-claim $*" >> ${JSON.stringify(envInfo.logFile)}\n`);
+  makeExecutable(path.join(coreDir, 'read-live-claim-truth.sh'), `#!/usr/bin/env bash\nprintf '%s\\n' '{"status":"owned","source":"github-rest"}'\n`);
   makeExecutable(path.join(coreDir, 'verify-current-head-review-request.sh'), `#!/usr/bin/env bash\necho "verify-request $*" >> ${JSON.stringify(envInfo.logFile)}\n`);
   makeExecutable(path.join(coreDir, 'mark-review.sh'), `#!/usr/bin/env bash\necho "mark-review $*" >> ${JSON.stringify(envInfo.logFile)}\n`);
   makeExecutable(path.join(coreDir, 'verify-review-clear.sh'), `#!/usr/bin/env bash
@@ -805,6 +807,151 @@ else console.log(JSON.stringify({ achieved: false, next: 'merge-pr', reason: 'PR
 }
 
 {
+  const envInfo = makeEnv('production-reconcile-uses-fresh-review-truth');
+  const coreDir = path.join(envInfo.root, 'core');
+  fs.mkdirSync(coreDir, { recursive: true });
+  makeExecutable(path.join(coreDir, 'probe-review-state.sh'), `#!/bin/bash
+printf '%s\\n' '{"pr":"743","head":"head-1","signature":"sig-1","state":"waiting","requestState":"present-current-head"}'
+`);
+  makeExecutable(path.join(coreDir, 'check-review-clear-once.sh'), `#!/bin/bash
+if [[ "\${OPENSPEC_BUDDY_REVIEW_TRUTH_READ_ONLY:-0}" != "1" ]]; then exit 9; fi
+printf '%s\\n' 'Review clearance verified for PR #743.'
+printf '%s\\n' 'review_outcome: clear'
+exit 0
+`);
+
+  withControllerEnv(envInfo, () => {
+    const initialized = controllerModule.initializeControllerState({
+      mode: 'multi',
+      goal: true,
+      maxLanes: '2',
+      issue: '743',
+      pr: '743',
+    }, { cwd: envInfo.repoDir });
+    controllerModule.writeControllerState({
+      ...initialized,
+      reviewFix: { pending: true, pr: '743', head: 'head-1', evidence: 'response-gate-required' },
+      interrupt: { type: 'blocked', stage: 'request_missing', issue: '743', pr: '743', head: 'head-1', blockedCode: 'request_missing' },
+    }, { cwd: envInfo.repoDir });
+    laneStateModule.writeLaneState({
+      ...laneStateModule.emptyLaneState({ cwd: envInfo.repoDir, maxLanes: 2 }),
+      lanes: [{
+        id: 'issue-743',
+        issue: '743',
+        pr: '743',
+        head: 'head-1',
+        stage: 'waiting_review',
+      }],
+    }, { cwd: envInfo.repoDir });
+  });
+
+  const result = run(envInfo, { OPENSPEC_BUDDY_CORE_SCRIPT_DIR: coreDir });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(readLog(envInfo)[0].reviewFix, '');
+  const state = readController(envInfo);
+  assert.equal(state.reviewFix.pending, false);
+  assert.equal(state.interrupt, null);
+}
+
+{
+  const envInfo = makeEnv('production-reconcile-rejects-head-race');
+  const coreDir = path.join(envInfo.root, 'core');
+  const probeCountFile = path.join(envInfo.root, 'probe.count');
+  fs.mkdirSync(coreDir, { recursive: true });
+  makeExecutable(path.join(coreDir, 'probe-review-state.sh'), `#!/bin/bash
+count=0
+if [[ -f ${JSON.stringify(probeCountFile)} ]]; then count=$(<${JSON.stringify(probeCountFile)}); fi
+count=$((count + 1))
+printf '%s' "$count" > ${JSON.stringify(probeCountFile)}
+if [[ "$count" == "1" ]]; then
+  printf '%s\\n' '{"pr":"743","head":"head-1","signature":"sig-1","state":"waiting","requestState":"present-current-head"}'
+else
+  printf '%s\\n' '{"pr":"743","head":"head-2","signature":"sig-2","state":"head_changed","requestState":"present-current-head"}'
+fi
+`);
+  makeExecutable(path.join(coreDir, 'check-review-clear-once.sh'), `#!/bin/bash
+printf '%s\\n' 'Review clearance verified for PR #743.'
+printf '%s\\n' 'review_outcome: clear'
+exit 0
+`);
+  withControllerEnv(envInfo, () => {
+    const initialized = controllerModule.initializeControllerState({
+      mode: 'multi',
+      goal: true,
+      maxLanes: '2',
+      issue: '743',
+      pr: '743',
+    }, { cwd: envInfo.repoDir });
+    controllerModule.writeControllerState({
+      ...initialized,
+      reviewFix: { pending: true, pr: '743', head: 'head-1', evidence: 'response-gate-required' },
+      interrupt: { type: 'blocked', stage: 'request_missing', issue: '743', pr: '743', head: 'head-1', blockedCode: 'request_missing' },
+    }, { cwd: envInfo.repoDir });
+    laneStateModule.writeLaneState({
+      ...laneStateModule.emptyLaneState({ cwd: envInfo.repoDir, maxLanes: 2 }),
+      lanes: [{ id: 'issue-743', issue: '743', pr: '743', head: 'head-1', stage: 'waiting_review' }],
+    }, { cwd: envInfo.repoDir });
+  });
+
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_CORE_SCRIPT_DIR: coreDir,
+    BUDDY_STUB_STAGE: 'review-fix',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(readLog(envInfo)[0].reviewFix, '1');
+  assert.equal(readController(envInfo).reviewFix.pending, true);
+}
+
+{
+  const envInfo = makeEnv('production-reconcile-rejects-review-activity-race');
+  const coreDir = path.join(envInfo.root, 'core');
+  const probeCountFile = path.join(envInfo.root, 'probe.count');
+  fs.mkdirSync(coreDir, { recursive: true });
+  makeExecutable(path.join(coreDir, 'probe-review-state.sh'), `#!/bin/bash
+count=0
+if [[ -f ${JSON.stringify(probeCountFile)} ]]; then count=$(<${JSON.stringify(probeCountFile)}); fi
+count=$((count + 1))
+printf '%s' "$count" > ${JSON.stringify(probeCountFile)}
+if [[ "$count" == "1" ]]; then
+  printf '%s\\n' '{"pr":"743","head":"head-1","signature":"sig-1","state":"waiting","requestState":"present-current-head"}'
+else
+  printf '%s\\n' '{"pr":"743","head":"head-1","signature":"sig-2","state":"changed","requestState":"present-current-head"}'
+fi
+`);
+  makeExecutable(path.join(coreDir, 'check-review-clear-once.sh'), `#!/bin/bash
+printf '%s\\n' 'Review clearance verified for PR #743.'
+printf '%s\\n' 'review_outcome: clear'
+exit 0
+`);
+  withControllerEnv(envInfo, () => {
+    const initialized = controllerModule.initializeControllerState({
+      mode: 'multi',
+      goal: true,
+      maxLanes: '2',
+      issue: '743',
+      pr: '743',
+    }, { cwd: envInfo.repoDir });
+    controllerModule.writeControllerState({
+      ...initialized,
+      reviewFix: { pending: true, pr: '743', head: 'head-1', evidence: 'response-gate-required' },
+      interrupt: { type: 'blocked', stage: 'request_missing', issue: '743', pr: '743', head: 'head-1', blockedCode: 'request_missing' },
+    }, { cwd: envInfo.repoDir });
+    laneStateModule.writeLaneState({
+      ...laneStateModule.emptyLaneState({ cwd: envInfo.repoDir, maxLanes: 2 }),
+      lanes: [{ id: 'issue-743', issue: '743', pr: '743', head: 'head-1', stage: 'waiting_review' }],
+    }, { cwd: envInfo.repoDir });
+  });
+
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_CORE_SCRIPT_DIR: coreDir,
+    BUDDY_STUB_STAGE: 'review-fix',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(readLog(envInfo)[0].reviewFix, '1');
+  assert.equal(readController(envInfo).reviewFix.pending, true);
+}
+
+{
   const envInfo = makeEnv('reconciler-clears-stale-review-wait');
   const state = {
     version: 1,
@@ -847,9 +994,65 @@ else console.log(JSON.stringify({ achieved: false, next: 'merge-pr', reason: 'PR
       return next;
     },
   });
-  assert.equal(result.changed, true);
-  assert.equal(written.reviewFix.pending, false);
-  assert.equal(written.interrupt, null);
+  assert.equal(result.changed, false);
+  assert.equal(written, null);
+
+  const freshResult = reconcilerModule.reconcileControllerState(state, {
+    cwd: envInfo.repoDir,
+    laneState,
+    freshTruth: {
+      pr: '743',
+      head: 'head-1',
+      threadState: 'clear',
+      actionableState: 'clear',
+      threadsHead: 'head-1',
+      threadsFreshAt: '2026-06-30T00:00:00.000Z',
+      runId: 'controller-run-1',
+      source: 'live-review-probe',
+    },
+    now: '2026-06-30T00:00:01.000Z',
+    runId: 'controller-run-1',
+    dirty: false,
+    writeState: (next) => next,
+  });
+  assert.equal(freshResult.changed, true);
+  assert.equal(freshResult.state.reviewFix.pending, false);
+  assert.equal(freshResult.state.interrupt, null);
+
+  const freshTruth = {
+    pr: '743',
+    head: 'head-1',
+    threadState: 'clear',
+    actionableState: 'clear',
+    threadsHead: 'head-1',
+    threadsFreshAt: '2026-06-30T00:00:00.000Z',
+    runId: 'controller-run-1',
+    source: 'live-review-probe',
+  };
+  assert.equal(reconcilerModule.reconcileControllerState(state, {
+    laneState,
+    freshTruth: { ...freshTruth, head: 'head-2', threadsHead: 'head-2' },
+    now: '2026-06-30T00:00:01.000Z',
+    runId: 'controller-run-1',
+    dirty: false,
+    writeState: (next) => next,
+  }).changed, false);
+  assert.equal(reconcilerModule.reconcileControllerState(state, {
+    laneState,
+    freshTruth: { ...freshTruth, threadState: 'actionable', actionableState: 'actionable' },
+    now: '2026-06-30T00:00:01.000Z',
+    runId: 'controller-run-1',
+    dirty: false,
+    writeState: (next) => next,
+  }).changed, false);
+  assert.equal(reconcilerModule.reconcileControllerState(state, {
+    laneState,
+    freshTruth,
+    now: '2026-06-30T00:00:01.000Z',
+    runId: 'controller-run-1',
+    dirty: true,
+    writeState: (next) => next,
+  }).changed, false);
 }
 
 {
@@ -916,7 +1119,7 @@ else console.log(JSON.stringify({ achieved: false, next: 'merge-pr', reason: 'PR
     laneState: { lanes: [{ ...baseLane, probeState: 'changed', threadState: 'clear', actionableState: 'clear', threadsHead: 'head-1', threadsFreshAt: '2026-06-30T00:00:00.000Z' }] },
     dirty: false,
     writeState: (next) => next,
-  }).changed, true);
+  }).changed, false);
 }
 
 {
