@@ -198,6 +198,8 @@ fs.writeFileSync(process.argv[1], JSON.stringify([
 ' "$tmp_dir/comments-clear.json"
 export GH_PR_FILE="$tmp_dir/pr-comment-clear.json"
 export GH_COMMENTS_FILE="$tmp_dir/comments-clear.json"
+printf '[]\n' > "$tmp_dir/reviews-empty-clear.json"
+export GH_REVIEWS_FILE="$tmp_dir/reviews-empty-clear.json"
 clear_output="$(bash "$helper" 123)"
 node -e '
 const result = JSON.parse(process.argv[1]);

@@ -121,7 +121,7 @@ fi
 cat > "$tmp_dir/verify-waitable.sh" <<'VERIFY'
 #!/bin/bash
 set -euo pipefail
-echo "No review found for current head"
+echo "No review response from chatgpt-codex-connector was found after the latest current-head review request."
 exit 1
 VERIFY
 chmod +x "$tmp_dir/verify-waitable.sh"
@@ -132,6 +132,28 @@ status="$?"
 set -e
 if [[ "$status" != "1" ]]; then
   echo "check-review-clear-once.sh should map waitable verifier failures to exit 1 (got $status)" >&2
+  exit 1
+fi
+
+cat > "$tmp_dir/verify-unavailable.sh" <<'VERIFY'
+#!/bin/bash
+set -euo pipefail
+echo "review_outcome: unavailable"
+echo "Review response is unavailable because Codex review quota is exhausted."
+exit 1
+VERIFY
+chmod +x "$tmp_dir/verify-unavailable.sh"
+export OPENSPEC_BUDDY_VERIFY_REVIEW_CLEAR_HELPER="$tmp_dir/verify-unavailable.sh"
+set +e
+bash "$helper" 123 >/tmp/check-review-clear-once-unavailable.out 2>/tmp/check-review-clear-once-unavailable.err
+status="$?"
+set -e
+if [[ "$status" != "4" ]]; then
+  echo "check-review-clear-once.sh should map unavailable verifier failures to exit 4 (got $status)" >&2
+  exit 1
+fi
+if ! grep -F 'review_outcome: unavailable' /tmp/check-review-clear-once-unavailable.out /tmp/check-review-clear-once-unavailable.err >/dev/null; then
+  echo "check-review-clear-once.sh should preserve unavailable review evidence" >&2
   exit 1
 fi
 

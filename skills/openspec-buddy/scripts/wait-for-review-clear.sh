@@ -205,7 +205,7 @@ run_full_check_after_change() {
   fi
   if [[ "$gate_status" -eq 0 ]]; then
     cat "$output_file"
-  elif [[ "$gate_status" -eq 2 ]]; then
+  elif [[ "$gate_status" -eq 2 || "$gate_status" -eq 4 ]]; then
     cat "$output_file" >&2
   fi
   return "$gate_status"
@@ -267,6 +267,9 @@ while [[ "$round" -le "$max_rounds" ]]; do
       if [[ "$gate_status" -eq 2 ]]; then
         exit 1
       fi
+      if [[ "$gate_status" -eq 4 ]]; then
+        exit 4
+      fi
       last_signature="$signature"
     fi
 
@@ -297,6 +300,9 @@ while [[ "$round" -le "$max_rounds" ]]; do
     if [[ "$gate_status" -eq 2 ]]; then
       exit 1
     fi
+    if [[ "$gate_status" -eq 4 ]]; then
+      exit 4
+    fi
     last_signature="$signature"
   fi
 
@@ -316,6 +322,9 @@ while [[ "$round" -le "$max_rounds" ]]; do
   fi
   if [[ "$gate_status" -eq 2 ]]; then
     exit 1
+  fi
+  if [[ "$gate_status" -eq 4 ]]; then
+    exit 4
   fi
 
   if [[ "$round" -lt "$max_rounds" ]]; then

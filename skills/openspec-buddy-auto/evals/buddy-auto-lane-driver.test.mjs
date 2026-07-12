@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { signReceipt } from '../scripts/receipt-truth.mjs';
 
 const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../../..');
 const helper = path.join(repoRoot, 'skills/openspec-buddy-auto/scripts/buddy-auto-lane-driver.mjs');
@@ -20,6 +21,7 @@ function makeEnv(name) {
   const coreDir = path.join(root, 'core');
   const repoDir = path.join(root, 'repo');
   const stateDir = path.join(root, 'state');
+  const driverStateDir = path.join(root, 'driver-state');
   const branchFile = path.join(root, 'current-branch.txt');
   fs.mkdirSync(binDir, { recursive: true });
   fs.mkdirSync(coreDir, { recursive: true });
@@ -263,7 +265,7 @@ if ((issue === '676' || pr === '708') && process.env.FIND_PR_FOR_676 === '1') {
   console.log('stage: implement-or-open-pr');
 }
 `, { mode: 0o755 });
-  return { root, binDir, coreDir, repoDir, stateDir, logFile, singleDriver, branchFile };
+  return { root, binDir, coreDir, repoDir, stateDir, driverStateDir, logFile, singleDriver, branchFile };
 }
 
 function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
@@ -280,6 +282,7 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
       PATH: `${envInfo.binDir}:${process.env.PATH}`,
       OPENSPEC_BUDDY_CORE_SCRIPT_DIR: envInfo.coreDir,
       OPENSPEC_BUDDY_AUTO_LANE_STATE_DIR: envInfo.stateDir,
+      OPENSPEC_BUDDY_AUTO_STATE_DIR: envInfo.driverStateDir,
       OPENSPEC_BUDDY_AUTO_SINGLE_DRIVER: envInfo.singleDriver,
       OPENSPEC_BUDDY_AUTO_CONTROLLER_CHILD: '1',
       OPENSPEC_BUDDY_COMMAND_TIMEOUT_MS: '10000',
@@ -289,13 +292,56 @@ function run(envInfo, extraEnv = {}, args = ['--poll-once']) {
   });
 }
 
+function seedControllerMergeReceipt(envInfo, {
+  issue = '675',
+  pr = '707',
+  head = 'merged-head',
+  repository = 'opt-de/major',
+  requestId = 'request-1',
+  responseId = 'response-1',
+} = {}) {
+  const state = {
+    version: 1,
+    key: `pr-${pr}`,
+    issue: String(issue),
+    pr: String(pr),
+    change: 'change-675',
+    head,
+    repository,
+    stages: {},
+  };
+  const common = {
+    at: '2026-06-28T00:00:00.000Z',
+    head,
+    repository,
+    issue: String(issue),
+    pr: String(pr),
+    command: 'fake-controller-command',
+    source: 'buddy-auto-driver/run-next',
+    requestId,
+    responseId,
+    responseUrl: 'https://example.test/review/response-1',
+    responseOutcome: 'clear',
+  };
+  state.stages.review_clear = { ...common };
+  state.stages.merge_authorized = { ...common, mergeAttemptId: 'attempt-1' };
+  state.stages.merged = { ...common, mergeAttemptId: 'attempt-1', mergeCommit: 'merge-1', mergedHead: head };
+  fs.mkdirSync(envInfo.driverStateDir, { recursive: true });
+  for (const stage of ['review_clear', 'merge_authorized', 'merged']) {
+    state.stages[stage].signature = signReceipt(state, stage, state.stages[stage], { stateDir: envInfo.driverStateDir });
+  }
+  fs.writeFileSync(path.join(envInfo.driverStateDir, `pr-${pr}.json`), `${JSON.stringify(state, null, 2)}\n`);
+}
+
 function normalizedLane(overrides) {
   return {
     id: '', issue: '', change: '', branch: '', pr: '', head: '', stage: '', claimId: '',
     reviewRequestedAt: '', reviewRetryCount: 0, lastProbeAt: '', lastSignature: '',
     lastRequestState: '', lastResult: '', probeState: '', requestState: '', actionableState: '',
     threadState: '', restFreshAt: '', threadsFreshAt: '', threadsHead: '',
-    reviewStatusSyncedAt: '', blockedReason: '', retryableStage: '', retryableHead: '',
+    reviewStatusSyncedAt: '', responseOutcome: 'unknown', reviewRequestId: '', reviewResponseId: '',
+    reviewResponseAt: '', reviewResponseUrl: '', unauthorizedMergeRecoveredAt: '', unauthorizedMergeRecoveryReason: '',
+    blockedReason: '', retryableStage: '', retryableHead: '',
     retryableSince: '', retryAttempts: 0, updatedAt: '', ...overrides,
   };
 }
@@ -807,14 +853,43 @@ function normalizedLane(overrides) {
     PR_707_MERGED_AT: '"2026-06-28T00:00:00Z"',
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /^HANDOFF/m);
-  assert.match(result.stdout, /^stage: merge-ready$/m);
+  assert.match(result.stdout, /^BLOCKED/m);
+  assert.match(result.stdout, /^stage: unauthorized-merge$/m);
   const log = fs.existsSync(envInfo.logFile) ? fs.readFileSync(envInfo.logFile, 'utf8') : '';
   assert.doesNotMatch(log, /probe 707/);
   const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
-  assert.equal(state.lanes[0].stage, 'merge_ready');
+  assert.equal(state.lanes[0].stage, 'unauthorized_merge');
   assert.equal(state.lanes[0].head, 'merged-head');
-  assert.equal(state.lanes[0].lastResult, 'pr-truth-merged');
+  assert.equal(state.lanes[0].lastResult, 'unauthorized-merge');
+  assert.doesNotMatch(log, /mark-achieved-post-merge/);
+  const rerun = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '1',
+    CURRENT_BRANCH: 'dev1',
+    PR_707_STATE: 'MERGED',
+    PR_707_HEAD: 'merged-head',
+    PR_707_MERGED_AT: '"2026-06-28T00:00:00Z"',
+  });
+  assert.equal(rerun.status, 0, rerun.stderr);
+  assert.match(rerun.stdout, /^BLOCKED/m);
+  assert.match(rerun.stdout, /^stage: unauthorized-merge$/m);
+  const recovered = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '1',
+    CURRENT_BRANCH: 'dev1',
+    PR_707_STATE: 'MERGED',
+    PR_707_HEAD: 'merged-head',
+    PR_707_MERGED_AT: '"2026-06-28T00:00:00Z"',
+    OPENSPEC_BUDDY_AUTO_UNAUTHORIZED_MERGE_RECOVERY: '1',
+    OPENSPEC_BUDDY_AUTO_RECOVERY_REASON: 'user-approved audit recovery for PR 707',
+  });
+  assert.equal(recovered.status, 0, recovered.stderr);
+  assert.match(recovered.stdout, /^DONE/m);
+  assert.match(recovered.stdout, /^stage: lane-done$/m);
+  const recoveredState = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  assert.equal(recoveredState.lanes[0].stage, 'done');
+  assert.match(recoveredState.lanes[0].unauthorizedMergeRecoveredAt, /^\d{4}-\d{2}-\d{2}T/);
+  assert.equal(recoveredState.history.at(-1).recoveryReason, 'user-approved audit recovery for PR 707');
 }
 
 {
@@ -837,14 +912,15 @@ function normalizedLane(overrides) {
     PR_707_MERGED_AT: '"2026-06-28T00:00:00Z"',
   }, ['--reconcile']);
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /^HANDOFF/m);
-  assert.match(result.stdout, /^stage: merge-ready$/m);
+  assert.match(result.stdout, /^BLOCKED/m);
+  assert.match(result.stdout, /^stage: unauthorized-merge$/m);
   const log = fs.existsSync(envInfo.logFile) ? fs.readFileSync(envInfo.logFile, 'utf8') : '';
   assert.doesNotMatch(log, /probe 707/);
   const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
-  assert.equal(state.lanes[0].stage, 'merge_ready');
+  assert.equal(state.lanes[0].stage, 'unauthorized_merge');
   assert.equal(state.lanes[0].head, 'merged-head');
-  assert.equal(state.lanes[0].lastResult, 'pr-truth-merged');
+  assert.equal(state.lanes[0].lastResult, 'unauthorized-merge');
+  assert.doesNotMatch(log, /mark-achieved-post-merge/);
 }
 
 {
@@ -858,6 +934,7 @@ function normalizedLane(overrides) {
       { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'merged-head', stage: 'merge_ready', reviewRetryCount: 1, lastRequestState: 'present-current-head' },
     ],
   }));
+  seedControllerMergeReceipt(envInfo);
   const result = run(envInfo, {
     OPENSPEC_BUDDY_AUTO_GOAL: '1',
     OPENSPEC_BUDDY_AUTO_LANES: '1',
@@ -2182,6 +2259,7 @@ console.log('required_action: merge PR through controller-owned gate');
       { id: 'issue-675', issue: '675', change: 'change-675', branch: 'change-675', pr: '707', head: 'head-1', stage: 'merge_ready', reviewRetryCount: 0 },
     ],
   }));
+  seedControllerMergeReceipt(envInfo, { head: 'head-1' });
   const fakeDriver = path.join(envInfo.root, 'fake-achieved-driver.mjs');
   fs.writeFileSync(fakeDriver, `#!/usr/bin/env node
 console.log('DONE');
@@ -2575,6 +2653,101 @@ console.log('stage: achieved');
   assert.match(result.stdout, /retry window expired/);
   const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
   assert.equal(state.lanes[0].stage, 'blocked');
+}
+
+{
+  const envInfo = makeEnv('review-unavailable-no-retry');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 1,
+    lanes: [
+      normalizedLane({
+        id: 'issue-675',
+        issue: '675',
+        change: 'change-675',
+        branch: 'change-675',
+        pr: '707',
+        head: 'head-1',
+        stage: 'waiting_review',
+        reviewRetryCount: 0,
+        lastSignature: 'sig',
+        lastRequestState: 'present-current-head',
+      }),
+    ],
+  }));
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '1',
+    CURRENT_BRANCH: 'change-675',
+    PROBE_STATE_707: 'review_returned',
+    CHECK_REVIEW_STATUS: '4',
+    CHECK_REVIEW_STDERR: 'review_outcome: unavailable\nreview_request_id: request-2\nreview_response_id: quota-2\nreview_response_at: 2026-06-30T00:04:00Z\nreview_response_url: https://example.test/quota-2\nReview response is unavailable',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /BLOCKED/);
+  assert.match(result.stdout, /review-unavailable/);
+  let state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  assert.equal(state.lanes[0].stage, 'review_unavailable');
+  assert.equal(state.lanes[0].lastResult, 'review-unavailable');
+  assert.equal(state.lanes[0].responseOutcome, 'unavailable');
+  assert.equal(state.lanes[0].reviewRequestId, 'request-2');
+  assert.equal(state.lanes[0].reviewResponseId, 'quota-2');
+  assert.equal(state.lanes[0].reviewResponseUrl, 'https://example.test/quota-2');
+  assert.equal((fs.readFileSync(envInfo.logFile, 'utf8').match(/^request 707/mg) || []).length, 0);
+
+  const second = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '1',
+    CURRENT_BRANCH: 'change-675',
+    PROBE_STATE_707: 'review_returned',
+    CHECK_REVIEW_STATUS: '4',
+    CHECK_REVIEW_STDERR: 'review_outcome: unavailable\nReview response is unavailable',
+  });
+  assert.equal(second.status, 0, second.stderr);
+  state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  assert.equal(state.lanes[0].stage, 'review_unavailable');
+  assert.equal((fs.readFileSync(envInfo.logFile, 'utf8').match(/^request 707/mg) || []).length, 0);
+}
+
+{
+  const envInfo = makeEnv('review-unavailable-restores-request-state');
+  fs.mkdirSync(envInfo.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(envInfo.stateDir, 'dev1.json'), JSON.stringify({
+    version: 1,
+    worktree: { path: envInfo.repoDir, alias: 'dev1', pathHash: 'hash', boundBranch: 'dev1', boundBase: 'origin/integration' },
+    maxLanes: 1,
+    lanes: [
+      normalizedLane({
+        id: 'issue-675',
+        issue: '675',
+        change: 'change-675',
+        branch: 'change-675',
+        pr: '707',
+        head: 'head-1',
+        stage: 'review_unavailable',
+        responseOutcome: 'unavailable',
+        lastSignature: 'old-sig',
+        lastRequestState: 'missing-current-head',
+        requestState: 'missing-current-head',
+      }),
+    ],
+  }));
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_GOAL: '1',
+    OPENSPEC_BUDDY_AUTO_LANES: '1',
+    CURRENT_BRANCH: 'change-675',
+    PROBE_SIGNATURE_707: 'new-sig',
+    PROBE_REQUEST_STATE_707: 'present-current-head',
+    PROBE_STATE_707: 'waiting',
+  }, ['--reconcile']);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^DONE/m);
+  const state = JSON.parse(fs.readFileSync(path.join(envInfo.stateDir, 'dev1.json'), 'utf8'));
+  assert.equal(state.lanes[0].stage, 'waiting_review');
+  assert.equal(state.lanes[0].lastRequestState, 'present-current-head');
+  assert.equal(state.lanes[0].requestState, 'present-current-head');
 }
 
 console.log('buddy-auto-lane-driver tests passed');

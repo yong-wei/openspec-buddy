@@ -4,11 +4,29 @@ import {
   classifyProbe,
   laneWaitingWithCurrentHead,
   mergeReviewTruth,
+  normalizeReviewTruth,
   threadCacheFreshForHead,
 } from '../scripts/review-truth.mjs';
 import { decideLaneAction } from '../scripts/auto-decision.mjs';
 
 const clock = () => new Date('2026-06-30T00:00:00.000Z');
+
+assert.equal(normalizeReviewTruth({ responseOutcome: 'unavailable' }).responseOutcome, 'unavailable');
+assert.equal(normalizeReviewTruth({ responseOutcome: 'bogus' }).responseOutcome, 'unknown');
+
+const oldTruth = {
+  head: 'old-head',
+  responseOutcome: 'clear',
+  reviewRequestId: 'request-1',
+  reviewResponseId: 'response-1',
+  reviewResponseAt: '2026-06-30T00:00:00.000Z',
+  reviewResponseUrl: 'https://example.test/response-1',
+};
+const newHeadTruth = mergeReviewTruth(oldTruth, { head: 'new-head' });
+assert.equal(newHeadTruth.responseOutcome, 'unknown');
+assert.equal(newHeadTruth.reviewRequestId, '');
+assert.equal(newHeadTruth.reviewResponseId, '');
+assert.equal(mergeReviewTruth(oldTruth, { reviewRequestId: 'request-2' }).responseOutcome, 'unknown');
 
 {
   const truth = classifyProbe({

@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { validSignedReceipt } from './receipt-truth.mjs';
 import {
   acquireLaneLock,
   gitRoot,
@@ -231,6 +232,13 @@ function upsertLane(state, lanePatch) {
     blockedReason: '',
     retryableSince: '',
     retryAttempts: 0,
+    responseOutcome: 'unknown',
+    reviewRequestId: '',
+    reviewResponseId: '',
+    reviewResponseAt: '',
+    reviewResponseUrl: '',
+    unauthorizedMergeRecoveredAt: '',
+    unauthorizedMergeRecoveryReason: '',
     updatedAt,
     ...lanePatch,
     id,
@@ -421,6 +429,154 @@ function cachedPrTruth(pr) {
   return truth;
 }
 
+function driverReceiptStateDir() {
+  return process.env.OPENSPEC_BUDDY_AUTO_STATE_DIR
+    || path.join(gitRoot(), 'openspec/.buddy-cache/auto-state');
+}
+
+function readDriverReceiptState(pr) {
+  if (!pr) return null;
+  const file = path.join(driverReceiptStateDir(), `pr-${pr}.json`);
+  if (!fs.existsSync(file)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function matchingMergeAuthorization(lane, prData = {}) {
+  if (lane.unauthorizedMergeRecoveredAt && lane.unauthorizedMergeRecoveryReason) {
+    return { ok: true, recovered: true };
+  }
+  const driverState = readDriverReceiptState(lane.pr);
+  const repository = String(process.env.OPENSPEC_BUDDY_REPO_NWO || repoNwoFromOrigin() || '');
+  const head = String(prData.head?.sha || prData.headRefOid || lane.head || '');
+  const requestId = String(lane.reviewRequestId || '');
+  const responseId = String(lane.reviewResponseId || '');
+  if (!driverState || !repository || !head) {
+    return { ok: false, reason: 'PR is merged but no controller merge authorization receipt is available.' };
+  }
+  const auth = driverState.stages?.merge_authorized || {};
+  const baseOptions = {
+    stateDir: driverReceiptStateDir(),
+    repository,
+    issue: String(lane.issue || ''),
+    pr: String(lane.pr || ''),
+    head,
+    require: ['repository', 'issue', 'pr', 'head', 'requestId', 'responseId', 'mergeAttemptId'],
+  };
+  if (!validSignedReceipt(driverState, 'merge_authorized', baseOptions)) {
+    return { ok: false, reason: 'PR is merged but its controller merge authorization receipt is missing or invalid.' };
+  }
+  if (requestId && auth.requestId !== requestId) {
+    return { ok: false, reason: 'PR is merged but the authorization receipt names a different review request.' };
+  }
+  if (responseId && auth.responseId !== responseId) {
+    return { ok: false, reason: 'PR is merged but the authorization receipt names a different review response.' };
+  }
+  const clear = driverState.stages?.review_clear || {};
+  if (
+    !validSignedReceipt(driverState, 'review_clear', {
+      ...baseOptions,
+      require: ['repository', 'issue', 'pr', 'head', 'requestId', 'responseId'],
+    })
+    || clear.responseOutcome !== 'clear'
+    || clear.requestId !== auth.requestId
+    || clear.responseId !== auth.responseId
+  ) {
+    return { ok: false, reason: 'PR is merged but the authorization receipt is not backed by the same clear review response.' };
+  }
+  return { ok: true, state: driverState, authorization: auth };
+}
+
+function blockUnauthorizedMergedLane(state, lane, prData, reason = '') {
+  refreshLanePrFields(lane, prData);
+  lane.stage = 'unauthorized_merge';
+  lane.lastResult = 'unauthorized-merge';
+  lane.blockedReason = reason || 'PR merged without a matching controller merge authorization receipt; explicit recovery is required.';
+  clearRetryableState(lane);
+  lane.updatedAt = new Date().toISOString();
+  writeLaneState(state);
+  emitBlocked([
+    ['stage', 'unauthorized-merge'],
+    ['lane', lane.id],
+    ['issue', lane.issue],
+    ['pr', lane.pr],
+    ['head', lane.head],
+    ['reason', lane.blockedReason],
+    ['required_action', 'Obtain explicit user-approved recovery; do not run normal achievement synchronization.'],
+  ]);
+  return true;
+}
+
+function recoverUnauthorizedMergeLanes(state) {
+  if (!truthy(process.env.OPENSPEC_BUDDY_AUTO_UNAUTHORIZED_MERGE_RECOVERY)) return false;
+  if (!controllerChildMode()) {
+    emitBlocked([
+      ['stage', 'unauthorized-merge-recovery'],
+      ['reason', 'Unauthorized merge recovery is controller-owned; rerun through buddy-auto.mjs.'],
+    ]);
+    return true;
+  }
+  const reason = String(process.env.OPENSPEC_BUDDY_AUTO_RECOVERY_REASON || '').trim();
+  if (!reason) {
+    emitBlocked([
+      ['stage', 'unauthorized-merge-recovery'],
+      ['reason', 'Explicit unauthorized merge recovery requires a non-empty user authorization reason.'],
+    ]);
+    return true;
+  }
+  const lanes = state.lanes.filter((lane) => lane.stage === 'unauthorized_merge' && lane.pr);
+  if (lanes.length === 0) {
+    emitDone([
+      ['stage', 'unauthorized-merge-recovery'],
+      ['reason', 'No unauthorized merge lane requires recovery.'],
+    ]);
+    return true;
+  }
+  const lane = lanes[0];
+  const truth = forceRefreshPrTruth(lane.pr);
+  if (truth.status !== 0 || !(String(truth.data?.state || '').toUpperCase() === 'MERGED' || truth.data?.mergedAt)) {
+    markLaneFailure(state, lane, truth.reason || 'Explicit recovery requires merged PR truth.', {
+      retryable: false,
+      source: 'unauthorized-merge-recovery',
+    });
+    emitBlocked([
+      ['stage', 'unauthorized-merge-recovery'],
+      ['lane', lane.id],
+      ['issue', lane.issue],
+      ['pr', lane.pr],
+      ['reason', lane.blockedReason],
+    ]);
+    return true;
+  }
+  refreshLanePrFields(lane, truth.data);
+  const recoveredAt = new Date().toISOString();
+  state.history = [
+    ...(state.history || []),
+    {
+      id: lane.id,
+      issue: lane.issue,
+      pr: lane.pr,
+      branch: lane.branch,
+      stage: 'unauthorized_merge',
+      lastResult: 'unauthorized-merge',
+      recoveredAt,
+      recoveryReason: reason,
+    },
+  ];
+  lane.unauthorizedMergeRecoveredAt = recoveredAt;
+  lane.unauthorizedMergeRecoveryReason = reason;
+  lane.stage = 'merge_ready';
+  lane.lastResult = 'unauthorized-merge-recovery-authorized';
+  lane.blockedReason = '';
+  clearRetryableState(lane);
+  lane.updatedAt = recoveredAt;
+  writeLaneState(state);
+  return completeMergedLaneAchievement(state, lane, truth.data);
+}
+
 function invalidatePrTruth(pr) {
   if (pr) prTruthCache.delete(String(pr));
 }
@@ -514,6 +670,40 @@ function checkLaneReview(lane) {
   return run(path.join(coreScriptDir, 'check-review-clear-once.sh'), [String(lane.pr)], { allowFailure: true });
 }
 
+function reviewEvidenceValue(output, key) {
+  const match = String(output || '').match(new RegExp(`^${key}:\\s*(.+)$`, 'im'));
+  return match ? match[1].trim() : '';
+}
+
+function enterReviewUnavailable(state, lane, output = '') {
+  lane.stage = 'review_unavailable';
+  lane.responseOutcome = 'unavailable';
+  lane.reviewRequestId = reviewEvidenceValue(output, 'review_request_id') || lane.reviewRequestId || '';
+  lane.reviewResponseId = reviewEvidenceValue(output, 'review_response_id') || lane.reviewResponseId || '';
+  lane.reviewResponseAt = reviewEvidenceValue(output, 'review_response_at') || lane.reviewResponseAt || '';
+  lane.reviewResponseUrl = reviewEvidenceValue(output, 'review_response_url') || lane.reviewResponseUrl || '';
+  lane.reviewRetryCount = 0;
+  lane.reviewRequestedAt = '';
+  lane.lastResult = 'review-unavailable';
+  lane.blockedReason = 'Latest Codex review response is unavailable; wait for quota/service recovery, then explicitly request a new current-head review.';
+  clearRetryableState(lane);
+  lane.updatedAt = new Date().toISOString();
+  writeLaneState(state);
+  emitBlocked([
+    ['stage', 'review-unavailable'],
+    ['lane', lane.id],
+    ['issue', lane.issue],
+    ['pr', lane.pr],
+    ['reason', lane.blockedReason],
+    ['response_outcome', lane.responseOutcome],
+    ['review_request_id', lane.reviewRequestId],
+    ['review_response_id', lane.reviewResponseId],
+    ['review_response_url', lane.reviewResponseUrl],
+    ['required_action', 'After quota/service recovery, authorize a new current-head review request and rerun the controller.'],
+  ], output);
+  return true;
+}
+
 function verifyAchievedTruth(lane) {
   return run(path.join(coreScriptDir, 'verify-achieved-truth.mjs'), [String(lane.issue), String(lane.pr)], { allowFailure: true });
 }
@@ -522,7 +712,26 @@ function markAchievedPostMerge(lane, archivePath) {
   return run(path.join(coreScriptDir, 'mark-achieved-post-merge.sh'), [String(lane.issue), archivePath, String(lane.pr)], { allowFailure: true });
 }
 
-function completeMergedLaneAchievement(state, lane) {
+function completeMergedLaneAchievement(state, lane, prData = null) {
+  const mergedTruth = prData || forceRefreshPrTruth(lane.pr);
+  if (mergedTruth.status !== undefined && mergedTruth.status !== 0) {
+    const reason = mergedTruth.reason || 'Could not refresh merged PR truth before achievement.';
+    markLaneFailure(state, lane, reason, {
+      retryable: isTransientFailure(reason),
+      source: 'merged-pr-truth',
+    });
+    emitBlocked([
+      ['stage', 'merged-pr-truth'],
+      ['lane', lane.id],
+      ['issue', lane.issue],
+      ['pr', lane.pr],
+      ['reason', lane.blockedReason],
+    ]);
+    return true;
+  }
+  const truthData = mergedTruth.data || mergedTruth;
+  const authorization = matchingMergeAuthorization(lane, truthData);
+  if (!authorization.ok) return blockUnauthorizedMergedLane(state, lane, truthData, authorization.reason);
   ensureBoundBranch();
   const verify = verifyAchievedTruth(lane);
   if (verify.status !== 0) {
@@ -710,6 +919,10 @@ function reconcileLaneFromTruth(state, lane) {
       return { handled: true, emitted: false };
     }
     if (truth.data?.mergedAt) {
+      const authorization = matchingMergeAuthorization(lane, truth.data);
+      if (!authorization.ok) {
+        return { handled: true, emitted: blockUnauthorizedMergedLane(state, lane, truth.data, authorization.reason) };
+      }
       lane.stage = 'merge_ready';
       lane.blockedReason = '';
       lane.lastResult = 'reconciled-merged-pr';
@@ -753,8 +966,15 @@ function reconcileRecoverableLanes(state) {
     const activeLanes = refreshed.lanes.filter((lane) => lane.stage !== 'done' && !laneBlocksGoalCompletion(lane));
     if (blockedLanes.length > 0 && activeLanes.length === 0) {
       const lane = blockedLanes[0] || {};
+      const blockedStage = lane.stage === 'retryable_blocked'
+        ? 'retryable-blocked'
+        : lane.stage === 'review_unavailable'
+          ? 'review-unavailable'
+          : lane.stage === 'unauthorized_merge'
+            ? 'unauthorized-merge'
+            : 'blocked-lanes';
       emitBlocked([
-        ['stage', lane.stage === 'retryable_blocked' ? 'retryable-blocked' : 'blocked-lanes'],
+        ['stage', blockedStage],
         ['lane', lane.id],
         ['issue', lane.issue],
         ['pr', lane.pr],
@@ -763,6 +983,42 @@ function reconcileRecoverableLanes(state) {
       ]);
       return true;
     }
+  }
+  return false;
+}
+
+function reconcileReviewUnavailableLanes(state) {
+  for (const lane of state.lanes.filter((candidate) => candidate.stage === 'review_unavailable' && candidate.pr)) {
+    const probe = probeLane(lane);
+    if (probe.status !== 0) continue;
+    const parsed = parseJsonResult(probe.stdout, 'probe-review-state.sh returned invalid JSON');
+    if (!parsed.ok) continue;
+    const nextHead = String(parsed.data?.head || lane.head || '');
+    const nextSignature = String(parsed.data?.signature || lane.lastSignature || '');
+    const changed = Boolean(
+      (nextHead && nextHead !== lane.head)
+      || (nextSignature && nextSignature !== lane.lastSignature),
+    );
+    if (!changed) continue;
+    lane.stage = 'waiting_review';
+    lane.head = nextHead;
+    lane.lastSignature = nextSignature;
+    const nextRequestState = String(parsed.data?.requestState || 'missing-current-head');
+    lane.lastRequestState = nextRequestState;
+    lane.requestState = nextRequestState;
+    lane.responseOutcome = 'unknown';
+    lane.reviewRequestId = '';
+    lane.reviewResponseId = '';
+    lane.reviewResponseAt = '';
+    lane.reviewResponseUrl = '';
+    lane.reviewRequestedAt = '';
+    lane.reviewRetryCount = 0;
+    lane.lastResult = 'review-unavailable-state-changed';
+    lane.blockedReason = '';
+    clearRetryableState(lane);
+    lane.updatedAt = new Date().toISOString();
+    writeLaneState(state);
+    return true;
   }
   return false;
 }
@@ -787,8 +1043,15 @@ function emitBlockedLaneSummaryIfTerminal(state) {
   const activeLanes = state.lanes.filter((lane) => lane.stage !== 'done' && !laneBlocksGoalCompletion(lane));
   if (blockedLanes.length === 0 || activeLanes.length > 0) return false;
   const lane = blockedLanes[0] || {};
+  const blockedStage = lane.stage === 'retryable_blocked'
+    ? 'retryable-blocked'
+    : lane.stage === 'review_unavailable'
+      ? 'review-unavailable'
+      : lane.stage === 'unauthorized_merge'
+        ? 'unauthorized-merge'
+        : 'blocked-lanes';
   emitBlocked([
-    ['stage', lane.stage === 'retryable_blocked' ? 'retryable-blocked' : 'blocked-lanes'],
+    ['stage', blockedStage],
     ['lane', lane.id],
     ['issue', lane.issue],
     ['pr', lane.pr],
@@ -1352,7 +1615,7 @@ function advanceResumedLane(state, lane) {
     }
     const prState = String(truth.data?.state || '').toUpperCase();
     if (prState === 'MERGED' || truth.data?.mergedAt) {
-      return completeMergedLaneAchievement(state, lane);
+      return completeMergedLaneAchievement(state, lane, truth.data);
     }
     const resumed = resumeLaneOrFail(state, lane, 'resume-merge-ready-lane');
     if (!resumed.ok) {
@@ -1492,6 +1755,7 @@ function advanceResumedLane(state, lane) {
       writeLaneState(state);
       return false;
     }
+    if (check.status === 4) return enterReviewUnavailable(state, lane, check.stdout || check.stderr);
     if (check.status !== 3) {
       const reason = check.stderr || check.stdout || 'check-review-clear-once.sh failed after review-fix handoff';
       markLaneFailure(state, lane, reason, {
@@ -1509,6 +1773,13 @@ function advanceResumedLane(state, lane) {
     }
   }
   if (parsed.stage === 'achieved') {
+    if (lane.pr) {
+      const truth = forceRefreshPrTruth(lane.pr);
+      if (truth.status === 0 && (String(truth.data?.state || '').toUpperCase() === 'MERGED' || truth.data?.mergedAt)) {
+        const authorization = matchingMergeAuthorization(lane, truth.data);
+        if (!authorization.ok) return blockUnauthorizedMergedLane(state, lane, truth.data, authorization.reason);
+      }
+    }
     lane.stage = 'done';
     lane.updatedAt = new Date().toISOString();
     lane.lastResult = parsed.stage;
@@ -1559,6 +1830,10 @@ function refreshWaitingLanePrTruth(state, lane) {
 
   const stateValue = String(truth.data?.state || '').toUpperCase();
   if (stateValue === 'MERGED' || truth.data?.mergedAt) {
+    const authorization = matchingMergeAuthorization(lane, truth.data);
+    if (!authorization.ok) {
+      return { handled: true, emitted: blockUnauthorizedMergedLane(state, lane, truth.data, authorization.reason) };
+    }
     refreshLanePrFields(lane, truth.data);
     lane.stage = 'merge_ready';
     lane.blockedReason = '';
@@ -1667,6 +1942,7 @@ function runDeepReviewCheck(state, lane, source = 'deep-check-review', { resetWa
     return false;
   }
   if (check.status === 3) return enterReviewFix(state, lane, check.stdout || check.stderr);
+  if (check.status === 4) return enterReviewUnavailable(state, lane, check.stdout || check.stderr);
   const reason = check.stderr || check.stdout || 'check-review-clear-once.sh failed';
   const retryable = isTransientFailure(reason);
   if (resetWait && retryable) {
@@ -1890,6 +2166,8 @@ function runScheduler(opts) {
     let state = readLaneState({ maxLanes });
     state.maxLanes = maxLanes;
     writeLaneState(state);
+    if (recoverUnauthorizedMergeLanes(state)) return;
+    if (reconcileReviewUnavailableLanes(state)) state = readLaneState({ maxLanes });
 
     if (opts.releaseLaneIssue) {
       const args = [String(opts.releaseLaneIssue), '--clear-lane'];
@@ -1912,6 +2190,7 @@ function runScheduler(opts) {
     }
 
     if (opts.reconcile) {
+      if (reconcileReviewUnavailableLanes(state)) state = readLaneState({ maxLanes });
       if (reconcileRecoverableLanes(state)) return;
       if (reconcileWaitingReviewPrTruth(state)) return;
       const refreshed = readLaneState({ maxLanes });
@@ -1977,6 +2256,9 @@ function runScheduler(opts) {
           lane.stage = 'waiting_review';
           lane.updatedAt = new Date().toISOString();
           writeLaneState(state);
+        } else if (check.status === 4) {
+          enterReviewUnavailable(state, lane, check.stdout || check.stderr);
+          return;
         } else {
           emitBlocked([
             ['stage', 'check-review-clear-once'],
@@ -1996,6 +2278,7 @@ function runScheduler(opts) {
     const retryableBlockedBeforeEarlyReconcile = state.lanes.some((lane) => lane.stage === 'retryable_blocked');
     if (reconcileRecoverableLanes(state)) return;
     state = readLaneState({ maxLanes });
+    if (reconcileReviewUnavailableLanes(state)) state = readLaneState({ maxLanes });
     if (retryableBlockedBeforeEarlyReconcile && JSON.stringify(state.lanes || []) !== beforeEarlyReconcile) {
       if (emitBlockedLaneSummaryIfTerminal(state)) return;
       const branch = currentBranch();
@@ -2022,6 +2305,7 @@ function runScheduler(opts) {
 
     while (true) {
       state = readLaneState({ maxLanes });
+      if (reconcileReviewUnavailableLanes(state)) state = readLaneState({ maxLanes });
       if (reconcileRecoverableLanes(state)) return;
       state = readLaneState({ maxLanes });
       if (emitBlockedLaneSummaryIfTerminal(state)) return;

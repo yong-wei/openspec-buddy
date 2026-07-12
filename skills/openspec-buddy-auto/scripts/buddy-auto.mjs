@@ -37,11 +37,12 @@ function gitDirty() {
 }
 
 function parseArgs(argv) {
-  const opts = { resetController: false, resetLane: false, resetReason: '', help: false };
+  const opts = { resetController: false, resetLane: false, resetReason: '', recoverUnauthorizedMerge: false, help: false };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--reset-controller-state') opts.resetController = true;
     else if (arg === '--reset-lane-state') opts.resetLane = true;
+    else if (arg === '--recover-unauthorized-merge') opts.recoverUnauthorizedMerge = true;
     else if (arg === '--reason') opts.resetReason = argv[++i] || '';
     else if (arg === '-h' || arg === '--help') opts.help = true;
     else throw new Error(`Unknown argument: ${arg}`);
@@ -90,7 +91,7 @@ function compact(result) {
   return [result.stdout || '', result.stderr || ''].join('\n').trim();
 }
 
-function childEnv(state) {
+function childEnv(state, opts = {}) {
   const env = {
     ...process.env,
     OPENSPEC_BUDDY_AUTO_CONTROLLER_CHILD: '1',
@@ -111,13 +112,20 @@ function childEnv(state) {
   delete env.OPENSPEC_BUDDY_AUTO_REVIEW_WAIT_MODE;
   if (state.reviewFix.pending) env.OPENSPEC_BUDDY_REVIEW_FIX_CONTEXT = '1';
   else delete env.OPENSPEC_BUDDY_REVIEW_FIX_CONTEXT;
+  if (opts.recoverUnauthorizedMerge) {
+    env.OPENSPEC_BUDDY_AUTO_UNAUTHORIZED_MERGE_RECOVERY = '1';
+    env.OPENSPEC_BUDDY_AUTO_RECOVERY_REASON = opts.resetReason || '';
+  } else {
+    delete env.OPENSPEC_BUDDY_AUTO_UNAUTHORIZED_MERGE_RECOVERY;
+    delete env.OPENSPEC_BUDDY_AUTO_RECOVERY_REASON;
+  }
   return env;
 }
 
-function runChild(state) {
+function runChild(state, opts = {}) {
   const command = state.mode === 'multi' ? laneDriver : singleDriver;
   const args = state.mode === 'multi' ? [command, '--poll-once'] : [command];
-  const env = childEnv(state);
+  const env = childEnv(state, opts);
   if (state.mode === 'multi') env.OPENSPEC_BUDDY_AUTO_LANE_POLL_ONCE = '1';
   return spawnSync(process.execPath, args, {
     cwd: process.cwd(),
@@ -347,7 +355,7 @@ function main() {
   const opts = parseArgs(process.argv.slice(2));
   const seed = seedFromEnv();
   if (opts.help) {
-    console.log('Usage: buddy-auto.mjs [--reset-controller-state] [--reset-lane-state --reason <why>]');
+    console.log('Usage: buddy-auto.mjs [--reset-controller-state] [--reset-lane-state --reason <why>] [--recover-unauthorized-merge --reason <why>]');
     return;
   }
   if (opts.resetController || opts.resetLane) {
@@ -384,7 +392,7 @@ function main() {
 
   state = reconcileControllerState(state).state;
   state = syncTargetPrFromIssueLane(state);
-  handleChildResult(state, runChild(state));
+  handleChildResult(state, runChild(state, opts));
 }
 
 try {

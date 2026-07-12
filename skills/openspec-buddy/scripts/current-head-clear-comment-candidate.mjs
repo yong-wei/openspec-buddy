@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import fs from 'node:fs';
+import { latestReviewCycle } from './classify-review-response.mjs';
 
 const [reviewRequest, prFile, commitsFile, commentsFile, reviewsFile, reviewerArg] = process.argv.slice(2);
 
@@ -18,54 +19,6 @@ function readJson(file) {
 
 function array(value) {
   return Array.isArray(value) ? value : [];
-}
-
-function authorLogin(entry) {
-  const value = entry?.author ?? entry?.user;
-  if (typeof value === 'string') return value;
-  return value?.login || value?.name || '';
-}
-
-function normalizeReviewerLogin(login) {
-  return String(login || '').trim().toLowerCase().replace(/\[bot\]$/i, '');
-}
-
-function isConfiguredReviewer(entry) {
-  const normalizedLogin = normalizeReviewerLogin(authorLogin(entry));
-  const normalizedReviewer = normalizeReviewerLogin(reviewer);
-  if (!normalizedLogin || !normalizedReviewer) return false;
-
-  const codexConnector = 'chatgpt-codex-connector';
-  if (normalizedReviewer.includes(codexConnector)) {
-    return normalizedLogin.includes(codexConnector);
-  }
-
-  return normalizedLogin === normalizedReviewer;
-}
-
-function entryTime(entry) {
-  const value = entry?.createdAt || entry?.created_at || entry?.submittedAt || entry?.submitted_at || '';
-  const time = Date.parse(value);
-  return Number.isFinite(time) ? time : null;
-}
-
-function isExplicitlyClear(text) {
-  return /no actionable findings|no significant issues|no major problems|no major issues|did(?:n't| not) find any major issues|no findings|nothing actionable|没有重大问题|未发现重大问题|无重大问题|没有发现重大问题/i.test(String(text || ''));
-}
-
-function isClearReview(review) {
-  const state = String(review?.state || '').toUpperCase();
-  return state === 'APPROVED' || isExplicitlyClear(review?.body || '');
-}
-
-function isReviewRequest(text) {
-  const body = String(text || '');
-  if (configuredReviewRequest) return body.includes(configuredReviewRequest);
-  return /@codex\s+review\b/i.test(body);
-}
-
-function reviewCommitOid(review) {
-  return review?.commit?.oid || review?.commit?.OID || review?.commit_id || review?.commitId || '';
 }
 
 function latestHeadCommitTime(pr, commits) {
@@ -88,54 +41,33 @@ const comments = array(readJson(commentsFile));
 const reviews = array(readJson(reviewsFile));
 const headCommitTime = latestHeadCommitTime(pr, commits);
 const headOid = pr.headRefOid || pr.headOid || pr.head?.oid || pr.head?.sha || '';
-
-const headReviewRequests = comments
-  .filter((comment) => isReviewRequest(comment?.body || ''))
-  .filter((comment) => {
-    const createdAt = entryTime(comment);
-    return headCommitTime !== null && createdAt !== null && createdAt >= headCommitTime;
-  })
-  .sort((left, right) => (entryTime(left) ?? 0) - (entryTime(right) ?? 0));
-const latestRequest = headReviewRequests.at(-1);
-
-const clearComments = comments
-  .filter((comment) => isConfiguredReviewer(comment))
-  .filter((comment) => isExplicitlyClear(comment?.body || ''))
-  .filter((comment) => {
-    const createdAt = entryTime(comment);
-    const requestCreatedAt = entryTime(latestRequest);
-    return latestRequest
-      && headCommitTime !== null
-      && createdAt !== null
-      && requestCreatedAt !== null
-      && createdAt >= headCommitTime
-      && createdAt >= requestCreatedAt;
-  })
-  .sort((left, right) => (entryTime(left) ?? 0) - (entryTime(right) ?? 0));
-const latestClear = clearComments.at(-1);
-const latestClearReview = reviews
-  .filter((review) => isConfiguredReviewer(review))
-  .filter((review) => isClearReview(review))
-  .filter((review) => {
-    const commitOid = reviewCommitOid(review);
-    const submittedAt = entryTime(review);
-    const requestCreatedAt = entryTime(latestRequest);
-    return latestRequest
-      && headOid
-      && commitOid
-      && commitOid === headOid
-      && submittedAt !== null
-      && requestCreatedAt !== null
-      && submittedAt >= requestCreatedAt;
-  })
-  .sort((left, right) => (entryTime(left) ?? 0) - (entryTime(right) ?? 0))
-  .at(-1);
+const cycle = latestReviewCycle({
+  comments,
+  reviews,
+  reviewer,
+  reviewRequest: configuredReviewRequest,
+  headOid,
+  headCommitTime: headCommitTime === null ? '' : new Date(headCommitTime).toISOString(),
+});
+const requestCreatedAt = cycle.request?.createdAt || cycle.request?.created_at || '';
+const responseCreatedAt = cycle.response?.createdAt
+  || cycle.response?.created_at
+  || cycle.response?.submittedAt
+  || cycle.response?.submitted_at
+  || '';
+const responseUrl = cycle.response?.url || cycle.response?.html_url || '';
 
 process.stdout.write(`${JSON.stringify({
-  hasCandidate: Boolean(latestClear || latestClearReview),
-  source: latestClear ? 'top-level-comment' : latestClearReview ? 'review' : '',
+  hasCandidate: cycle.outcome === 'clear',
+  outcome: cycle.outcome,
+  source: cycle.source,
+  headOid,
   headCommitTime: headCommitTime ? new Date(headCommitTime).toISOString() : '',
-  requestCreatedAt: latestRequest?.createdAt || latestRequest?.created_at || '',
-  clearCreatedAt: latestClear?.createdAt || latestClear?.created_at || '',
-  clearUrl: latestClear?.url || latestClear?.html_url || '',
+  requestId: cycle.request?.id || cycle.request?.node_id || '',
+  requestCreatedAt,
+  responseId: cycle.response?.id || cycle.response?.node_id || '',
+  responseCreatedAt,
+  responseUrl,
+  clearCreatedAt: cycle.outcome === 'clear' ? responseCreatedAt : '',
+  clearUrl: cycle.outcome === 'clear' ? responseUrl : '',
 })}\n`);

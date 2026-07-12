@@ -67,7 +67,10 @@ verification evidence before resolution.
 ## Merge Clearance
 
 A PR may proceed toward merge only after the controller has current-head review
-clearance and the other merge gates pass.
+clearance and the other merge gates pass. The latest response in the latest
+review-request cycle is authoritative: a quota or service-limit response is
+`unavailable`, not clear, and blocks the lane without another automatic request
+until remote state changes or explicit recovery is authorized.
 
 Flat PR comments and review summaries are not sufficient. A top-level clear
 comment counts only when the controller's review verifier matches it to the
@@ -76,6 +79,13 @@ review-cycle judgment.
 
 `P0`, `P1`, and `P2` findings block merge. `P2` feedback must be fixed or
 justified with evidence before a later clean review state can pass.
+
+When all gates pass, the controller performs the merge and records
+`merge_authorized` immediately before the mutation, then records `merged` only
+after verifying the remote merged head. Agents must never run `gh pr merge`.
+An externally merged PR without that receipt becomes
+`BLOCKED(unauthorized-merge)` and cannot enter achievement through a normal
+rerun.
 
 ## Forbidden During Review Wait
 
@@ -90,5 +100,6 @@ direct deterministic helper invocation
 ```
 
 If the controller returns `HANDOFF`, perform only the requested review-fix or
-merge action, then run the controller again. If it returns `BLOCKED`, fix only
-that blocker, then run the controller again.
+other explicitly authorized external action, then run the controller again.
+Never treat a merge-related handoff as permission to merge. If it returns
+`BLOCKED`, fix only that blocker, then run the controller again.

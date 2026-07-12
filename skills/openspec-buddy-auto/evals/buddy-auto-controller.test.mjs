@@ -700,11 +700,22 @@ exit 99
   makeExecutable(path.join(coreDir, 'verify-claim-worktree.sh'), `#!/usr/bin/env bash\necho "verify-claim $*" >> ${JSON.stringify(envInfo.logFile)}\n`);
   makeExecutable(path.join(coreDir, 'verify-current-head-review-request.sh'), `#!/usr/bin/env bash\necho "verify-request $*" >> ${JSON.stringify(envInfo.logFile)}\n`);
   makeExecutable(path.join(coreDir, 'mark-review.sh'), `#!/usr/bin/env bash\necho "mark-review $*" >> ${JSON.stringify(envInfo.logFile)}\n`);
-  makeExecutable(path.join(coreDir, 'verify-review-clear.sh'), `#!/usr/bin/env bash\necho "verify-review $*" >> ${JSON.stringify(envInfo.logFile)}\n`);
+  makeExecutable(path.join(coreDir, 'verify-review-clear.sh'), `#!/usr/bin/env bash
+echo "verify-review $*" >> ${JSON.stringify(envInfo.logFile)}
+printf '%s\\n' 'review_outcome: clear' 'review_request_id: request-1' 'review_response_id: response-1' 'review_response_url: https://example.test/review/response-1'
+`);
+  const mergedMarker = path.join(envInfo.root, 'merged.marker');
+  makeExecutable(path.join(coreDir, 'merge-pr-after-gates.sh'), `#!/usr/bin/env bash
+set -euo pipefail
+echo "merge-pr $*" >> ${JSON.stringify(envInfo.logFile)}
+touch ${JSON.stringify(mergedMarker)}
+printf '%s\\n' '{"merged":true,"pr":"707","head":"head-1","mergeCommit":"merge-1","reviewRequestId":"request-1","reviewResponseId":"response-1","reviewResponseUrl":"https://example.test/review/response-1"}'
+`);
   makeExecutable(path.join(coreDir, 'verify-achieved-truth.mjs'), `#!/usr/bin/env node
 import fs from 'node:fs';
 fs.appendFileSync(${JSON.stringify(envInfo.logFile)}, 'achieved-truth ' + process.argv.slice(2).join(' ') + '\\n');
-console.log(JSON.stringify({ achieved: false, next: 'merge-pr', reason: 'PR is not merged' }));
+if (fs.existsSync(${JSON.stringify(mergedMarker)})) console.log(JSON.stringify({ achieved: true, reason: 'merged PR is terminal' }));
+else console.log(JSON.stringify({ achieved: false, next: 'merge-pr', reason: 'PR is not merged' }));
 `);
   process.env.PATH = `${envInfo.binDir}:${process.env.PATH}`;
   process.env.OPENSPEC_BUDDY_AUTO_LANE_STATE_DIR = envInfo.laneDir;
@@ -718,17 +729,19 @@ console.log(JSON.stringify({ achieved: false, next: 'merge-pr', reason: 'PR is n
     OPENSPEC_BUDDY_AUTO_LANE_DRIVER: laneDriverHelper,
     OPENSPEC_BUDDY_AUTO_SINGLE_DRIVER: singleDriverHelper,
     OPENSPEC_BUDDY_AUTO_STATE_DIR: path.join(envInfo.root, 'auto-state'),
+    OPENSPEC_BUDDY_REPO_NWO: 'owner/repo',
     OPENSPEC_BUDDY_CORE_SCRIPT_DIR: coreDir,
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /^HANDOFF/m);
-  assert.match(result.stdout, /^stage: merge-pr$/m);
+  assert.match(result.stdout, /^DONE/m);
+  assert.match(result.stdout, /^stage: achieved$/m);
   assert.doesNotMatch(result.stdout, /^stage: review_clear$/m);
   const log = fs.readFileSync(envInfo.logFile, 'utf8');
   assert.match(log, /verify-claim --issue 675 --pr 707/);
   assert.match(log, /mark-review 675 707/);
   assert.match(log, /verify-review 707/);
   assert.match(log, /achieved-truth 675 707/);
+  assert.match(log, /merge-pr 675 707 head-1/);
 }
 
 {
