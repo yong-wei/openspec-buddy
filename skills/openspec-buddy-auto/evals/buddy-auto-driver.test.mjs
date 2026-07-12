@@ -93,6 +93,49 @@ function seedControllerMergeReceipt(stateDir, {
   fs.writeFileSync(path.join(stateDir, `pr-${pr}.json`), `${JSON.stringify(state, null, 2)}\n`);
 }
 
+function seedPendingMergeAuthorization(stateDir, {
+  issue = '675',
+  pr = '707',
+  head = 'exact-head',
+  repository = 'owner/repo',
+} = {}) {
+  const state = {
+    version: 1,
+    key: `pr-${pr}`,
+    issue: String(issue),
+    pr: String(pr),
+    change: '',
+    head,
+    repository,
+    stages: {},
+  };
+  const base = {
+    at: '2026-07-12T00:00:00.000Z',
+    head,
+    repository,
+    issue: String(issue),
+    pr: String(pr),
+    command: 'fake-controller-command',
+    source: 'buddy-auto-driver/run-next',
+  };
+  state.stages.mark_review_passed = { ...base };
+  state.stages.review_requested = { ...base };
+  state.stages.review_clear = {
+    ...base,
+    requestId: 'request-1',
+    responseId: 'response-1',
+    responseUrl: 'https://example.test/review/response-1',
+    responseOutcome: 'clear',
+  };
+  state.stages.merge_gates_passed = { ...base };
+  state.stages.merge_authorized = { ...state.stages.review_clear, mergeAttemptId: 'attempt-1' };
+  fs.mkdirSync(stateDir, { recursive: true });
+  for (const stage of Object.keys(state.stages)) {
+    state.stages[stage].signature = signReceipt(state, stage, state.stages[stage], { stateDir });
+  }
+  fs.writeFileSync(path.join(stateDir, `pr-${pr}.json`), `${JSON.stringify(state, null, 2)}\n`);
+}
+
 function seedClaimReceipt(stateDir, {
   issue = '916',
   repository = 'owner/repo',
@@ -691,6 +734,43 @@ exit 1
   assert.ok(state.stages.mark_review_passed);
   assert.ok(state.stages.review_requested);
   assert.equal(state.stages.review_clear, undefined);
+}
+
+{
+  const recoveryStateDir = path.join(tmp, 'state-merge-receipt-recovery');
+  const recoveryCoreDir = path.join(tmp, 'core-merge-receipt-recovery');
+  const recoveryBinDir = path.join(tmp, 'bin-merge-receipt-recovery');
+  const recoveryLogFile = path.join(tmp, 'commands-merge-receipt-recovery.log');
+  fs.mkdirSync(recoveryCoreDir, { recursive: true });
+  fs.mkdirSync(recoveryBinDir, { recursive: true });
+  seedPendingMergeAuthorization(recoveryStateDir);
+  makeExecutable(path.join(recoveryCoreDir, 'read-live-claim-truth.sh'), `#!/usr/bin/env bash
+echo "live-claim $*" >> ${JSON.stringify(recoveryLogFile)}
+printf '%s\\n' '{"status":"expired","source":"github-rest","claimId":"claim-675"}'
+`);
+  makeMergeAwareAchievedTruth(path.join(recoveryCoreDir, 'verify-achieved-truth.mjs'), recoveryLogFile);
+  makeExecutable(path.join(recoveryBinDir, 'gh'), `#!/usr/bin/env bash
+set -euo pipefail
+if [[ "\${1:-}" == "api" && "\${2:-}" == "repos/owner/repo/pulls/707" ]]; then
+  printf '%s\\n' '{"number":707,"state":"closed","merged_at":"2026-07-12T07:00:00Z","head":{"sha":"exact-head"}}'
+  exit 0
+fi
+exit 1
+`);
+  const result = run(['--issue', '675', '--pr', '707', '--head', 'exact-head'], {
+    env: {
+      OPENSPEC_BUDDY_AUTO_STATE_DIR: recoveryStateDir,
+      OPENSPEC_BUDDY_CORE_SCRIPT_DIR: recoveryCoreDir,
+      PATH: `${recoveryBinDir}:${process.env.PATH}`,
+    },
+  });
+  assert.equal(result.status, 0, `${result.stderr}\\n${result.stdout}`);
+  assert.match(result.stdout, /^DONE/m);
+  assert.match(result.stdout, /stage: achieved/);
+  const state = JSON.parse(fs.readFileSync(path.join(recoveryStateDir, 'pr-707.json'), 'utf8'));
+  assert.ok(state.stages.merged);
+  assert.ok(state.stages.achieved);
+  assert.doesNotMatch(fs.readFileSync(recoveryLogFile, 'utf8'), /live-claim/);
 }
 
 {

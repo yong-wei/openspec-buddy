@@ -503,6 +503,29 @@ function remotePrIsMerged(truth) {
   ));
 }
 
+function controllerMergeRecoveryAvailable(opts, state) {
+  if (!stateMatchesContext(opts, state)) return false;
+  if (validReceipt(state, 'merged', {
+    require: ['repository', 'issue', 'pr', 'head', 'requestId', 'responseId', 'mergeAttemptId'],
+  })) return false;
+  if (!controllerMergeAuthorizationValid(opts, state)) return false;
+  const remoteTruth = freshRemotePrTruth(state, opts.pr);
+  if (!remotePrIsMerged(remoteTruth)) return false;
+  const remoteHead = remoteTruth.head?.sha || remoteTruth.headRefOid || '';
+  return !remoteHead || !opts.head || String(remoteHead) === String(opts.head);
+}
+
+function ensureControllerMergedReceipt(opts, state) {
+  if (controllerMergeAuthorizationValid(opts, state, { requireMerged: true })) return true;
+  if (!controllerMergeAuthorizationValid(opts, state)) return false;
+  const remoteTruth = freshRemotePrTruth(state, opts.pr);
+  if (!remotePrIsMerged(remoteTruth)) return false;
+  const remoteHead = remoteTruth.head?.sha || remoteTruth.headRefOid || '';
+  if (remoteHead && opts.head && String(remoteHead) !== String(opts.head)) return false;
+  runControllerOwnedMerge(opts);
+  return controllerMergeAuthorizationValid(opts, readState(opts), { requireMerged: true });
+}
+
 function emitUnauthorizedMerge(opts, reason) {
   emitBlocked({
     stage: 'unauthorized-merge',
@@ -628,6 +651,14 @@ function commandFor(opts, state, runtime = {}) {
       stage: 'achieved-truth',
       command: [path.join(coreScriptDir, 'verify-achieved-truth.mjs'), opts.issue, opts.pr],
       reason: 'Controller-owned merge was verified for this exact head; read archive and achievement truth.',
+    };
+  }
+
+  if (controllerMergeRecoveryAvailable(opts, state)) {
+    return {
+      stage: 'achieved-truth',
+      command: [path.join(coreScriptDir, 'verify-achieved-truth.mjs'), opts.issue, opts.pr],
+      reason: 'Remote PR is merged and a matching merge authorization receipt exists; recover the missing merged receipt before applying live-claim gates.',
     };
   }
 
@@ -1021,7 +1052,7 @@ function runDriver(opts) {
       }
       if (truth.achieved === true) {
         const currentState = readState(opts);
-        if (!controllerMergeAuthorizationValid(opts, currentState, { requireMerged: true })) {
+        if (!ensureControllerMergedReceipt(opts, currentState)) {
           emitUnauthorizedMerge(opts, 'Achievement truth is terminal for a merged PR, but no matching controller merge authorization receipt exists.');
         }
         recordStage(opts, 'achieved', next.command);
@@ -1034,7 +1065,7 @@ function runDriver(opts) {
         return;
       }
       if (truth.next === 'mark-achieved-post-merge') {
-        if (!controllerMergeAuthorizationValid(opts, readState(opts), { requireMerged: true })) {
+        if (!ensureControllerMergedReceipt(opts, readState(opts))) {
           emitUnauthorizedMerge(opts, 'Post-merge achievement was requested for a merged PR without a matching controller merge authorization receipt.');
         }
         runPostMergeAchievement(opts, truth, next.command);
