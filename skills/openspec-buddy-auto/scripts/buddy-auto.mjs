@@ -202,37 +202,50 @@ function readFreshReviewTruth(state, controllerRunId) {
     OPENSPEC_BUDDY_REVIEW_PREVIOUS_REQUEST_STATE: '',
     OPENSPEC_BUDDY_REVIEW_REQUESTED_AT: '',
     OPENSPEC_BUDDY_REUSE_PR_REST_CACHE: '0',
+    OPENSPEC_BUDDY_REVIEW_TRUTH_READ_ONLY: '1',
   };
+  const parseProbe = (result) => {
+    if (result.status !== 0) return null;
+    try {
+      const data = JSON.parse(result.stdout || '{}');
+      const head = String(data.head || data.headRefOid || '');
+      return head ? { data, head } : null;
+    } catch {
+      return null;
+    }
+  };
+  const initialProbe = parseProbe(runReviewTruthHelper(
+    path.join(coreScriptDir, 'probe-review-state.sh'),
+    lane.pr,
+    env,
+  ));
+  if (!initialProbe) return null;
+
   const review = runReviewTruthHelper(path.join(coreScriptDir, 'check-review-clear-once.sh'), lane.pr, env);
   const threadState = review.status === 0
     ? 'clear'
     : review.status === 3
       ? 'actionable'
       : 'unknown';
-  const probe = runReviewTruthHelper(path.join(coreScriptDir, 'probe-review-state.sh'), lane.pr, env);
-  if (probe.status !== 0) return null;
-
-  let probeData;
-  try {
-    probeData = JSON.parse(probe.stdout || '{}');
-  } catch {
-    return null;
-  }
-  const head = String(probeData.head || probeData.headRefOid || '');
-  if (!head) return null;
+  const finalProbe = parseProbe(runReviewTruthHelper(
+    path.join(coreScriptDir, 'probe-review-state.sh'),
+    lane.pr,
+    env,
+  ));
+  if (!finalProbe || finalProbe.head !== initialProbe.head) return null;
 
   const fetchedAt = new Date().toISOString();
   const threadTruthFresh = threadState !== 'unknown';
   return normalizeReviewTruth({
     pr: lane.pr,
-    head,
-    probeState: probeData.state || probeData.probeState || 'waiting',
-    requestState: probeData.requestState || 'unknown',
+    head: finalProbe.head,
+    probeState: finalProbe.data.state || finalProbe.data.probeState || 'waiting',
+    requestState: finalProbe.data.requestState || 'unknown',
     threadState,
     actionableState: threadState,
     restFreshAt: fetchedAt,
     threadsFreshAt: threadTruthFresh ? fetchedAt : '',
-    threadsHead: threadTruthFresh ? head : '',
+    threadsHead: threadTruthFresh ? finalProbe.head : '',
     runId: controllerRunId,
     source: 'controller-live-review-truth',
     responseOutcome: threadState === 'clear' ? 'clear' : threadState === 'actionable' ? 'actionable' : 'unknown',

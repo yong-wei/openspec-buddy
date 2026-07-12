@@ -66,7 +66,10 @@ repo_nwo="$(buddy_repo_nwo)"
 owner="${repo_nwo%%/*}"
 repo="${repo_nwo#*/}"
 cache_dir="$(buddy_cache_dir "$tmp_dir/gh-cache")"
-"$script_dir/verify-claim-worktree.sh" --pr "$pr_number" >/dev/null
+# Controller recovery reads review truth from a coordination branch; it does not authorize PR work.
+if [[ "${OPENSPEC_BUDDY_REVIEW_TRUTH_READ_ONLY:-0}" != "1" ]]; then
+  "$script_dir/verify-claim-worktree.sh" --pr "$pr_number" >/dev/null
+fi
 
 if [[ -n "$provided_pr_file" || -n "$provided_reviews_file" || -n "$provided_commits_file" || -n "$provided_issue_comments_file" || -n "$provided_review_comments_file" ]]; then
   for required_file in "$provided_pr_file" "$provided_reviews_file" "$provided_commits_file" "$provided_issue_comments_file" "$provided_review_comments_file"; do
