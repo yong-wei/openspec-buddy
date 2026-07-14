@@ -71,7 +71,7 @@ function hasSubstantiveContent(value) {
 for (const [name, value] of Object.entries(fields)) {
   if (placeholder.test(value)) errors.push(`${name}: placeholder is not allowed`);
 }
-for (const name of ["Public behavior", "Public seam", "Rationale"]) {
+for (const name of ["Public seam", "Rationale"]) {
   if (fields[name] && !hasSubstantiveContent(fields[name])) {
     errors.push(`${name}: must contain substantive content`);
   }
@@ -97,6 +97,9 @@ if (notApplicableClasses.has(changeClass) && !["required", "not-applicable"].inc
 }
 
 if (seamStatus === "required") {
+  if (fields["Public behavior"] && !hasSubstantiveContent(fields["Public behavior"])) {
+    errors.push("Public behavior: must contain substantive content when Seam status is required");
+  }
   for (const name of ["Public behavior", "Public seam", "Rationale"]) {
     if (fields[name]?.toLowerCase() === "none") errors.push(`${name}: must not be none when Seam status is required`);
   }

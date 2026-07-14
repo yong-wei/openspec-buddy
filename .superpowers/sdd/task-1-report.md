@@ -6,7 +6,7 @@
 - Added `medium-risk` to the seam-required change classes alongside `behavioral` and `high-risk`.
 - Enforced explicit verification method and rationale for documentation or mechanical `not-applicable` contracts.
 - Required every `AC-N` found in the issue body to appear in exactly one deterministic semicolon-separated map: automated `AC coverage` or justified `Manual-only acceptance`.
-- Required all eight fields to be non-empty and required substantive content for public behavior, public seam, and rationale; punctuation, placeholders, `none`/`n-a`/`not-applicable`, and negative empty meanings are rejected.
+- Required all eight fields to be non-empty. Required seams demand substantive public behavior; documentation/mechanical `not-applicable` contracts may declare `Public behavior: none`. Public seam and rationale always require substantive verification method and reasoning.
 - Parsed AC coverage as `AC-N: evidence` and manual-only acceptance as `AC-N: automation rationale | manual evidence check`, rejecting missing segments and non-substantive content independently.
 - Rejected duplicate, unknown, overlapping, placeholder, punctuation-only, AC-ID-only, and negative empty AC mappings such as `not covered`.
 - Rejected missing or duplicate sections and fields, unsupported structures and enums, blank fields, and placeholders.

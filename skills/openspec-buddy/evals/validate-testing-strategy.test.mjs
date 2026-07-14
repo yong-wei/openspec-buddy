@@ -42,7 +42,7 @@ for (const changeClass of ["behavioral", "medium-risk", "high-risk"]) {
 for (const changeClass of ["documentation", "mechanical"]) {
   const result = run(`${changeClass}-not-applicable`, `Change class: ${changeClass}
 Seam status: not-applicable
-Public behavior: Rendered documentation or synchronized artifact content
+Public behavior: none
 Public seam: rtk git diff --check
 Existing seam reused: none
 AC coverage: AC-1: verified by diff inspection; AC-2: verified by diff inspection
