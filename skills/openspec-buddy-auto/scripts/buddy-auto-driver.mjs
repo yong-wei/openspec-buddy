@@ -22,6 +22,8 @@ const stages = new Set([
   'review_clear',
   'merge_gates_passed',
   'merge_authorized',
+  'unauthorized_merge',
+  'unauthorized_merge_recovered',
   'post_merge_achieved',
   'merged',
   'achieved',
@@ -40,6 +42,10 @@ const deterministicStages = new Set([
 
 function truthy(value) {
   return ['1', 'true', 'yes', 'on'].includes(String(value || '').toLowerCase());
+}
+
+function evidenceDigest(kind, value) {
+  return `${kind}:${crypto.createHash('sha256').update(String(value || '')).digest('hex')}`;
 }
 
 function parseArgs(argv) {
@@ -526,7 +532,64 @@ function ensureControllerMergedReceipt(opts, state) {
   return controllerMergeAuthorizationValid(opts, readState(opts), { requireMerged: true });
 }
 
+function unauthorizedMergeRecoveryValid(opts, state) {
+  const violation = state.stages?.unauthorized_merge || {};
+  const recovery = state.stages?.unauthorized_merge_recovered || {};
+  const receiptOptions = {
+    require: ['repository', 'issue', 'pr', 'head'],
+    repository: opts.repository,
+    issue: String(opts.issue || ''),
+    pr: String(opts.pr || ''),
+    head: String(opts.head || ''),
+  };
+  return stateMatchesContext(opts, state)
+    && validReceipt(state, 'unauthorized_merge', receiptOptions)
+    && validReceipt(state, 'unauthorized_merge_recovered', receiptOptions)
+    && Boolean(recovery.recoveryReason)
+    && recovery.command === evidenceDigest('unauthorized-merge-recovery', recovery.recoveryReason)
+    && recovery.violationSignature === violation.signature;
+}
+
+function postMergeAuthorizationValid(opts, state) {
+  return controllerMergeAuthorizationValid(opts, state, { requireMerged: true })
+    || unauthorizedMergeRecoveryValid(opts, state);
+}
+
+function recoverUnauthorizedMerge(opts, state) {
+  if (!truthy(process.env.OPENSPEC_BUDDY_AUTO_UNAUTHORIZED_MERGE_RECOVERY)) return { attempted: false };
+  if (!controllerChildMode()) {
+    return { attempted: true, ok: false, reason: 'Unauthorized merge recovery is controller-owned; rerun through buddy-auto.mjs.' };
+  }
+  const reason = String(process.env.OPENSPEC_BUDDY_AUTO_RECOVERY_REASON || '').trim();
+  if (!reason) {
+    return { attempted: true, ok: false, reason: 'Explicit unauthorized merge recovery requires a non-empty user authorization reason.' };
+  }
+  const violation = state.stages?.unauthorized_merge || {};
+  if (!stateMatchesContext(opts, state) || !validReceipt(state, 'unauthorized_merge', {
+    require: ['repository', 'issue', 'pr', 'head'],
+    repository: opts.repository,
+    issue: String(opts.issue || ''),
+    pr: String(opts.pr || ''),
+    head: String(opts.head || ''),
+  })) {
+    return { attempted: true, ok: false, reason: 'Explicit recovery requires a matching signed violation context for this repository, issue, PR, and head.' };
+  }
+  const truth = freshRemotePrTruth(state, opts.pr);
+  const remoteHead = truth?.head?.sha || truth?.headRefOid || '';
+  if (!remotePrIsMerged(truth) || !remoteHead || String(remoteHead) !== String(opts.head || '')) {
+    return { attempted: true, ok: false, reason: 'Explicit recovery requires fresh merged PR truth for the exact violation head.' };
+  }
+  recordStage(opts, 'unauthorized_merge_recovered', [evidenceDigest('unauthorized-merge-recovery', reason)], {
+    recoveryReason: reason,
+    violationSignature: violation.signature,
+    mergedAt: truth.merged_at || truth.mergedAt || '',
+    remoteHead,
+  });
+  return { attempted: true, ok: true };
+}
+
 function emitUnauthorizedMerge(opts, reason) {
+  recordStage(opts, 'unauthorized_merge', [evidenceDigest('unauthorized-merge', reason)], { violationReason: reason });
   emitBlocked({
     stage: 'unauthorized-merge',
     reason,
@@ -673,6 +736,14 @@ function commandFor(opts, state, runtime = {}) {
       stage: 'achieved-truth',
       command: [path.join(coreScriptDir, 'verify-achieved-truth.mjs'), opts.issue, opts.pr],
       reason: 'Controller-owned merge was verified for this exact head; read archive and achievement truth.',
+    };
+  }
+
+  if (unauthorizedMergeRecoveryValid(opts, state)) {
+    return {
+      stage: 'achieved-truth',
+      command: [path.join(coreScriptDir, 'verify-achieved-truth.mjs'), opts.issue, opts.pr],
+      reason: 'Signed unauthorized merge recovery permits post-merge achievement truth for this exact head.',
     };
   }
 
@@ -967,6 +1038,21 @@ function runDriver(opts) {
   const runtime = {};
   for (let i = 0; i < 8; i += 1) {
     const state = readState(opts);
+    if (state.stages?.unauthorized_merge && !unauthorizedMergeRecoveryValid(opts, state)) {
+      const recovery = recoverUnauthorizedMerge(opts, state);
+      if (!recovery.attempted) {
+        emitBlocked({
+          stage: 'unauthorized-merge',
+          reason: state.stages.unauthorized_merge.violationReason || 'PR merged without a matching controller merge authorization receipt; explicit recovery is required.',
+        });
+        process.exit(1);
+      }
+      if (!recovery.ok) {
+        emitBlocked({ stage: 'unauthorized-merge-recovery', reason: recovery.reason });
+        process.exit(1);
+      }
+      continue;
+    }
     const next = commandFor(opts, state, runtime);
     lastStage = next.stage;
     if (next.stage === 'blocked') {
@@ -1074,7 +1160,7 @@ function runDriver(opts) {
       }
       if (truth.achieved === true) {
         const currentState = readState(opts);
-        if (!ensureControllerMergedReceipt(opts, currentState)) {
+        if (!postMergeAuthorizationValid(opts, currentState) && !ensureControllerMergedReceipt(opts, currentState)) {
           emitUnauthorizedMerge(opts, 'Achievement truth is terminal for a merged PR, but no matching controller merge authorization receipt exists.');
         }
         recordStage(opts, 'achieved', next.command);
@@ -1087,7 +1173,8 @@ function runDriver(opts) {
         return;
       }
       if (truth.next === 'mark-achieved-post-merge') {
-        if (!ensureControllerMergedReceipt(opts, readState(opts))) {
+        const currentState = readState(opts);
+        if (!postMergeAuthorizationValid(opts, currentState) && !ensureControllerMergedReceipt(opts, currentState)) {
           emitUnauthorizedMerge(opts, 'Post-merge achievement was requested for a merged PR without a matching controller merge authorization receipt.');
         }
         runPostMergeAchievement(opts, truth, next.command);

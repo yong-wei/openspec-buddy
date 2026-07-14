@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { signReceipt } from '../scripts/receipt-truth.mjs';
 
 const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../../..');
 const controllerModule = await import(pathToFileURL(path.join(repoRoot, 'skills/openspec-buddy-auto/scripts/controller-state.mjs')).href);
@@ -57,7 +58,9 @@ fs.appendFileSync(${JSON.stringify(logFile)}, JSON.stringify({
   waitMode: process.env.OPENSPEC_BUDDY_AUTO_REVIEW_WAIT_MODE || '',
   goal: process.env.OPENSPEC_BUDDY_AUTO_GOAL || '',
   reviewFix: process.env.OPENSPEC_BUDDY_REVIEW_FIX_CONTEXT || '',
-  controllerChild: process.env.OPENSPEC_BUDDY_AUTO_CONTROLLER_CHILD || ''
+  controllerChild: process.env.OPENSPEC_BUDDY_AUTO_CONTROLLER_CHILD || '',
+  unauthorizedMergeRecovery: process.env.OPENSPEC_BUDDY_AUTO_UNAUTHORIZED_MERGE_RECOVERY || '',
+  recoveryReason: process.env.OPENSPEC_BUDDY_AUTO_RECOVERY_REASON || ''
 }) + '\\n');
 if (process.env.BUDDY_STUB_STATE_ISSUE) {
   const stateFile = ${JSON.stringify(root)} + '/stub-state.json';
@@ -197,6 +200,71 @@ function controllerPath(envInfo) {
   assert.equal(log[0].child, 'single');
   const state = readController(envInfo);
   assert.equal(state.mode, 'single');
+}
+
+{
+  const envInfo = makeEnv('single-unauthorized-merge-recovery');
+  const result = run(envInfo, {}, ['--recover-unauthorized-merge', '--reason', 'user-approved audit recovery']);
+  assert.equal(result.status, 0, result.stderr);
+  const log = readLog(envInfo);
+  assert.equal(log[0].child, 'single');
+  assert.equal(log[0].controllerChild, '1');
+  assert.equal(log[0].unauthorizedMergeRecovery, '1');
+  assert.equal(log[0].recoveryReason, 'user-approved audit recovery');
+}
+
+{
+  const envInfo = makeEnv('single-unauthorized-merge-recovery-integration');
+  const driverStateDir = path.join(envInfo.root, 'driver-state');
+  const driverState = {
+    version: 1,
+    key: 'pr-707',
+    issue: '675',
+    pr: '707',
+    change: '',
+    head: 'merged-head',
+    repository: 'owner/repo',
+    stages: {},
+  };
+  const violation = {
+    at: '2026-07-14T00:00:00.000Z',
+    head: 'merged-head',
+    repository: 'owner/repo',
+    issue: '675',
+    pr: '707',
+    command: '',
+    source: 'buddy-auto-driver/run-next',
+    violationReason: 'merged without controller authorization',
+  };
+  violation.signature = signReceipt(driverState, 'unauthorized_merge', violation, { stateDir: driverStateDir });
+  driverState.stages.unauthorized_merge = violation;
+  fs.writeFileSync(path.join(driverStateDir, 'pr-707.json'), `${JSON.stringify(driverState, null, 2)}\n`);
+  makeExecutable(path.join(envInfo.binDir, 'gh'), `#!/bin/bash
+set -euo pipefail
+if [[ "$*" == "pr view 707 --json body --jq .body" ]]; then echo 'origin issue: #675'; exit 0; fi
+if [[ "$*" == "pr view 707 --json headRefOid --jq .headRefOid" ]]; then echo merged-head; exit 0; fi
+if [[ "$*" == "api repos/owner/repo/pulls/707" ]]; then
+  printf '%s\\n' '{"number":707,"state":"closed","merged_at":"2026-07-14T00:00:00Z","head":{"sha":"merged-head"}}'
+  exit 0
+fi
+exit 1
+`);
+  makeExecutable(path.join(envInfo.root, 'verify-achieved-truth.mjs'), `#!/usr/bin/env node
+console.log(JSON.stringify({achieved:true,reason:'terminal after explicit recovery'}));
+`);
+  const result = run(envInfo, {
+    OPENSPEC_BUDDY_AUTO_SINGLE_DRIVER: singleDriverHelper,
+    OPENSPEC_BUDDY_AUTO_TARGET_PR: '707',
+    OPENSPEC_BUDDY_AUTO_STATE_DIR: driverStateDir,
+    OPENSPEC_BUDDY_REPO_NWO: 'owner/repo',
+    OPENSPEC_BUDDY_CORE_SCRIPT_DIR: envInfo.root,
+  }, ['--recover-unauthorized-merge', '--reason', 'user-approved audit recovery']);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^DONE/m);
+  assert.match(result.stdout, /^stage: achieved$/m);
+  const recovered = JSON.parse(fs.readFileSync(path.join(driverStateDir, 'pr-707.json'), 'utf8'));
+  assert.equal(recovered.stages.unauthorized_merge_recovered.recoveryReason, 'user-approved audit recovery');
+  assert.ok(recovered.stages.achieved);
 }
 
 {
