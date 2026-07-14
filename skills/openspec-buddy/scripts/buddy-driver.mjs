@@ -12,6 +12,7 @@ function parseArgs(argv) {
     issue: '',
     pr: '',
     change: '',
+    exploreQuestion: '',
     noIssue: false,
     noPr: false,
     dryRun: false,
@@ -22,6 +23,7 @@ function parseArgs(argv) {
     else if (arg === '--issue') opts.issue = argv[++i] || '';
     else if (arg === '--pr') opts.pr = argv[++i] || '';
     else if (arg === '--change') opts.change = argv[++i] || '';
+    else if (arg === '--explore-question') opts.exploreQuestion = argv[++i] || '';
     else if (arg === '--no-issue') opts.noIssue = true;
     else if (arg === '--no-pr') opts.noPr = true;
     else if (arg === '--run-next') continue;
@@ -98,12 +100,36 @@ function emitBlocked({ mode, command = [], reason, output = '' }) {
   }
 }
 
-function emitHandoff({ mode, commands, notes }) {
+function emitHandoff({ mode, commands, notes, fields = [] }) {
   outputBlock('HANDOFF', [
     ['mode', mode],
+    ...fields,
     ['required_action', notes.join(' ')],
     ['commands', commands.map(commandLine).join(' && ')],
   ]);
+}
+
+const exploreRoutes = {
+  intent: { optional: 'grilling', native: 'native-one-question-clarification' },
+  facts: { optional: 'research', native: 'native-primary-source-investigation' },
+  'interaction-state': { optional: 'prototype', native: 'native-throwaway-experiment' },
+  'active-change-design': { optional: '', native: 'openspec-explore' },
+};
+
+function exploreRecommendation(question) {
+  const route = exploreRoutes[question];
+  if (!route) throw new Error(`Unsupported explore question: ${question}`);
+  if (!route.optional) return { provider: 'buddy-native', method: route.native };
+  try {
+    const output = run(process.execPath, [path.join(scriptDir, 'detect-method-skills.mjs')], { optional: true });
+    const detected = JSON.parse(output);
+    if (detected[route.optional] === 'available') {
+      return { provider: 'matt', method: route.optional };
+    }
+  } catch {
+    // Optional method discovery must never prevent native exploration.
+  }
+  return { provider: 'buddy-native', method: route.native };
 }
 
 function repoState() {
@@ -126,6 +152,7 @@ function describeNext(opts) {
   const mode = inferMode(opts);
   const commands = [];
   const notes = [];
+  const fields = [];
 
   if (opts.noPr) {
     throw new Error('--no-pr is not a core Buddy option. It is valid only in openspec-buddy-auto for explicit local-only --change runs.');
@@ -133,6 +160,20 @@ function describeNext(opts) {
 
   if (mode === 'context-needed') {
     notes.push('No phase context was inferred. Do not claim or mutate GitHub state until the agent or caller provides a concrete phase context.');
+  } else if (mode === 'explore') {
+    if (!opts.exploreQuestion) {
+      throw new Error('--explore-question is required for explore mode.');
+    }
+    const recommendation = exploreRecommendation(opts.exploreQuestion);
+    fields.push(
+      ['mutation_allowed', 'false'],
+      ['coordination_state', 'none'],
+      ['explore_question', opts.exploreQuestion],
+      ['method_provider', recommendation.provider],
+      ['recommended_method', recommendation.method],
+      ['next_transition', 'propose | continue-explore'],
+    );
+    notes.push('Explore is read-only. Use the recommended method when relevant, or continue with the native exploration contract.');
   } else if (mode === 'claim') {
     commands.push([path.join(scriptDir, 'check-config.sh')]);
     commands.push([path.join(scriptDir, 'claim-issue.sh'), ...(opts.issue ? [opts.issue] : [])]);
@@ -159,19 +200,19 @@ function describeNext(opts) {
     throw new Error(`Unsupported mode: ${mode}`);
   }
 
-  return { mode, commands, notes };
+  return { mode, commands, notes, fields };
 }
 
 function printPlan(opts) {
-  const { mode, commands, notes } = describeNext(opts);
-  emitHandoff({ mode, commands, notes });
+  const { mode, commands, notes, fields } = describeNext(opts);
+  emitHandoff({ mode, commands, notes, fields });
 }
 
 function runDriver(opts) {
   const state = repoState();
-  const { mode, commands, notes } = describeNext(opts);
+  const { mode, commands, notes, fields } = describeNext(opts);
   if (!commands.length) {
-    emitHandoff({ mode, commands, notes });
+    emitHandoff({ mode, commands, notes, fields });
     return;
   }
   for (const command of commands) {
@@ -197,7 +238,7 @@ function runDriver(opts) {
 function main() {
   const opts = parseArgs(process.argv.slice(2));
   if (opts.help) {
-    console.log('Usage: buddy-driver.mjs [--dry-run] [--mode claim|propose|apply|achieve] [--issue N] [--pr PR] [--change ID] [--no-issue]');
+    console.log('Usage: buddy-driver.mjs [--dry-run] [--mode claim|propose|explore|apply|achieve] [--explore-question intent|facts|interaction-state|active-change-design] [--issue N] [--pr PR] [--change ID] [--no-issue]');
     return;
   }
   if (!fs.existsSync(scriptDir)) throw new Error(`Missing script directory: ${scriptDir}`);

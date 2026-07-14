@@ -8,12 +8,27 @@ driver first. This file holds the stage rules the driver points to.
 Every manual Buddy phase starts with:
 
 ```bash
-<openspec-buddy-skill-dir>/scripts/buddy-driver.mjs --mode <claim|propose|apply|achieve>
+<openspec-buddy-skill-dir>/scripts/buddy-driver.mjs --mode <explore|claim|propose|apply|achieve>
 ```
 
 Use `--issue`, `--pr`, `--change`, `--no-issue`, or `--run-next` when the
 driver asks for them. Do not substitute manual `gh`, `git`, `sleep`, or
 handwritten GraphQL checks for a Buddy helper.
+
+## Explore
+
+Explore is a read-only manual Buddy phase for resolving uncertainty before a
+claim, proposal, or implementation decision. It may inspect repository and
+primary-source evidence, clarify intent, or run a disposable experiment, but
+it must not mutate repository or GitHub state. Follow
+`references/explore-routing.md` for question classification, optional method
+selection, and the native fallback.
+
+Invoke it with the matching question classification:
+
+```bash
+<openspec-buddy-skill-dir>/scripts/buddy-driver.mjs --mode explore --explore-question <intent|facts|interaction-state|active-change-design>
+```
 
 ## Claim
 

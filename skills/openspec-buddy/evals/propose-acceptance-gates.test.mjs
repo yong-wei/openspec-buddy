@@ -17,6 +17,14 @@ const executionLoop = read('skills/openspec-buddy-auto/references/execution-loop
 const issueTemplate = read('skills/openspec-buddy/references/issue-template.md');
 const projectCoordination = read('skills/openspec-buddy/references/project-coordination.md');
 const readme = read('README.md');
+const exploreRoutingPath = 'skills/openspec-buddy/references/explore-routing.md';
+
+assert.ok(
+  fs.existsSync(path.join(repoRoot, exploreRoutingPath)),
+  'manual Buddy must document native explore routing',
+);
+
+const exploreRouting = read(exploreRoutingPath);
 
 assert.match(
   buddySkill,
@@ -130,6 +138,49 @@ assert.match(
   readme,
   /完整代码审查[\s\S]*Acceptance Checklist[\s\S]*未登记需求/,
   'README review request example must preserve full review and add AC/scope checks',
+);
+
+for (const route of [
+  '| Unclear intent | `intent` | `grilling` | Native one-question clarification |',
+  '| Missing facts | `facts` | `research` | Native primary-source investigation |',
+  '| Undecidable interaction or state | `interaction-state` | `prototype` | Native throwaway experiment |',
+  '| Active change design issue | `active-change-design` | Native `openspec-explore` | Native `openspec-explore` |',
+]) {
+  assert.ok(exploreRouting.includes(route), `explore routing must include exact route: ${route}`);
+}
+assert.ok(
+  exploreRouting.includes('buddy-driver.mjs --mode explore --explore-question <intent|facts|interaction-state|active-change-design>'),
+  'explore routing must document the legal driver invocation',
+);
+assert.match(
+  exploreRouting,
+  /unavailable[\s\S]*native fallback/i,
+  'every optional discovery method must have a native fallback',
+);
+assert.match(
+  exploreRouting,
+  /read-only[\s\S]*(?:must not|do not)[\s\S]*(?:mutate|write|create|edit|commit|push)/i,
+  'explore must explicitly remain read-only',
+);
+assert.match(
+  exploreRouting,
+  /Buddy Auto[\s\S]*(?:excluded|does not|must not)[\s\S]*explore/i,
+  'Buddy Auto must be explicitly excluded from explore routing',
+);
+assert.match(
+  buddySkill,
+  /references\/explore-routing\.md/,
+  'main skill must link to the explore routing reference',
+);
+assert.ok(coreLifecycle.includes('## Explore'), 'core lifecycle must define Explore');
+assert.ok(
+  coreLifecycle.includes('buddy-driver.mjs --mode explore --explore-question <intent|facts|interaction-state|active-change-design>'),
+  'core lifecycle must document the legal Explore invocation',
+);
+assert.match(coreLifecycle, /Explore is a read-only manual Buddy phase/i, 'core lifecycle must keep Explore read-only');
+assert.ok(
+  coreLifecycle.includes('`references/explore-routing.md`'),
+  'core lifecycle must route to the detailed Explore reference',
 );
 
 console.log('propose acceptance gates eval passed');

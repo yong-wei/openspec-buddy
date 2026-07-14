@@ -52,6 +52,91 @@ function makeExecutable(file, body) {
 }
 
 {
+  const result = run(['--help']);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /--mode claim\|propose\|explore\|apply\|achieve/);
+}
+
+{
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'buddy-driver-explore-'));
+  const scriptDir = path.join(tmp, 'skills/openspec-buddy/scripts');
+  fs.mkdirSync(scriptDir, { recursive: true });
+  fs.cpSync(helper, path.join(scriptDir, 'buddy-driver.mjs'));
+  fs.cpSync(path.join(path.dirname(helper), 'detect-method-skills.mjs'), path.join(scriptDir, 'detect-method-skills.mjs'));
+  const logFile = path.join(tmp, 'commands.log');
+  for (const name of ['check-config.sh', 'claim-issue.sh', 'sync-base-branch.sh', 'mark-in-progress.sh']) {
+    makeExecutable(path.join(scriptDir, name), `#!/usr/bin/env bash\necho ${name} >> ${JSON.stringify(logFile)}\n`);
+  }
+  const skillRoot = path.join(tmp, 'method-skills');
+  fs.mkdirSync(path.join(skillRoot, 'research'), { recursive: true });
+  fs.writeFileSync(path.join(skillRoot, 'research', 'SKILL.md'), '# research\n');
+  spawnSync('git', ['init', '-q'], { cwd: tmp });
+  const result = spawnSync('node', [path.join(scriptDir, 'buddy-driver.mjs'), '--mode', 'explore', '--explore-question', 'facts'], {
+    cwd: tmp,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      HOME: path.join(tmp, 'home'),
+      OPENSPEC_BUDDY_SKILL_ROOTS: skillRoot,
+    },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^HANDOFF$/m);
+  assert.match(result.stdout, /^mode: explore$/m);
+  assert.match(result.stdout, /^mutation_allowed: false$/m);
+  assert.match(result.stdout, /^coordination_state: none$/m);
+  assert.match(result.stdout, /^method_provider: matt$/m);
+  assert.match(result.stdout, /^recommended_method: research$/m);
+  assert.match(result.stdout, /^next_transition: propose \| continue-explore$/m);
+  assert.equal(fs.existsSync(logFile), false);
+}
+
+{
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'buddy-driver-explore-fallback-'));
+  const scriptDir = path.join(tmp, 'skills/openspec-buddy/scripts');
+  fs.mkdirSync(scriptDir, { recursive: true });
+  fs.cpSync(helper, path.join(scriptDir, 'buddy-driver.mjs'));
+  spawnSync('git', ['init', '-q'], { cwd: tmp });
+  const result = spawnSync('node', [path.join(scriptDir, 'buddy-driver.mjs'), '--mode', 'explore', '--explore-question', 'interaction-state'], {
+    cwd: tmp,
+    encoding: 'utf8',
+    env: { ...process.env, HOME: path.join(tmp, 'home'), OPENSPEC_BUDDY_SKILL_ROOTS: '' },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^method_provider: buddy-native$/m);
+  assert.match(result.stdout, /^recommended_method: native-throwaway-experiment$/m);
+}
+
+{
+  const result = run(['--mode', 'explore']);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /--explore-question is required/);
+}
+
+{
+  const result = run(['--mode', 'explore', '--explore-question', 'unknown']);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Unsupported explore question/);
+}
+
+for (const [question, method] of [
+  ['intent', 'native-one-question-clarification'],
+  ['facts', 'native-primary-source-investigation'],
+  ['interaction-state', 'native-throwaway-experiment'],
+  ['active-change-design', 'openspec-explore'],
+]) {
+  const result = run(['--dry-run', '--mode', 'explore', '--explore-question', question], {
+    env: {
+      HOME: path.join(os.tmpdir(), 'missing-buddy-method-home'),
+      OPENSPEC_BUDDY_SKILL_ROOTS: path.join(os.tmpdir(), 'missing-buddy-method-skills'),
+    },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, new RegExp(`^explore_question: ${question}$`, 'm'));
+  assert.match(result.stdout, new RegExp(`^recommended_method: ${method}$`, 'm'));
+}
+
+{
   const skill = fs.readFileSync(path.resolve(__dirname, '../SKILL.md'), 'utf8');
   assert.match(skill, /<EXTREMELY_IMPORTANT>/);
   assert.match(skill, /buddy-driver\.mjs/);

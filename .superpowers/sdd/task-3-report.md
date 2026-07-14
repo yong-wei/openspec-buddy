@@ -1,0 +1,82 @@
+# Task 3 Report: Native Explore Routing Documentation
+
+## Result
+
+- Added the manual Buddy Explore routing reference.
+- Documented the four uncertainty routes: intent, facts, interaction/state,
+  and active-change design.
+- Documented native fallbacks, the read-only boundary, and explicit Buddy Auto
+  exclusion.
+- Linked the reference from the main skill and core lifecycle.
+- Added acceptance-gate assertions for the documentation contract.
+
+## TDD Evidence
+
+RED:
+
+```text
+AssertionError: manual Buddy must document native explore routing
+```
+
+GREEN:
+
+```text
+rtk node skills/openspec-buddy/evals/propose-acceptance-gates.test.mjs
+propose acceptance gates eval passed
+```
+
+## Verification
+
+- Focused acceptance-gate eval: exit 0.
+- `rtk npm pack --dry-run`: exit 0.
+- `rtk proxy npm pack --dry-run --json`: exit 0; package manifest includes
+  `skills/openspec-buddy/scripts/detect-method-skills.mjs` and
+  `skills/openspec-buddy/references/explore-routing.md`.
+- Full `rtk timeout 900 npm test`: all observed groups through
+  `sync-base-branch.test.sh` passed, then the run remained in the known
+  `wait-for-review-clear.test.sh` baseline stall. The run was terminated per
+  task-owner direction and is not reported as a full-suite pass.
+
+## Concerns
+
+- The full-suite baseline stall prevents a fresh complete-suite success claim;
+  no Task 3-specific failure was observed.
+
+## Review Resolution
+
+- Added required `--explore-question` classification with the legal values
+  `intent`, `facts`, `interaction-state`, and `active-change-design`.
+- The driver now returns exactly the optional method matching that question or
+  its route-specific native fallback. It rejects missing and unsupported
+  classifications.
+- `openspec-explore` is identified and routed as a native OpenSpec workflow;
+  optional method detection is not consulted for active-change design.
+- Added Explore to the skill trigger, phase list, legal lifecycle mode list, and
+  driver-first invocation guidance.
+- Replaced the combined routing regex with exact route-row assertions and
+  explicit legal-command, read-only, reference, and driver behavior checks.
+
+Review-fix verification:
+
+```text
+rtk node skills/openspec-buddy/evals/detect-method-skills.test.mjs
+method skill detector eval passed
+
+rtk node skills/openspec-buddy/evals/buddy-driver.test.mjs
+buddy-driver tests passed
+
+rtk node skills/openspec-buddy/evals/propose-acceptance-gates.test.mjs
+propose acceptance gates eval passed
+
+rtk npm run test:fast
+fast tests passed.
+
+rtk npm pack --dry-run
+openspec-buddy-0.21.0.tgz
+
+rtk git diff --check
+exit 0
+```
+
+The unrelated full-suite `wait-for-review-clear.test.sh` baseline stall remains
+excluded from this fix under the task owner's verification resolution.
