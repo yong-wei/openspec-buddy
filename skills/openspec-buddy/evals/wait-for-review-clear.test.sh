@@ -16,8 +16,6 @@ export OPENSPEC_BUDDY_REVIEW_INITIAL_WAIT_SECONDS=0
 export OPENSPEC_BUDDY_REVIEW_POLL_SECONDS=1
 export OPENSPEC_BUDDY_REVIEW_MAX_WAIT_SECONDS=1
 export OPENSPEC_BUDDY_REPO_ROOT="$tmp_dir/repo"
-export OPENSPEC_BUDDY_CACHE_DIR="$OPENSPEC_BUDDY_REPO_ROOT/openspec/.buddy-cache"
-unset OPENSPEC_BUDDY_GH_CACHE_DIR
 mkdir -p "$OPENSPEC_BUDDY_REPO_ROOT"
 
 printf '%s\n' \
@@ -660,6 +658,8 @@ export OPENSPEC_BUDDY_VERIFY_REVIEW_CLEAR_HELPER="$tmp_dir/verify-cache-refresh.
 export GH_PR_SEQUENCE_DIR="$tmp_dir/pr-sequence"
 export GH_PR_SEQUENCE_COUNT_FILE="$tmp_dir/pr-sequence.count"
 export GH_PR_SEQUENCE_STATIC_COUNT=4
+export OPENSPEC_BUDDY_CACHE_DIR="$OPENSPEC_BUDDY_REPO_ROOT/openspec/.buddy-cache"
+unset OPENSPEC_BUDDY_GH_CACHE_DIR
 rm -f "$GH_PR_SEQUENCE_COUNT_FILE"
 
 reset_cache_refresh_scenario() {
@@ -671,6 +671,7 @@ reset_cache_refresh_scenario() {
     "$tmp_dir/cache-refresh-output.txt" \
     "$tmp_dir/cache-refresh-err.txt"
 }
+reset_cache_refresh_scenario
 if ! run_scenario_with_timeout_retry \
   10 \
   "$tmp_dir/cache-refresh-output.txt" \
@@ -696,6 +697,7 @@ fi
 unset GH_PR_SEQUENCE_DIR
 unset GH_PR_SEQUENCE_COUNT_FILE
 unset GH_PR_SEQUENCE_STATIC_COUNT
+unset OPENSPEC_BUDDY_CACHE_DIR
 
 export OPENSPEC_BUDDY_REVIEW_INITIAL_WAIT_SECONDS=0
 export OPENSPEC_BUDDY_REVIEW_POLL_SECONDS=1
