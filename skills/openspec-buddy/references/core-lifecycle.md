@@ -65,6 +65,25 @@ mutation:
 <openspec-buddy-skill-dir>/scripts/validate-issue-body.mjs openspec/changes/<change_id>/.buddy/issue.md
 ```
 
+Proposal review decisions belong in the local manifest at
+`openspec/changes/<change_id>/.buddy/proposal-review.yaml`. Record:
+
+- `split_status`: `single-change` or `series-required`
+- `vertical_slice_status`: `valid` or `invalid`
+- `blocking_edges_status`: `valid` or `incomplete`
+- `wide_refactor_strategy`: `none` or `expand-migrate-contract`
+- `children`: the child change IDs, or `[]` for a single change
+
+A child is valid only when it is independently claimable, testable, reviewable,
+and deliverable as one PR. This test applies to executable outcomes, not to
+every layer of their implementation: database, API, UI, and test steps may
+remain tasks in the same change when they together deliver one vertical slice.
+
+Broad mechanical migrations are the exception to ordinary vertical slicing.
+Set `wide_refactor_strategy: expand-migrate-contract` when expansion,
+migration, and contraction must be coordinated across a wide surface. Do not
+invent pseudo-slices that cannot pass independently merely to reduce diff size.
+
 The issue body must include a Buddy Acceptance Checklist and task-to-AC mapping:
 
 - `## Acceptance Checklist`

@@ -64,6 +64,23 @@ Describe the user-visible or engineering outcome.
 - Stop if GitHub blockedBy relationships still contain open blockers.
 ```
 
+Keep proposal review decisions beside the OpenSpec change rather than adding
+them to Issue front matter. For a single vertical slice,
+`.buddy/proposal-review.yaml` can contain:
+
+```yaml
+split_status: single-change
+vertical_slice_status: valid
+blocking_edges_status: valid
+wide_refactor_strategy: none
+children: []
+```
+
+For a series, set `split_status: series-required` and list the child change IDs
+under `children`. For a broad mechanical migration, set
+`wide_refactor_strategy: expand-migrate-contract` and explain the expansion,
+migration, and contraction sequence in the change design.
+
 For non-empty list fields, use YAML block lists:
 
 ```yaml

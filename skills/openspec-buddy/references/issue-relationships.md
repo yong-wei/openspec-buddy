@@ -20,6 +20,12 @@ series:<series-name>
 
 It is not an executable OpenSpec change and must never be selected by `apply` or `auto`.
 
+A proposal with `split_status: series-required` uses this issue only as a
+tracking parent. Put the independently executable work in child changes, each
+with its own OpenSpec artifacts and change issue. The tracking parent records
+the shared goal and completion of the series; it is not another implementation
+unit and does not own a claim branch or implementation PR.
+
 ## Series Parent Completion
 
 After each child change is archived, Buddy checks the linked series parent.
@@ -57,6 +63,11 @@ When change A depends on change B:
 ```
 
 This records A as `marked as blocked by` B. GitHub also shows B as `marking as blocking` A.
+
+Native GitHub `blockedBy` is authoritative for dependency scheduling. The
+`depends_on`, `blocked_by`, and `blocking` Buddy metadata fields are an
+auditable mirror; disagreement must be repaired rather than resolved in favor
+of metadata.
 
 Do not claim issue A while its `blockedBy` relationship contains any open, unarchived issue.
 
