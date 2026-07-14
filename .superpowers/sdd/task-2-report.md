@@ -2,22 +2,25 @@
 
 ## Implemented
 
-- Added `validate-proposal-shape.mjs` immediately after `validate-issue-body.mjs` in the core Buddy `propose --change` command sequence.
-- Kept the validation active for local `--no-issue` proposals without adding it to claim, apply, achieve, Explore, or Buddy Auto selection.
-- Converted a missing `.buddy/proposal-review.yaml` result into a `HANDOFF` that requires the manifest before any GitHub Issue mutation; no default manifest is generated.
-- Added executable driver coverage for command order, local-only validation, and missing-manifest behavior, plus a static artifact contract assertion.
+- Added `validate-testing-strategy.mjs <design.md> <issue.md>` after issue-body and proposal-shape validation in the manual Buddy `propose --change` command sequence.
+- Kept validation active for local `--no-issue` proposals without adding it to claim, apply, achieve, Explore, or Buddy Auto paths.
+- Converted missing `design.md` and missing `## Testing Strategy` results into actionable `HANDOFF` output requiring an explicit contract before any GitHub Issue mutation; no defaults are generated.
+- Added executable coverage for command order, local propose validation, both missing-artifact cases, and absence of `gh` invocation, plus static manual/Auto routing assertions.
 
 ## TDD Evidence
 
-The focused tests were run before production changes and failed because `validate-proposal-shape.mjs` was absent from the driver sequence. After the minimal driver integration, both focused tests passed.
+- Red: both focused evals failed because `validate-testing-strategy.mjs` was absent from the propose command sequence.
+- Green: after the minimal driver integration and HANDOFF mapping, both focused evals passed.
 
 ## Verification
 
 - `rtk node skills/openspec-buddy/evals/buddy-driver.test.mjs` — passed
-- `rtk node skills/openspec-buddy/evals/propose-default-artifacts.test.mjs` — passed
+- `rtk node skills/openspec-buddy/evals/propose-acceptance-gates.test.mjs` — passed
 - `rtk npm run test:fast` — passed
 - `rtk git diff --check` — passed
 
 ## Concerns
 
-None within Task 2 scope. The untracked implementation plan remains untouched and excluded from the task commit.
+Malformed or incomplete Testing Strategy content other than a missing section remains a validator failure and therefore a `BLOCKED` result. Task 2 only requires missing design/section setup to produce `HANDOFF`.
+
+The untracked implementation plan remains untouched and excluded from the task commit.

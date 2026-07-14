@@ -183,6 +183,11 @@ function describeNext(opts) {
     if (opts.change) {
       commands.push([path.join(scriptDir, 'validate-issue-body.mjs'), `openspec/changes/${opts.change}/.buddy/issue.md`]);
       commands.push([path.join(scriptDir, 'validate-proposal-shape.mjs'), `openspec/changes/${opts.change}/.buddy/proposal-review.yaml`]);
+      commands.push([
+        path.join(scriptDir, 'validate-testing-strategy.mjs'),
+        `openspec/changes/${opts.change}/design.md`,
+        `openspec/changes/${opts.change}/.buddy/issue.md`,
+      ]);
     } else {
       notes.push('Pass --change <change_id> to get the exact issue-body validation command.');
     }
@@ -230,6 +235,19 @@ function runDriver(opts) {
           mode,
           commands: [command],
           notes: [output, 'Create the proposal-review manifest before any GitHub Issue mutation.'],
+          fields,
+        });
+        return;
+      }
+      if (
+        mode === 'propose'
+        && command[0] === path.join(scriptDir, 'validate-testing-strategy.mjs')
+        && /(?:design\.md not found|Testing Strategy section missing)/.test(output)
+      ) {
+        emitHandoff({
+          mode,
+          commands: [command],
+          notes: [output, 'Create design.md with an explicit Testing Strategy section before any GitHub Issue mutation.'],
           fields,
         });
         return;

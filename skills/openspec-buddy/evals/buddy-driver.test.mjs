@@ -30,9 +30,15 @@ function makeExecutable(file, body) {
   assert.match(result.stdout, /openspec\/changes\/add-driver-gate\/\.buddy\/issue\.md/);
   assert.match(result.stdout, /validate-proposal-shape\.mjs/);
   assert.match(result.stdout, /openspec\/changes\/add-driver-gate\/\.buddy\/proposal-review\.yaml/);
+  assert.match(result.stdout, /validate-testing-strategy\.mjs/);
+  assert.match(result.stdout, /openspec\/changes\/add-driver-gate\/design\.md/);
   assert.ok(
     result.stdout.indexOf('validate-issue-body.mjs') < result.stdout.indexOf('validate-proposal-shape.mjs'),
     'proposal shape validation must immediately follow issue body validation',
+  );
+  assert.ok(
+    result.stdout.indexOf('validate-proposal-shape.mjs') < result.stdout.indexOf('validate-testing-strategy.mjs'),
+    'testing strategy validation must follow proposal shape validation',
   );
   assert.match(result.stdout, /independent proposal review/i);
 }
@@ -42,7 +48,47 @@ function makeExecutable(file, body) {
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /check-config\.sh local/);
   assert.match(result.stdout, /validate-proposal-shape\.mjs/);
+  assert.match(result.stdout, /validate-testing-strategy\.mjs/);
   assert.doesNotMatch(result.stdout, /--local-only/);
+}
+
+for (const missingArtifact of ['design', 'section']) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), `buddy-driver-propose-missing-testing-${missingArtifact}-`));
+  const scriptDir = path.join(tmp, 'skills/openspec-buddy/scripts');
+  const changeDir = path.join(tmp, 'openspec/changes/missing-testing');
+  fs.mkdirSync(path.join(changeDir, '.buddy'), { recursive: true });
+  fs.mkdirSync(scriptDir, { recursive: true });
+  fs.cpSync(helper, path.join(scriptDir, 'buddy-driver.mjs'));
+  fs.copyFileSync(
+    path.join(path.dirname(helper), 'validate-testing-strategy.mjs'),
+    path.join(scriptDir, 'validate-testing-strategy.mjs'),
+  );
+  const logFile = path.join(tmp, 'commands.log');
+  const githubLog = path.join(tmp, 'github.log');
+  makeExecutable(path.join(scriptDir, 'check-config.sh'), `#!/usr/bin/env bash\necho check-config >> ${JSON.stringify(logFile)}\n`);
+  makeExecutable(path.join(scriptDir, 'validate-issue-body.mjs'), `#!/usr/bin/env bash\necho validate-issue-body >> ${JSON.stringify(logFile)}\n`);
+  makeExecutable(path.join(scriptDir, 'validate-proposal-shape.mjs'), `#!/usr/bin/env bash\necho validate-proposal-shape >> ${JSON.stringify(logFile)}\n`);
+  makeExecutable(path.join(tmp, 'gh'), `#!/usr/bin/env bash\necho gh >> ${JSON.stringify(githubLog)}\n`);
+  fs.writeFileSync(path.join(changeDir, '.buddy/issue.md'), '- [ ] AC-1: Outcome.\n');
+  if (missingArtifact === 'section') {
+    fs.writeFileSync(path.join(changeDir, 'design.md'), '# Design\n\nNo testing contract.\n');
+  }
+  spawnSync('git', ['init', '-q'], { cwd: tmp });
+  const result = spawnSync('node', [path.join(scriptDir, 'buddy-driver.mjs'), '--mode', 'propose', '--change', 'missing-testing'], {
+    cwd: tmp,
+    encoding: 'utf8',
+    env: { ...process.env, PATH: `${tmp}:${process.env.PATH}` },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^HANDOFF$/m);
+  assert.match(result.stdout, missingArtifact === 'design' ? /design\.md not found/ : /Testing Strategy section missing/);
+  assert.match(result.stdout, /before any GitHub Issue mutation/i);
+  assert.equal(fs.existsSync(githubLog), false, 'proposal validation failure must not invoke GitHub mutation');
+  assert.equal(fs.readFileSync(logFile, 'utf8').trim(), [
+    'check-config',
+    'validate-issue-body',
+    'validate-proposal-shape',
+  ].join('\n'));
 }
 
 {

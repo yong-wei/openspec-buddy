@@ -19,6 +19,8 @@ const issueRelationships = read('skills/openspec-buddy/references/issue-relation
 const projectCoordination = read('skills/openspec-buddy/references/project-coordination.md');
 const readme = read('README.md');
 const exploreRoutingPath = 'skills/openspec-buddy/references/explore-routing.md';
+const buddyDriver = read('skills/openspec-buddy/scripts/buddy-driver.mjs');
+const autoDriver = read('skills/openspec-buddy-auto/scripts/buddy-auto-driver.mjs');
 
 assert.ok(
   fs.existsSync(path.join(repoRoot, exploreRoutingPath)),
@@ -26,6 +28,17 @@ assert.ok(
 );
 
 const exploreRouting = read(exploreRoutingPath);
+
+assert.match(
+  buddyDriver,
+  /validate-issue-body\.mjs[\s\S]*validate-proposal-shape\.mjs[\s\S]*validate-testing-strategy\.mjs[\s\S]*design\.md/,
+  'manual propose must validate the approved testing strategy after issue-body and proposal-shape validation',
+);
+assert.doesNotMatch(
+  autoDriver,
+  /validate-testing-strategy\.mjs/,
+  'testing strategy validation must not alter Buddy Auto compatibility paths',
+);
 
 assert.match(
   buddySkill,
