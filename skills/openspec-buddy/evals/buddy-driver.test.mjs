@@ -52,6 +52,62 @@ function makeExecutable(file, body) {
 }
 
 {
+  const result = run(['--help']);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /--mode claim\|propose\|explore\|apply\|achieve/);
+}
+
+{
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'buddy-driver-explore-'));
+  const scriptDir = path.join(tmp, 'skills/openspec-buddy/scripts');
+  fs.mkdirSync(scriptDir, { recursive: true });
+  fs.cpSync(helper, path.join(scriptDir, 'buddy-driver.mjs'));
+  fs.cpSync(path.join(path.dirname(helper), 'detect-method-skills.mjs'), path.join(scriptDir, 'detect-method-skills.mjs'));
+  const logFile = path.join(tmp, 'commands.log');
+  for (const name of ['check-config.sh', 'claim-issue.sh', 'sync-base-branch.sh', 'mark-in-progress.sh']) {
+    makeExecutable(path.join(scriptDir, name), `#!/usr/bin/env bash\necho ${name} >> ${JSON.stringify(logFile)}\n`);
+  }
+  const skillRoot = path.join(tmp, 'method-skills');
+  fs.mkdirSync(path.join(skillRoot, 'research'), { recursive: true });
+  fs.writeFileSync(path.join(skillRoot, 'research', 'SKILL.md'), '# research\n');
+  spawnSync('git', ['init', '-q'], { cwd: tmp });
+  const result = spawnSync('node', [path.join(scriptDir, 'buddy-driver.mjs'), '--mode', 'explore'], {
+    cwd: tmp,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      HOME: path.join(tmp, 'home'),
+      OPENSPEC_BUDDY_SKILL_ROOTS: skillRoot,
+    },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^HANDOFF$/m);
+  assert.match(result.stdout, /^mode: explore$/m);
+  assert.match(result.stdout, /^mutation_allowed: false$/m);
+  assert.match(result.stdout, /^coordination_state: none$/m);
+  assert.match(result.stdout, /^method_provider: matt$/m);
+  assert.match(result.stdout, /^recommended_method: research$/m);
+  assert.match(result.stdout, /^next_transition: propose \| continue-explore$/m);
+  assert.equal(fs.existsSync(logFile), false);
+}
+
+{
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'buddy-driver-explore-fallback-'));
+  const scriptDir = path.join(tmp, 'skills/openspec-buddy/scripts');
+  fs.mkdirSync(scriptDir, { recursive: true });
+  fs.cpSync(helper, path.join(scriptDir, 'buddy-driver.mjs'));
+  spawnSync('git', ['init', '-q'], { cwd: tmp });
+  const result = spawnSync('node', [path.join(scriptDir, 'buddy-driver.mjs'), '--mode', 'explore'], {
+    cwd: tmp,
+    encoding: 'utf8',
+    env: { ...process.env, HOME: path.join(tmp, 'home'), OPENSPEC_BUDDY_SKILL_ROOTS: '' },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^method_provider: buddy-native$/m);
+  assert.match(result.stdout, /^recommended_method: buddy-native$/m);
+}
+
+{
   const skill = fs.readFileSync(path.resolve(__dirname, '../SKILL.md'), 'utf8');
   assert.match(skill, /<EXTREMELY_IMPORTANT>/);
   assert.match(skill, /buddy-driver\.mjs/);
