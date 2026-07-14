@@ -90,8 +90,12 @@ assert.equal(direct.status, 0, direct.stderr);
 assert.match(direct.stdout, /Buddy issue body validation passed/);
 
 const issueTemplate = fs.readFileSync(path.join(repoRoot, "skills/openspec-buddy/references/issue-template.md"), "utf8");
-const templateBody = issueTemplate.match(/```markdown\n([\s\S]*?)\n```/)?.[1];
-assert.ok(templateBody, "issue template must contain a markdown body fence");
+const markdownFences = [...issueTemplate.matchAll(/```markdown\n([\s\S]*?)\n```/g)].map((match) => match[1]);
+assert.match(markdownFences[0] ?? "", /^## Testing Strategy\n/, "Testing Strategy may precede the Issue body fence");
+const templateBody = markdownFences.find((body) => /^---\n[\s\S]*?^change_id:/m.test(body));
+assert.ok(templateBody, "issue template must contain a markdown Issue body fence with change_id front matter");
+assert.match(templateBody, /^---\n/, "Issue body fixture must select YAML front matter, not the Testing Strategy fence");
+assert.doesNotMatch(templateBody, /^## Testing Strategy\n/, "Testing Strategy fence must not be validated as the Issue body");
 const templateValidation = runValidatorDirect(writeBody("template.md", templateBody), {
   OPENSPEC_BUDDY_BASE_BRANCH: "example-base-branch",
 });

@@ -18,6 +18,10 @@
   gates, without importing provider-specific refactoring guidance as a Buddy
   lifecycle gate.
 - Extended the documentation contract eval and the Auto eval expectation.
+- Hardened the Issue template validation fixture to select the fenced Markdown
+  body that starts with YAML front matter and contains `change_id`, with
+  regression assertions that the preceding Testing Strategy fence is not used
+  as the Issue body.
 
 ## TDD Evidence
 
@@ -28,16 +32,13 @@
 ## Verification
 
 - `rtk node skills/openspec-buddy/evals/propose-acceptance-gates.test.mjs`: pass
+- `rtk node skills/openspec-buddy/evals/propose-issue-body-validation.test.mjs`:
+  pass
 - Auto `evals.json` parse check: pass
 - `rtk git diff --check`: pass
-- `rtk npm run test:fast`: fail in the pre-existing
-  `skills/openspec-buddy/evals/propose-issue-body-validation.test.mjs:98`
-  assertion because its valid fixture is reported as missing Buddy metadata.
-  The failure reproduces when that eval runs alone; Task 3 does not modify the
-  failing eval or `validate-issue-body.mjs`.
+- `rtk npm run test:fast`: pass
 
 ## Concerns
 
-The branch's fast suite is not fully green because of the independently
-reproducible issue-body validation failure above. Task 3's focused documentation
-contract and JSON validation pass.
+None within Task 3. The implementation plan remains untracked and excluded from
+the commits.
