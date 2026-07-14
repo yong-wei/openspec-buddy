@@ -105,6 +105,7 @@ JSON
 fi
 if [[ "${1:-}" == "api" && "${2:-}" == repos/owner/repo/commits/*/check-runs* ]]; then
   case "${CHECK_MODE:-success}" in
+    empty) printf '%s\n' '{"check_runs":[]}' ;;
     failing) printf '%s\n' '{"check_runs":[{"status":"completed","conclusion":"failure"}]}' ;;
     pending) printf '%s\n' '{"check_runs":[{"status":"in_progress","conclusion":null}]}' ;;
     *) printf '%s\n' '{"check_runs":[{"status":"completed","conclusion":"success"}]}' ;;
@@ -114,6 +115,7 @@ fi
 if [[ "${1:-}" == "api" && "${2:-}" == repos/owner/repo/commits/*/status* ]]; then
   case "${STATUS_MODE:-success}" in
     checks-only) printf '%s\n' '{"state":"pending","statuses":[]}' ;;
+    legacy-failure) printf '%s\n' '{"state":"failure","statuses":[{"state":"failure"}]}' ;;
     legacy-pending) printf '%s\n' '{"state":"pending","statuses":[{"state":"pending"}]}' ;;
     *) printf '%s\n' '{"state":"success","statuses":[]}' ;;
   esac
@@ -160,6 +162,7 @@ expect_denied missing-response env REVIEW_MODE=missing
 expect_denied unresolved-thread env REVIEW_MODE=unresolved
 expect_denied ci-failing env CHECK_MODE=failing
 expect_denied ci-pending env CHECK_MODE=pending
+expect_denied legacy-status-failure env STATUS_MODE=legacy-failure
 expect_denied legacy-status-pending env STATUS_MODE=legacy-pending
 expect_denied not-mergeable env MERGEABLE_FALSE=1
 expect_denied wrong-base env BASE_WRONG=1
@@ -189,6 +192,12 @@ node -e '
 const data = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
 if (data.merged !== true || data.pr !== "123" || data.head !== "head-1") process.exit(1);
 ' "$tmp_dir/checks-only.out"
+
+run_case empty-ci env CHECK_MODE=empty STATUS_MODE=checks-only bash "$helper" 42 123 head-1 >"$tmp_dir/empty-ci.out"
+node -e '
+const data = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+if (data.merged !== true || data.pr !== "123" || data.head !== "head-1") process.exit(1);
+' "$tmp_dir/empty-ci.out"
 if ! grep -F -- 'pr merge --repo owner/repo 123 --squash --delete-branch --match-head-commit head-1' "$GH_LOG_FILE" >/dev/null; then
   echo "merge command must target the verified repository explicitly" >&2
   cat "$GH_LOG_FILE" >&2

@@ -115,7 +115,7 @@ if (badCheck) {
 }
 const combinedState = String(status.state || "").toLowerCase();
 const legacyStatuses = Array.isArray(status.statuses) ? status.statuses : [];
-const checksOnlyPending = combinedState === "pending" && legacyStatuses.length === 0 && checkRuns.length > 0;
+const checksOnlyPending = combinedState === "pending" && legacyStatuses.length === 0;
 if (combinedState && combinedState !== "success" && !checksOnlyPending) {
   process.stderr.write(`Combined CI status is not successful: ${combinedState}.\n`);
   process.exit(1);
