@@ -1,6 +1,6 @@
 ---
 name: openspec-buddy
-description: Use when the user explicitly invokes openspec-buddy claim, propose, apply, or achieve for OpenSpec changes coordinated through GitHub Issues across branches, agents, or worktrees.
+description: Use when the user explicitly invokes openspec-buddy explore, claim, propose, apply, or achieve for OpenSpec changes coordinated through GitHub Issues across branches, agents, or worktrees.
 compatibility: Requires openspec CLI and GitHub CLI.
 ---
 
@@ -13,7 +13,7 @@ explicit local-only exception.
 <EXTREMELY_IMPORTANT>
 EVERY OPENSPEC-BUDDY PHASE MUST START BY RUNNING THE DRIVER SCRIPT.
 
-RUN THIS BEFORE CLAIM, PROPOSE, APPLY, ACHIEVE, REVIEW, MERGE, OR ISSUE STATE
+RUN THIS BEFORE EXPLORE, CLAIM, PROPOSE, APPLY, ACHIEVE, REVIEW, MERGE, OR ISSUE STATE
 SYNC:
 
 ```bash
@@ -56,6 +56,17 @@ one GitHub Issue = one change_id = one claim branch = one OpenSpec change = one 
 `claim_branch` must equal `change_id`. GitHub Issue, PR, Project, review, and
 claim ownership state are truth. Cache and local notes are accelerators only.
 
+## Explore Entry
+
+Classify the uncertainty, then invoke the read-only manual Explore phase:
+
+```bash
+<openspec-buddy-skill-dir>/scripts/buddy-driver.mjs --mode explore --explore-question <intent|facts|interaction-state|active-change-design>
+```
+
+The driver returns exactly one matching optional method or its native fallback.
+Explore does not mutate repository or GitHub state and is not a Buddy Auto mode.
+
 ## Required Configuration
 
 Before normal GitHub-backed commands, the driver will direct you to:
@@ -71,7 +82,7 @@ Default GitHub-backed flows require `OPENSPEC_BUDDY_BASE_BRANCH`,
 
 ## References
 
-- `references/core-lifecycle.md`: claim, propose, apply, review, achieve stage rules
+- `references/core-lifecycle.md`: explore, claim, propose, apply, review, achieve stage rules
 - `references/explore-routing.md`: read-only explore question and method routing
 - `references/claim-locking.md`: claim race and partial-claim handling
 - `references/issue-template.md`: issue body template
@@ -92,9 +103,10 @@ Default GitHub-backed flows require `OPENSPEC_BUDDY_BASE_BRANCH`,
   independent review decides approved AC ids.
 - Do not treat `--no-pr` as valid for issue-backed changes. It only applies to
   explicitly local-only `--no-issue` changes.
-- Do not use driver options in normal operation. Options such as `--dry-run`,
-  `--mode`, `--issue`, `--pr`, and `--change` are compatibility and diagnostic
-  controls for exceptional recovery only.
+- Except for the documented Explore entry, do not use driver options in normal
+  operation. Options such as `--dry-run`, `--mode`, `--issue`, `--pr`, and
+  `--change` are compatibility and diagnostic controls for exceptional recovery
+  only.
 
 ## Final Report
 

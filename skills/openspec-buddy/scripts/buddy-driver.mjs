@@ -12,6 +12,7 @@ function parseArgs(argv) {
     issue: '',
     pr: '',
     change: '',
+    exploreQuestion: '',
     noIssue: false,
     noPr: false,
     dryRun: false,
@@ -22,6 +23,7 @@ function parseArgs(argv) {
     else if (arg === '--issue') opts.issue = argv[++i] || '';
     else if (arg === '--pr') opts.pr = argv[++i] || '';
     else if (arg === '--change') opts.change = argv[++i] || '';
+    else if (arg === '--explore-question') opts.exploreQuestion = argv[++i] || '';
     else if (arg === '--no-issue') opts.noIssue = true;
     else if (arg === '--no-pr') opts.noPr = true;
     else if (arg === '--run-next') continue;
@@ -107,19 +109,27 @@ function emitHandoff({ mode, commands, notes, fields = [] }) {
   ]);
 }
 
-function exploreRecommendation() {
+const exploreRoutes = {
+  intent: { optional: 'grilling', native: 'native-one-question-clarification' },
+  facts: { optional: 'research', native: 'native-primary-source-investigation' },
+  'interaction-state': { optional: 'prototype', native: 'native-throwaway-experiment' },
+  'active-change-design': { optional: '', native: 'openspec-explore' },
+};
+
+function exploreRecommendation(question) {
+  const route = exploreRoutes[question];
+  if (!route) throw new Error(`Unsupported explore question: ${question}`);
+  if (!route.optional) return { provider: 'buddy-native', method: route.native };
   try {
     const output = run(process.execPath, [path.join(scriptDir, 'detect-method-skills.mjs')], { optional: true });
     const detected = JSON.parse(output);
-    const available = ['grilling', 'research', 'prototype']
-      .filter((method) => detected[method] === 'available');
-    if (available.length) {
-      return { provider: 'matt', method: available.join(' | ') };
+    if (detected[route.optional] === 'available') {
+      return { provider: 'matt', method: route.optional };
     }
   } catch {
     // Optional method discovery must never prevent native exploration.
   }
-  return { provider: 'buddy-native', method: 'buddy-native' };
+  return { provider: 'buddy-native', method: route.native };
 }
 
 function repoState() {
@@ -151,10 +161,14 @@ function describeNext(opts) {
   if (mode === 'context-needed') {
     notes.push('No phase context was inferred. Do not claim or mutate GitHub state until the agent or caller provides a concrete phase context.');
   } else if (mode === 'explore') {
-    const recommendation = exploreRecommendation();
+    if (!opts.exploreQuestion) {
+      throw new Error('--explore-question is required for explore mode.');
+    }
+    const recommendation = exploreRecommendation(opts.exploreQuestion);
     fields.push(
       ['mutation_allowed', 'false'],
       ['coordination_state', 'none'],
+      ['explore_question', opts.exploreQuestion],
       ['method_provider', recommendation.provider],
       ['recommended_method', recommendation.method],
       ['next_transition', 'propose | continue-explore'],
@@ -224,7 +238,7 @@ function runDriver(opts) {
 function main() {
   const opts = parseArgs(process.argv.slice(2));
   if (opts.help) {
-    console.log('Usage: buddy-driver.mjs [--dry-run] [--mode claim|propose|explore|apply|achieve] [--issue N] [--pr PR] [--change ID] [--no-issue]');
+    console.log('Usage: buddy-driver.mjs [--dry-run] [--mode claim|propose|explore|apply|achieve] [--explore-question intent|facts|interaction-state|active-change-design] [--issue N] [--pr PR] [--change ID] [--no-issue]');
     return;
   }
   if (!fs.existsSync(scriptDir)) throw new Error(`Missing script directory: ${scriptDir}`);

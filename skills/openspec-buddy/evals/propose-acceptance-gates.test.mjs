@@ -140,10 +140,17 @@ assert.match(
   'README review request example must preserve full review and add AC/scope checks',
 );
 
-assert.match(
-  exploreRouting,
-  /unclear intent[\s\S]*grilling[\s\S]*one-question clarification[\s\S]*missing facts[\s\S]*research[\s\S]*primary-source investigation[\s\S]*undecidable interaction or state[\s\S]*prototype[\s\S]*throwaway experiment[\s\S]*active change design issue[\s\S]*openspec-explore/i,
-  'explore routing must map intent, facts, solution uncertainty, and active-change design issues',
+for (const route of [
+  '| Unclear intent | `intent` | `grilling` | Native one-question clarification |',
+  '| Missing facts | `facts` | `research` | Native primary-source investigation |',
+  '| Undecidable interaction or state | `interaction-state` | `prototype` | Native throwaway experiment |',
+  '| Active change design issue | `active-change-design` | Native `openspec-explore` | Native `openspec-explore` |',
+]) {
+  assert.ok(exploreRouting.includes(route), `explore routing must include exact route: ${route}`);
+}
+assert.ok(
+  exploreRouting.includes('buddy-driver.mjs --mode explore --explore-question <intent|facts|interaction-state|active-change-design>'),
+  'explore routing must document the legal driver invocation',
 );
 assert.match(
   exploreRouting,
@@ -165,10 +172,15 @@ assert.match(
   /references\/explore-routing\.md/,
   'main skill must link to the explore routing reference',
 );
-assert.match(
-  coreLifecycle,
-  /## Explore[\s\S]*read-only[\s\S]*references\/explore-routing\.md/i,
-  'core lifecycle must define explore as read-only and route to the detailed reference',
+assert.ok(coreLifecycle.includes('## Explore'), 'core lifecycle must define Explore');
+assert.ok(
+  coreLifecycle.includes('buddy-driver.mjs --mode explore --explore-question <intent|facts|interaction-state|active-change-design>'),
+  'core lifecycle must document the legal Explore invocation',
+);
+assert.match(coreLifecycle, /Explore is a read-only manual Buddy phase/i, 'core lifecycle must keep Explore read-only');
+assert.ok(
+  coreLifecycle.includes('`references/explore-routing.md`'),
+  'core lifecycle must route to the detailed Explore reference',
 );
 
 console.log('propose acceptance gates eval passed');

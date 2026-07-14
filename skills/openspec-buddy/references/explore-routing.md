@@ -6,14 +6,28 @@ available. Availability changes only the recommendation: an unavailable skill
 always uses the corresponding native fallback, so Explore remains usable on a
 plain installation.
 
+## Legal Invocation
+
+```bash
+<openspec-buddy-skill-dir>/scripts/buddy-driver.mjs --mode explore --explore-question <intent|facts|interaction-state|active-change-design>
+```
+
+`--explore-question` is required in Explore mode and selects exactly one route.
+
 ## Question Routing
 
-| Question type | Optional method | Native fallback |
-| --- | --- | --- |
-| Unclear intent | `grilling` | Ask one-question clarification at a time until the consequential ambiguity is resolved. |
-| Missing facts | `research` | Conduct a primary-source investigation and distinguish evidence from inference. |
-| Undecidable interaction or state | `prototype` | Build the smallest throwaway experiment needed to observe the disputed behavior, then discard it. |
-| Active change design issue | `openspec-explore` | Use the native OpenSpec exploration workflow for the active change; this route does not depend on the optional method detector. |
+| Question type | Input | Optional method | Native fallback |
+| --- | --- | --- | --- |
+| Unclear intent | `intent` | `grilling` | Native one-question clarification |
+| Missing facts | `facts` | `research` | Native primary-source investigation |
+| Undecidable interaction or state | `interaction-state` | `prototype` | Native throwaway experiment |
+| Active change design issue | `active-change-design` | Native `openspec-explore` | Native `openspec-explore` |
+
+The native clarification asks one question at a time until the consequential
+ambiguity is resolved. Native research investigates primary sources and
+distinguishes evidence from inference. The native throwaway experiment is the
+smallest disposable observation of the disputed behavior. `openspec-explore`
+is a native OpenSpec workflow, not an optional Matt method.
 
 Choose the route from the uncertainty that blocks a decision, not from which
 optional skill happens to be installed. If several uncertainties exist, handle

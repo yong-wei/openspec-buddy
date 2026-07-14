@@ -71,7 +71,7 @@ function makeExecutable(file, body) {
   fs.mkdirSync(path.join(skillRoot, 'research'), { recursive: true });
   fs.writeFileSync(path.join(skillRoot, 'research', 'SKILL.md'), '# research\n');
   spawnSync('git', ['init', '-q'], { cwd: tmp });
-  const result = spawnSync('node', [path.join(scriptDir, 'buddy-driver.mjs'), '--mode', 'explore'], {
+  const result = spawnSync('node', [path.join(scriptDir, 'buddy-driver.mjs'), '--mode', 'explore', '--explore-question', 'facts'], {
     cwd: tmp,
     encoding: 'utf8',
     env: {
@@ -97,14 +97,43 @@ function makeExecutable(file, body) {
   fs.mkdirSync(scriptDir, { recursive: true });
   fs.cpSync(helper, path.join(scriptDir, 'buddy-driver.mjs'));
   spawnSync('git', ['init', '-q'], { cwd: tmp });
-  const result = spawnSync('node', [path.join(scriptDir, 'buddy-driver.mjs'), '--mode', 'explore'], {
+  const result = spawnSync('node', [path.join(scriptDir, 'buddy-driver.mjs'), '--mode', 'explore', '--explore-question', 'interaction-state'], {
     cwd: tmp,
     encoding: 'utf8',
     env: { ...process.env, HOME: path.join(tmp, 'home'), OPENSPEC_BUDDY_SKILL_ROOTS: '' },
   });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /^method_provider: buddy-native$/m);
-  assert.match(result.stdout, /^recommended_method: buddy-native$/m);
+  assert.match(result.stdout, /^recommended_method: native-throwaway-experiment$/m);
+}
+
+{
+  const result = run(['--mode', 'explore']);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /--explore-question is required/);
+}
+
+{
+  const result = run(['--mode', 'explore', '--explore-question', 'unknown']);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Unsupported explore question/);
+}
+
+for (const [question, method] of [
+  ['intent', 'native-one-question-clarification'],
+  ['facts', 'native-primary-source-investigation'],
+  ['interaction-state', 'native-throwaway-experiment'],
+  ['active-change-design', 'openspec-explore'],
+]) {
+  const result = run(['--dry-run', '--mode', 'explore', '--explore-question', question], {
+    env: {
+      HOME: path.join(os.tmpdir(), 'missing-buddy-method-home'),
+      OPENSPEC_BUDDY_SKILL_ROOTS: path.join(os.tmpdir(), 'missing-buddy-method-skills'),
+    },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, new RegExp(`^explore_question: ${question}$`, 'm'));
+  assert.match(result.stdout, new RegExp(`^recommended_method: ${method}$`, 'm'));
 }
 
 {
