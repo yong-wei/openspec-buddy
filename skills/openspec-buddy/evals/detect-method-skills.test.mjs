@@ -21,14 +21,26 @@ function addSkill(root, name) {
   fs.writeFileSync(path.join(skillDirectory, 'SKILL.md'), `# ${name}\n`);
 }
 
-function detect({ roots = [], home = temporaryDirectory('buddy-method-home-') } = {}) {
+function detect({
+  roots = [],
+  home = temporaryDirectory('buddy-method-home-'),
+  codexHome,
+  cwd = repoRoot,
+} = {}) {
+  const env = {
+    ...process.env,
+    HOME: home,
+    OPENSPEC_BUDDY_SKILL_ROOTS: roots.join(path.delimiter),
+  };
+  if (codexHome === undefined) {
+    delete env.CODEX_HOME;
+  } else {
+    env.CODEX_HOME = codexHome;
+  }
   const result = spawnSync(process.execPath, [detector], {
     encoding: 'utf8',
-    env: {
-      ...process.env,
-      HOME: home,
-      OPENSPEC_BUDDY_SKILL_ROOTS: roots.join(path.delimiter),
-    },
+    cwd,
+    env,
   });
 
   assert.equal(result.status, 0, result.stderr);
@@ -61,18 +73,29 @@ try {
     prototype: 'unavailable',
   });
 
-  const unreadableRoot = temporaryDirectory('buddy-method-unreadable-');
-  addSkill(unreadableRoot, 'prototype');
-  fs.chmodSync(unreadableRoot, 0o000);
-  try {
-    assert.deepEqual(detect({ roots: [unreadableRoot] }), {
-      grilling: 'unavailable',
-      research: 'unavailable',
-      prototype: 'unavailable',
-    });
-  } finally {
-    fs.chmodSync(unreadableRoot, 0o700);
-  }
+  const codexHome = temporaryDirectory('buddy-method-codex-home-');
+  addSkill(path.join(codexHome, 'skills'), 'grilling');
+  assert.deepEqual(detect({ codexHome }), {
+    grilling: 'available',
+    research: 'unavailable',
+    prototype: 'unavailable',
+  });
+
+  const project = temporaryDirectory('buddy-method-project-');
+  addSkill(path.join(project, '.agents', 'skills'), 'prototype');
+  assert.deepEqual(detect({ cwd: project }), {
+    grilling: 'unavailable',
+    research: 'unavailable',
+    prototype: 'available',
+  });
+
+  const invalidRoot = path.join(temporaryDirectory('buddy-method-invalid-'), 'not-a-directory');
+  fs.writeFileSync(invalidRoot, 'file roots cannot contain skills\n');
+  assert.deepEqual(detect({ roots: [invalidRoot] }), {
+    grilling: 'unavailable',
+    research: 'unavailable',
+    prototype: 'unavailable',
+  });
 
   console.log('method skill detector eval passed');
 } finally {

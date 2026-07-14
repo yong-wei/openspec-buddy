@@ -11,7 +11,8 @@ const configuredRoots = (process.env.OPENSPEC_BUDDY_SKILL_ROOTS ?? '')
 const roots = [
   ...configuredRoots,
   path.join(os.homedir(), '.agents', 'skills'),
-  path.join(os.homedir(), '.codex', 'skills'),
+  path.join(process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex'), 'skills'),
+  path.join(process.cwd(), '.agents', 'skills'),
 ];
 
 function hasSkill(root, capability) {
