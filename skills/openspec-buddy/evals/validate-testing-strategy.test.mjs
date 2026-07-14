@@ -51,6 +51,29 @@ Rationale: The change only updates static text or mechanical synchronization`);
   assert.equal(result.status, 0, result.stderr);
 }
 
+const notApplicableObservable = run("documentation-observable", `Change class: documentation
+Seam status: not-applicable
+Public behavior: Rendered testing-strategy guidance
+Public seam: inspect the rendered Markdown section
+Existing seam reused: none
+AC coverage: AC-1: rendered document inspection; AC-2: link integrity check
+Manual-only acceptance: none
+Rationale: The change only updates static documentation`);
+assert.equal(notApplicableObservable.status, 0, notApplicableObservable.stderr);
+
+for (const invalidBehavior of ["---", "?", "TODO", "not verified", "n/a", "not-applicable"]) {
+  const result = run(`not-applicable-behavior-${invalidBehavior}`.replaceAll(/[^a-z0-9]+/gi, "-"), `Change class: documentation
+Seam status: not-applicable
+Public behavior: ${invalidBehavior}
+Public seam: inspect the rendered Markdown section
+Existing seam reused: none
+AC coverage: AC-1: rendered document inspection; AC-2: link integrity check
+Manual-only acceptance: none
+Rationale: The change only updates static documentation`);
+  assert.equal(result.status, 1, `not-applicable Public behavior ${invalidBehavior} should fail`);
+  assert.match(result.stderr, /Public behavior.*substantive/i);
+}
+
 const missingSeam = run("missing-seam", required().replace(/Public seam:.*\n/, "Public seam:\n"));
 assert.equal(missingSeam.status, 1);
 assert.match(missingSeam.stderr, /Public seam.*must not be blank/i);
