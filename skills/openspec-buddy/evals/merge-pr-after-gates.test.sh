@@ -339,6 +339,24 @@ if [[ "$(<"$STATUS_FETCH_COUNT_FILE")" -ne "$EXPECTED_CI_SAMPLES" ]]; then
   echo "each zero-signal sample should query legacy statuses" >&2
   exit 1
 fi
+
+printf '%s\n' 'OPENSPEC_BUDDY_ALLOW_NO_CI=true' > "$OPENSPEC_BUDDY_REPO_ROOT/.env.openspec-buddy"
+run_case empty-ci-config env -u OPENSPEC_BUDDY_ALLOW_NO_CI CHECK_MODE=empty STATUS_MODE=checks-only bash "$helper" 42 123 head-1 >"$tmp_dir/empty-ci-config.out"
+rm "$OPENSPEC_BUDDY_REPO_ROOT/.env.openspec-buddy"
+node -e '
+const data = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+if (data.merged !== true || data.pr !== "123" || data.head !== "head-1") process.exit(1);
+' "$tmp_dir/empty-ci-config.out"
+for count_file in "$CHECK_RUN_FETCH_COUNT_FILE" "$CHECK_SUITE_FETCH_COUNT_FILE" "$STATUS_FETCH_COUNT_FILE"; do
+  if [[ "$(<"$count_file")" -ne "$EXPECTED_CI_SAMPLES" ]]; then
+    echo "file-configured continuous zero signal should use all seven samples" >&2
+    exit 1
+  fi
+done
+if [[ "$(wc -l < "$SLEEP_LOG_FILE")" -ne 6 ]] || grep -vxF '5' "$SLEEP_LOG_FILE" >/dev/null; then
+  echo "file-configured continuous zero signal should retain six fixed five-second sleeps" >&2
+  exit 1
+fi
 if ! grep -F -- 'pr merge --repo owner/repo 123 --squash --delete-branch --match-head-commit head-1' "$GH_LOG_FILE" >/dev/null; then
   echo "merge command must target the verified repository explicitly" >&2
   cat "$GH_LOG_FILE" >&2

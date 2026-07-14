@@ -27,6 +27,7 @@ if ! truthy "${OPENSPEC_BUDDY_AUTO_CONTROLLER_CHILD:-}"; then
 fi
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$script_dir/load-config.sh"
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
