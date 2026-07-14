@@ -59,8 +59,22 @@ for (const name of fieldNames) {
 }
 
 const placeholder = /\b(?:TBD|TODO)\b|decide\s+during\s+implementation/i;
+function hasSubstantiveContent(value) {
+  const normalized = value.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const contentWithoutAcIds = value.replace(/\bAC-\d+\b/g, "").match(/[\p{L}\p{N}]/gu)?.join("") ?? "";
+  return Boolean(contentWithoutAcIds) &&
+    !["none", "na", "notapplicable"].includes(normalized) &&
+    !placeholder.test(value) &&
+    !/^not[\s-]+(?:applicable|automated|covered|tested|verified)\b/i.test(value.trim());
+}
+
 for (const [name, value] of Object.entries(fields)) {
   if (placeholder.test(value)) errors.push(`${name}: placeholder is not allowed`);
+}
+for (const name of ["Public behavior", "Public seam", "Rationale"]) {
+  if (fields[name] && !hasSubstantiveContent(fields[name])) {
+    errors.push(`${name}: must contain substantive content`);
+  }
 }
 
 const seamRequiredClasses = new Set(["behavioral", "medium-risk", "high-risk"]);
@@ -83,7 +97,7 @@ if (notApplicableClasses.has(changeClass) && !["required", "not-applicable"].inc
 }
 
 if (seamStatus === "required") {
-  for (const name of ["Public behavior", "Public seam"]) {
+  for (const name of ["Public behavior", "Public seam", "Rationale"]) {
     if (fields[name]?.toLowerCase() === "none") errors.push(`${name}: must not be none when Seam status is required`);
   }
 }
@@ -119,15 +133,19 @@ function parseAcMap(label, text) {
     acIds.add(acId);
     if (!issueAcSet.has(acId)) errors.push(`${acId}: unknown ${shortLabel} entry`);
 
-    const normalized = reason.toLowerCase().replace(/[^a-z0-9]+/g, "");
-    const contentWithoutAcIds = reason.replace(/\bAC-\d+\b/g, "").match(/[\p{L}\p{N}]/gu)?.join("") ?? "";
-    const negativeEmptyMeaning = /\bnot[\s-]+(?:applicable|automated|covered|tested|verified)\b/i.test(reason);
-    if (
-      !contentWithoutAcIds ||
-      ["none", "na", "notapplicable"].includes(normalized) ||
-      placeholder.test(reason) ||
-      negativeEmptyMeaning
-    ) {
+    if (label === "Manual-only acceptance") {
+      const segments = reason.split("|").map((segment) => segment.trim());
+      if (segments.length !== 2) {
+        errors.push(`${acId}: Manual-only acceptance requires two segments: automation rationale | manual evidence check`);
+      } else {
+        if (!hasSubstantiveContent(segments[0])) {
+          errors.push(`${acId}: Manual-only acceptance automation rationale requires a substantive reason`);
+        }
+        if (!hasSubstantiveContent(segments[1])) {
+          errors.push(`${acId}: manual evidence check requires substantive content`);
+        }
+      }
+    } else if (!hasSubstantiveContent(reason)) {
       errors.push(`${acId}: ${label} entry requires its own non-placeholder affirmative reason`);
     }
   }

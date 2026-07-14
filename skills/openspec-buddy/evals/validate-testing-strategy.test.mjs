@@ -42,7 +42,7 @@ for (const changeClass of ["behavioral", "medium-risk", "high-risk"]) {
 for (const changeClass of ["documentation", "mechanical"]) {
   const result = run(`${changeClass}-not-applicable`, `Change class: ${changeClass}
 Seam status: not-applicable
-Public behavior: none
+Public behavior: Rendered documentation or synchronized artifact content
 Public seam: rtk git diff --check
 Existing seam reused: none
 AC coverage: AC-1: verified by diff inspection; AC-2: verified by diff inspection
@@ -61,7 +61,7 @@ assert.match(missingCoverage.stderr, /AC-2.*not mapped/i);
 
 const manualOnly = run("manual-only", required().replace(
   "AC coverage: AC-1: public CLI test; AC-2: integration seam test\nManual-only acceptance: none",
-  "AC coverage: AC-1: public CLI test\nManual-only acceptance: AC-2: visual confirmation of terminal rendering",
+  "AC coverage: AC-1: public CLI test\nManual-only acceptance: AC-2: terminal rendering lacks a deterministic visual harness | inspect the rendered output",
 ));
 assert.equal(manualOnly.status, 0, manualOnly.stderr);
 
@@ -93,7 +93,7 @@ for (const field of [
   assert.match(blank.stderr, new RegExp(`${field}.*must not be blank`, "i"));
 }
 
-for (const field of ["Public behavior", "Public seam"]) {
+for (const field of ["Public behavior", "Public seam", "Rationale"]) {
   const none = run(`required-none-${field.replaceAll(" ", "-")}`, required().replace(new RegExp(`${field}:.*`), `${field}: none`));
   assert.equal(none.status, 1);
   assert.match(none.stderr, new RegExp(`${field}.*must not be none`, "i"));
@@ -101,34 +101,34 @@ for (const field of ["Public behavior", "Public seam"]) {
 
 const manualEntries = run("manual-entries", required().replace(
   "AC coverage: AC-1: public CLI test; AC-2: integration seam test\nManual-only acceptance: none",
-  "AC coverage: AC-1: public CLI test\nManual-only acceptance: AC-2: inspect terminal output; AC-3: confirm screen-reader announcement",
+  "AC coverage: AC-1: public CLI test\nManual-only acceptance: AC-2: terminal rendering lacks a deterministic harness | inspect terminal output; AC-3: screen-reader output lacks a CI harness | confirm screen-reader announcement",
 ), "- [ ] AC-1: First.\n- [ ] AC-2: Second.\n- [ ] AC-3: Third.\n");
 assert.equal(manualEntries.status, 0, manualEntries.stderr);
 
 const isolatedManualReason = run("isolated-manual-reason", required().replace(
   "AC coverage: AC-1: public CLI test; AC-2: integration seam test\nManual-only acceptance: none",
-  "AC coverage: AC-1: public CLI test\nManual-only acceptance: AC-2: AC-3; AC-3: visual inspection",
+  "AC coverage: AC-1: public CLI test\nManual-only acceptance: AC-2: AC-3 | inspect output; AC-3: visual state lacks a deterministic harness | inspect rendering",
 ), "- [ ] AC-1: First.\n- [ ] AC-2: Second.\n- [ ] AC-3: Third.\n");
 assert.equal(isolatedManualReason.status, 1);
 assert.match(isolatedManualReason.stderr, /AC-2.*reason/i);
 
 const duplicateManual = run("duplicate-manual", required().replace(
   "AC coverage: AC-1: public CLI test; AC-2: integration seam test\nManual-only acceptance: none",
-  "AC coverage: AC-1: public CLI test\nManual-only acceptance: AC-2: inspect output; AC-2: inspect rendering",
+  "AC coverage: AC-1: public CLI test\nManual-only acceptance: AC-2: visual state lacks a harness | inspect output; AC-2: screen state lacks a harness | inspect rendering",
 ));
 assert.equal(duplicateManual.status, 1);
 assert.match(duplicateManual.stderr, /AC-2.*duplicate manual-only/i);
 
 const unknownManual = run("unknown-manual", required().replace(
   "Manual-only acceptance: none",
-  "Manual-only acceptance: AC-9: inspect output",
+  "Manual-only acceptance: AC-9: visual state lacks a harness | inspect output",
 ));
 assert.equal(unknownManual.status, 1);
 assert.match(unknownManual.stderr, /AC-9.*unknown/i);
 
 const overlappingMapping = run("overlapping-mapping", required().replace(
   "Manual-only acceptance: none",
-  "Manual-only acceptance: AC-2: inspect output",
+  "Manual-only acceptance: AC-2: visual state lacks a harness | inspect output",
 ));
 assert.equal(overlappingMapping.status, 1);
 assert.match(overlappingMapping.stderr, /AC-2.*both AC coverage and Manual-only acceptance/i);
@@ -164,10 +164,37 @@ for (const invalidReason of ["none", "n/a", "not-applicable", "---", "AC-3", "TO
 
   const invalidManual = run(`invalid-manual-${slug}`, required().replace(
     "AC coverage: AC-1: public CLI test; AC-2: integration seam test\nManual-only acceptance: none",
-    `AC coverage: AC-1: public CLI test\nManual-only acceptance: AC-2: ${invalidReason}`,
+    `AC coverage: AC-1: public CLI test\nManual-only acceptance: AC-2: ${invalidReason} | inspect output`,
   ));
   assert.equal(invalidManual.status, 1, `manual reason ${invalidReason} should fail`);
   assert.match(invalidManual.stderr, /AC-2.*Manual-only acceptance.*reason/i);
+}
+
+const missingManualEvidence = run("missing-manual-evidence", required().replace(
+  "AC coverage: AC-1: public CLI test; AC-2: integration seam test\nManual-only acceptance: none",
+  "AC coverage: AC-1: public CLI test\nManual-only acceptance: AC-2: terminal rendering lacks a deterministic harness",
+));
+assert.equal(missingManualEvidence.status, 1);
+assert.match(missingManualEvidence.stderr, /AC-2.*two segments/i);
+
+for (const invalidEvidence of ["none", "n/a", "---", "AC-3", "TODO", "not verified"]) {
+  const result = run(`invalid-manual-evidence-${invalidEvidence.replaceAll(/[^a-z0-9]+/gi, "-")}`, required().replace(
+    "AC coverage: AC-1: public CLI test; AC-2: integration seam test\nManual-only acceptance: none",
+    `AC coverage: AC-1: public CLI test\nManual-only acceptance: AC-2: terminal rendering lacks a deterministic harness | ${invalidEvidence}`,
+  ));
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /AC-2.*manual evidence check/i);
+}
+
+for (const field of ["Public behavior", "Public seam", "Rationale"]) {
+  for (const invalidContent of ["n/a", "not-applicable", "---", "TODO", "not verified"]) {
+    const result = run(`empty-${field}-${invalidContent}`.replaceAll(/[^a-z0-9]+/gi, "-"), required().replace(
+      new RegExp(`${field}:.*`),
+      `${field}: ${invalidContent}`,
+    ));
+    assert.equal(result.status, 1, `${field}: ${invalidContent} should fail`);
+    assert.match(result.stderr, new RegExp(`${field}.*substantive`, "i"));
+  }
 }
 
 const missingSectionDesign = path.join(tmpDir, "missing-section-design.md");
