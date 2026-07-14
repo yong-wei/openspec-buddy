@@ -6,7 +6,7 @@ import path from 'node:path';
 export const receiptSource = 'buddy-auto-driver/run-next';
 
 export function receiptPayload(state, stage, receipt) {
-  return [
+  const base = [
     state.key || '',
     receipt.repository || state.repository || '',
     state.issue || '',
@@ -22,6 +22,14 @@ export function receiptPayload(state, stage, receipt) {
     receipt.responseUrl || '',
     receipt.mergeAttemptId || '',
   ].join('\0');
+  const recoveryEvidence = [
+    receipt.violationSignature || '',
+    receipt.remoteHead || '',
+    receipt.mergedAt || '',
+  ];
+  return recoveryEvidence.some(Boolean)
+    ? `${base}\0${recoveryEvidence.join('\0')}`
+    : base;
 }
 
 function secretPath(stateDir) {

@@ -119,8 +119,10 @@ storm.
 ## Unauthorized Merge
 
 If GitHub reports a merged PR without a matching controller
-`merge_authorized` receipt, the lane enters `unauthorized_merge` and normal
-reruns remain blocked. Do not run achievement helpers or synthesize a clean
+`merge_authorized` receipt, both single and multi mode enter
+`unauthorized_merge` and normal reruns remain blocked. Single mode persists a
+signed violation receipt for the repository, issue, PR, and exact head before
+returning the blocker. Do not run achievement helpers or synthesize a clean
 receipt. Recovery requires a user-approved controller action with an audit
 reason:
 
@@ -130,8 +132,12 @@ reason:
   --reason "<user-approved recovery reason>"
 ```
 
-The controller records the violation and recovery reason before allowing
-post-merge achievement synchronization. Agents must never run `gh pr merge`.
+The controller accepts recovery only when the signed violation still matches
+the current context and a fresh GitHub read confirms that the same PR head is
+merged. It records the recovery reason in a signed recovery receipt before
+allowing post-merge achievement synchronization. Missing reasons, direct child
+invocation, changed heads, invalid receipts, and unmerged remote truth remain
+blocked. Agents must never run `gh pr merge`.
 
 ## Resume Or Branch Drift
 

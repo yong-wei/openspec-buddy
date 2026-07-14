@@ -124,6 +124,108 @@ printf '%s\n' \
 chmod +x "$tmp_dir/gh"
 export PATH="$tmp_dir:$PATH"
 
+run_scenario_with_timeout_retry() {
+  local base_timeout_seconds="$1"
+  local output_file="$2"
+  local error_file="$3"
+  local completion_diagnostic="$4"
+  local reset_scenario="$5"
+  shift 5
+
+  local status
+  if timeout --kill-after=1s "${base_timeout_seconds}s" "$@" > "$output_file" 2> "$error_file"; then
+    status=0
+  else
+    status="$?"
+  fi
+
+  if [[ "$status" -ne 124 ]]; then
+    return "$status"
+  fi
+  if grep -F -- "$completion_diagnostic" "$output_file" "$error_file" >/dev/null 2>&1; then
+    return 124
+  fi
+
+  "$reset_scenario"
+  if timeout --kill-after=1s "$((base_timeout_seconds * 2))s" "$@" > "$output_file" 2> "$error_file"; then
+    status=0
+  else
+    status="$?"
+  fi
+  return "$status"
+}
+
+cat > "$tmp_dir/retry-runner-probe.sh" <<'EOF'
+#!/bin/bash
+set -euo pipefail
+attempt_file="${RETRY_RUNNER_PROBE_ATTEMPTS:?}"
+attempt=0
+if [[ -f "$attempt_file" ]]; then attempt="$(cat "$attempt_file")"; fi
+attempt="$((attempt + 1))"
+printf '%s' "$attempt" > "$attempt_file"
+scenario_count_file="${RETRY_RUNNER_PROBE_SCENARIO_COUNT:?}"
+scenario_count=0
+if [[ -f "$scenario_count_file" ]]; then scenario_count="$(cat "$scenario_count_file")"; fi
+printf '%s' "$((scenario_count + 1))" > "$scenario_count_file"
+if [[ "${RETRY_RUNNER_PROBE_MODE:?}" == "outer-timeout" && "$attempt" -eq 1 ]]; then
+  echo stale > "${RETRY_RUNNER_PROBE_COMMENT_LOG:?}"
+  sleep 2
+fi
+if [[ "$RETRY_RUNNER_PROBE_MODE" == "failure" ]]; then
+  echo "ordinary assertion failure" >&2
+  exit 7
+fi
+echo "probe completed"
+EOF
+chmod +x "$tmp_dir/retry-runner-probe.sh"
+
+reset_retry_runner_probe() {
+  rm -f \
+    "$tmp_dir/retry-runner-scenario-count" \
+    "$tmp_dir/retry-runner-output.txt" \
+    "$tmp_dir/retry-runner-err.txt" \
+    "$tmp_dir/retry-runner-comment.log"
+  printf '%s\n' reset >> "$tmp_dir/retry-runner-reset.log"
+}
+
+export RETRY_RUNNER_PROBE_ATTEMPTS="$tmp_dir/retry-runner-probe-attempts"
+export RETRY_RUNNER_PROBE_SCENARIO_COUNT="$tmp_dir/retry-runner-scenario-count"
+export RETRY_RUNNER_PROBE_COMMENT_LOG="$tmp_dir/retry-runner-comment.log"
+export RETRY_RUNNER_PROBE_MODE=outer-timeout
+rm -f "$RETRY_RUNNER_PROBE_ATTEMPTS" "$tmp_dir/retry-runner-reset.log"
+run_scenario_with_timeout_retry \
+  1 \
+  "$tmp_dir/retry-runner-output.txt" \
+  "$tmp_dir/retry-runner-err.txt" \
+  'probe completed' \
+  reset_retry_runner_probe \
+  "$tmp_dir/retry-runner-probe.sh"
+if [[ "$(cat "$RETRY_RUNNER_PROBE_ATTEMPTS")" -ne 2 || "$(cat "$RETRY_RUNNER_PROBE_SCENARIO_COUNT")" -ne 1 ]]; then
+  echo "scenario runner should retry exactly once after outer timeout exhaustion" >&2
+  exit 1
+fi
+if [[ "$(wc -l < "$tmp_dir/retry-runner-reset.log" | tr -d ' ')" -ne 1 || -e "$RETRY_RUNNER_PROBE_COMMENT_LOG" ]]; then
+  echo "scenario runner should reset counters, output, and comment logs before retry" >&2
+  exit 1
+fi
+
+export RETRY_RUNNER_PROBE_MODE=failure
+rm -f "$RETRY_RUNNER_PROBE_ATTEMPTS" "$RETRY_RUNNER_PROBE_SCENARIO_COUNT" "$RETRY_RUNNER_PROBE_COMMENT_LOG"
+set +e
+run_scenario_with_timeout_retry \
+  1 \
+  "$tmp_dir/retry-runner-output.txt" \
+  "$tmp_dir/retry-runner-err.txt" \
+  'probe completed' \
+  reset_retry_runner_probe \
+  "$tmp_dir/retry-runner-probe.sh"
+retry_runner_failure_status="$?"
+set -e
+if [[ "$retry_runner_failure_status" -ne 7 || "$(cat "$RETRY_RUNNER_PROBE_ATTEMPTS")" -ne 1 ]]; then
+  echo "scenario runner should return ordinary failures without retrying" >&2
+  exit 1
+fi
+
 printf '%s\n' \
   '{' \
   '  "number": 123,' \
@@ -524,6 +626,7 @@ fs.writeFileSync(file, `${JSON.stringify([
   },
 ])}\n`);
 ' "$tmp_dir/issue-comments.json" "$OPENSPEC_BUDDY_PR_REVIEW_REQUEST"
+cp "$tmp_dir/issue-comments.json" "$tmp_dir/retry-timeout-issue-comments.seed.json"
 
 printf '%s\n' \
   '#!/bin/bash' \
@@ -588,7 +691,23 @@ export GH_PR_SEQUENCE_COUNT_FILE="$tmp_dir/pr-timeout-boundary-sequence.count"
 export GH_PR_SEQUENCE_STATIC_COUNT=4
 rm -f "$GH_PR_SEQUENCE_COUNT_FILE"
 export GH_COMMENT_LOG_FILE="$tmp_dir/comment-timeout-boundary.log"
-if ! timeout 8s "$helper" 123 > "$tmp_dir/timeout-boundary-output.txt" 2> "$tmp_dir/timeout-boundary-err.txt"; then
+reset_timeout_boundary_scenario() {
+  rm -rf "$OPENSPEC_BUDDY_REPO_ROOT/openspec/.buddy-cache"
+  rm -f \
+    "$VERIFY_COUNT_FILE" \
+    "$VERIFY_REUSE_LOG_FILE" \
+    "$GH_PR_SEQUENCE_COUNT_FILE" \
+    "$tmp_dir/timeout-boundary-output.txt" \
+    "$tmp_dir/timeout-boundary-err.txt" \
+    "$GH_COMMENT_LOG_FILE"
+}
+if ! run_scenario_with_timeout_retry \
+  8 \
+  "$tmp_dir/timeout-boundary-output.txt" \
+  "$tmp_dir/timeout-boundary-err.txt" \
+  'cached head and commit state agree' \
+  reset_timeout_boundary_scenario \
+  "$helper" 123; then
   echo "wait-for-review-clear.sh missed a light-state change at the timeout boundary" >&2
   cat "$tmp_dir/timeout-boundary-output.txt" >&2
   cat "$tmp_dir/timeout-boundary-err.txt" >&2
@@ -640,8 +759,22 @@ printf '%s\n' \
 chmod +x "$tmp_dir/request-pr-review-retry.sh"
 export OPENSPEC_BUDDY_REQUEST_PR_REVIEW_HELPER="$tmp_dir/request-pr-review-retry.sh"
 rm -f "$GH_COMMENT_LOG_FILE"
+reset_retry_timeout_scenario() {
+  rm -rf "$OPENSPEC_BUDDY_REPO_ROOT/openspec/.buddy-cache"
+  rm -f \
+    "$tmp_dir/retry-timeout-output.txt" \
+    "$tmp_dir/retry-timeout-err.txt" \
+    "$GH_COMMENT_LOG_FILE"
+  cp "$tmp_dir/retry-timeout-issue-comments.seed.json" "$GH_ISSUE_COMMENTS_FILE"
+}
 set +e
-timeout 30s "$helper" 123 > "$tmp_dir/retry-timeout-output.txt" 2> "$tmp_dir/retry-timeout-err.txt"
+run_scenario_with_timeout_retry \
+  12 \
+  "$tmp_dir/retry-timeout-output.txt" \
+  "$tmp_dir/retry-timeout-err.txt" \
+  'after 2 wait rounds' \
+  reset_retry_timeout_scenario \
+  "$helper" 123
 retry_timeout_status="$?"
 set -e
 unset VERIFY_MODE

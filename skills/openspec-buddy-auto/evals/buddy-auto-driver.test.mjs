@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { signReceipt } from '../scripts/receipt-truth.mjs';
+import { signReceipt, validSignedReceipt } from '../scripts/receipt-truth.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '../../..');
@@ -831,8 +831,21 @@ exit 1
   makeExecutable(path.join(mergedBridgeCoreDir, 'wait-for-review-clear.sh'), `#!/usr/bin/env bash\necho "wait-review $*" >> ${JSON.stringify(mergedBridgeLogFile)}\n`);
   makeExecutable(path.join(mergedBridgeCoreDir, 'verify-review-clear.sh'), `#!/usr/bin/env bash\necho "verify-review $*" >> ${JSON.stringify(mergedBridgeLogFile)}\n`);
   makeExecutable(path.join(mergedBridgeCoreDir, 'verify-achieved-truth.mjs'), `#!/usr/bin/env node\nimport fs from 'node:fs';\nfs.appendFileSync(${JSON.stringify(mergedBridgeLogFile)}, \`achieved-truth \${process.argv.slice(2).join(' ')}\\n\`);\nconsole.log(JSON.stringify({achieved:true,reason:'merged PR already terminal'}));\n`);
+  const detectionBinDir = path.join(tmp, 'bin-merged-bridge-detection');
+  const detectionGhLogFile = path.join(tmp, 'gh-merged-bridge-detection.log');
+  fs.mkdirSync(detectionBinDir, { recursive: true });
+  makeExecutable(path.join(detectionBinDir, 'gh'), `#!/usr/bin/env bash
+printf '%s\\n' "$*" >> ${JSON.stringify(detectionGhLogFile)}
+case "\${DETECTION_PR_TRUTH:-merged}" in
+  unavailable) exit 1 ;;
+  open) printf '%s\\n' '{"number":707,"state":"open","head":{"sha":"merged-head"}}' ;;
+  mismatch) printf '%s\\n' '{"number":707,"state":"closed","merged_at":"2026-07-14T00:00:00Z","head":{"sha":"other-head"}}' ;;
+  *) printf '%s\\n' '{"number":707,"state":"closed","merged_at":"2026-07-14T00:00:00Z","merge_commit_sha":"merge-707","head":{"sha":"merged-head"}}' ;;
+esac
+`);
   const result = run([], {
     env: {
+      PATH: `${detectionBinDir}:${process.env.PATH}`,
       OPENSPEC_BUDDY_AUTO_STATE_DIR: mergedBridgeStateDir,
       OPENSPEC_BUDDY_CORE_SCRIPT_DIR: mergedBridgeCoreDir,
       OPENSPEC_BUDDY_AUTO_TARGET_ISSUE: '675',
@@ -849,6 +862,152 @@ exit 1
     'verify-review 707',
     'achieved-truth 675 707',
   ].join('\n'));
+
+  const stateFile = path.join(mergedBridgeStateDir, 'pr-707.json');
+  let state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+  assert.ok(state.stages.unauthorized_merge);
+  assert.equal(state.stages.unauthorized_merge.head, 'merged-head');
+  assert.equal(state.stages.unauthorized_merge.pr, '707');
+  assert.equal(state.stages.unauthorized_merge.remoteHead, 'merged-head');
+  assert.equal(state.stages.unauthorized_merge.mergedAt, '2026-07-14T00:00:00Z');
+  assert.equal(state.stages.unauthorized_merge.mergeCommit, 'merge-707');
+  assert.equal(fs.readFileSync(detectionGhLogFile, 'utf8').trim(), 'api repos/owner/repo/pulls/707');
+
+  const verifiedViolation = state.stages.unauthorized_merge;
+  for (const mode of ['unavailable', 'open', 'mismatch']) {
+    delete state.stages.unauthorized_merge;
+    fs.writeFileSync(stateFile, `${JSON.stringify(state, null, 2)}\n`);
+    const rejectedDetection = run(['--issue', '675', '--pr', '707', '--head', 'merged-head'], {
+      env: {
+        PATH: `${detectionBinDir}:${process.env.PATH}`,
+        DETECTION_PR_TRUTH: mode,
+        OPENSPEC_BUDDY_AUTO_STATE_DIR: mergedBridgeStateDir,
+        OPENSPEC_BUDDY_CORE_SCRIPT_DIR: mergedBridgeCoreDir,
+      },
+    });
+    assert.notEqual(rejectedDetection.status, 0, `${mode} remote truth must block`);
+    const rejectedState = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+    assert.equal(rejectedState.stages.unauthorized_merge, undefined, `${mode} remote truth must not write a violation receipt`);
+  }
+  state.stages.unauthorized_merge = verifiedViolation;
+  fs.writeFileSync(stateFile, `${JSON.stringify(state, null, 2)}\n`);
+
+  const ordinaryRerun = run(['--issue', '675', '--pr', '707', '--head', 'merged-head'], {
+    env: {
+      OPENSPEC_BUDDY_AUTO_STATE_DIR: mergedBridgeStateDir,
+      OPENSPEC_BUDDY_CORE_SCRIPT_DIR: mergedBridgeCoreDir,
+    },
+  });
+  assert.notEqual(ordinaryRerun.status, 0);
+  assert.match(ordinaryRerun.stdout, /stage: unauthorized-merge/);
+
+  const missingReason = run(['--issue', '675', '--pr', '707', '--head', 'merged-head'], {
+    env: {
+      OPENSPEC_BUDDY_AUTO_STATE_DIR: mergedBridgeStateDir,
+      OPENSPEC_BUDDY_CORE_SCRIPT_DIR: mergedBridgeCoreDir,
+      OPENSPEC_BUDDY_AUTO_UNAUTHORIZED_MERGE_RECOVERY: '1',
+    },
+  });
+  assert.notEqual(missingReason.status, 0);
+  assert.match(missingReason.stdout, /non-empty user authorization reason/i);
+
+  const directChildBypass = run(['--issue', '675', '--pr', '707', '--head', 'merged-head'], {
+    env: {
+      OPENSPEC_BUDDY_AUTO_STATE_DIR: mergedBridgeStateDir,
+      OPENSPEC_BUDDY_CORE_SCRIPT_DIR: mergedBridgeCoreDir,
+      OPENSPEC_BUDDY_AUTO_CONTROLLER_CHILD: '0',
+      OPENSPEC_BUDDY_AUTO_UNAUTHORIZED_MERGE_RECOVERY: '1',
+      OPENSPEC_BUDDY_AUTO_RECOVERY_REASON: 'user approved recovery',
+    },
+  });
+  assert.equal(directChildBypass.status, 0, directChildBypass.stderr);
+  assert.match(directChildBypass.stdout, /^BLOCKED/m);
+  assert.match(directChildBypass.stdout, /controller-owned/i);
+
+  const changedHead = run(['--issue', '675', '--pr', '707', '--head', 'changed-head'], {
+    env: {
+      OPENSPEC_BUDDY_AUTO_STATE_DIR: mergedBridgeStateDir,
+      OPENSPEC_BUDDY_CORE_SCRIPT_DIR: mergedBridgeCoreDir,
+      OPENSPEC_BUDDY_AUTO_UNAUTHORIZED_MERGE_RECOVERY: '1',
+      OPENSPEC_BUDDY_AUTO_RECOVERY_REASON: 'user approved recovery',
+    },
+  });
+  assert.notEqual(changedHead.status, 0);
+  assert.match(changedHead.stdout, /signed violation context/i);
+
+  const recoveryBinDir = path.join(tmp, 'bin-merged-bridge-recovery');
+  fs.mkdirSync(recoveryBinDir, { recursive: true });
+  const recoveryGh = path.join(recoveryBinDir, 'gh');
+  makeExecutable(recoveryGh, `#!/usr/bin/env bash
+if [[ "\${RECOVERY_PR_STATE:-OPEN}" == "MERGED" ]]; then
+  printf '%s\\n' '{"number":707,"state":"closed","merged_at":"2026-07-14T00:00:00Z","head":{"sha":"merged-head"}}'
+else
+  printf '%s\\n' '{"number":707,"state":"open","head":{"sha":"merged-head"}}'
+fi
+`);
+  const unmergedTruth = run(['--issue', '675', '--pr', '707', '--head', 'merged-head'], {
+    env: {
+      PATH: `${recoveryBinDir}:${process.env.PATH}`,
+      OPENSPEC_BUDDY_AUTO_STATE_DIR: mergedBridgeStateDir,
+      OPENSPEC_BUDDY_CORE_SCRIPT_DIR: mergedBridgeCoreDir,
+      OPENSPEC_BUDDY_AUTO_UNAUTHORIZED_MERGE_RECOVERY: '1',
+      OPENSPEC_BUDDY_AUTO_RECOVERY_REASON: 'user approved recovery',
+    },
+  });
+  assert.notEqual(unmergedTruth.status, 0);
+  assert.match(unmergedTruth.stdout, /fresh merged PR truth/i);
+
+  const recovered = run(['--issue', '675', '--pr', '707', '--head', 'merged-head'], {
+    env: {
+      PATH: `${recoveryBinDir}:${process.env.PATH}`,
+      RECOVERY_PR_STATE: 'MERGED',
+      OPENSPEC_BUDDY_AUTO_STATE_DIR: mergedBridgeStateDir,
+      OPENSPEC_BUDDY_CORE_SCRIPT_DIR: mergedBridgeCoreDir,
+      OPENSPEC_BUDDY_AUTO_UNAUTHORIZED_MERGE_RECOVERY: '1',
+      OPENSPEC_BUDDY_AUTO_RECOVERY_REASON: 'user-approved audit recovery for PR 707',
+    },
+  });
+  assert.equal(recovered.status, 0, recovered.stderr);
+  assert.match(recovered.stdout, /^DONE/m);
+  assert.match(recovered.stdout, /stage: achieved/);
+  state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+  assert.equal(state.stages.unauthorized_merge_recovered.recoveryReason, 'user-approved audit recovery for PR 707');
+  assert.ok(state.stages.achieved);
+
+  for (const [field, replacement] of [
+    ['violationSignature', 'tampered-violation-signature'],
+    ['remoteHead', 'tampered-head'],
+    ['mergedAt', '2026-07-15T00:00:00Z'],
+  ]) {
+    const tampered = structuredClone(state);
+    tampered.stages.unauthorized_merge_recovered[field] = replacement;
+    assert.equal(
+      validSignedReceipt(tampered, 'unauthorized_merge_recovered', { stateDir: mergedBridgeStateDir }),
+      false,
+      `${field} must be covered by the recovery receipt signature`,
+    );
+    fs.writeFileSync(stateFile, `${JSON.stringify(tampered, null, 2)}\n`);
+    const rejected = run(['--issue', '675', '--pr', '707', '--head', 'merged-head'], {
+      env: {
+        OPENSPEC_BUDDY_AUTO_STATE_DIR: mergedBridgeStateDir,
+        OPENSPEC_BUDDY_CORE_SCRIPT_DIR: mergedBridgeCoreDir,
+      },
+    });
+    assert.notEqual(rejected.status, 0);
+    assert.match(rejected.stdout, /stage: unauthorized-merge/);
+    fs.writeFileSync(stateFile, `${JSON.stringify(state, null, 2)}\n`);
+  }
+
+  const completedRerun = run(['--issue', '675', '--pr', '707', '--head', 'merged-head'], {
+    env: {
+      PATH: `${recoveryBinDir}:${process.env.PATH}`,
+      RECOVERY_PR_STATE: 'MERGED',
+      OPENSPEC_BUDDY_AUTO_STATE_DIR: mergedBridgeStateDir,
+      OPENSPEC_BUDDY_CORE_SCRIPT_DIR: mergedBridgeCoreDir,
+    },
+  });
+  assert.equal(completedRerun.status, 0, completedRerun.stderr);
+  assert.match(completedRerun.stdout, /stage: achieved/);
 }
 
 {
