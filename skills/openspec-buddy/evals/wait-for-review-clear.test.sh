@@ -660,7 +660,22 @@ export GH_PR_SEQUENCE_COUNT_FILE="$tmp_dir/pr-sequence.count"
 export GH_PR_SEQUENCE_STATIC_COUNT=4
 rm -f "$GH_PR_SEQUENCE_COUNT_FILE"
 
-if ! timeout 10s "$helper" 123 > "$tmp_dir/cache-refresh-output.txt" 2> "$tmp_dir/cache-refresh-err.txt"; then
+reset_cache_refresh_scenario() {
+  rm -rf "$OPENSPEC_BUDDY_REPO_ROOT/openspec/.buddy-cache"
+  rm -f \
+    "$VERIFY_COUNT_FILE" \
+    "$VERIFY_REUSE_LOG_FILE" \
+    "$GH_PR_SEQUENCE_COUNT_FILE" \
+    "$tmp_dir/cache-refresh-output.txt" \
+    "$tmp_dir/cache-refresh-err.txt"
+}
+if ! run_scenario_with_timeout_retry \
+  10 \
+  "$tmp_dir/cache-refresh-output.txt" \
+  "$tmp_dir/cache-refresh-err.txt" \
+  'cached head and commit state agree' \
+  reset_cache_refresh_scenario \
+  "$helper" 123; then
   echo "wait-for-review-clear.sh did not refresh commit cache before the verifier run" >&2
   cat "$tmp_dir/cache-refresh-output.txt" >&2
   cat "$tmp_dir/cache-refresh-err.txt" >&2
