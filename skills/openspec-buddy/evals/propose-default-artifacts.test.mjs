@@ -11,6 +11,7 @@ function read(relativePath) {
 
 const skill = read('skills/openspec-buddy/SKILL.md');
 const lifecycle = read('skills/openspec-buddy/references/core-lifecycle.md');
+const driver = read('skills/openspec-buddy/scripts/buddy-driver.mjs');
 
 assert.match(
   skill,
@@ -26,6 +27,16 @@ assert.match(
   lifecycle,
   /Use propose to create a local OpenSpec change and, by default, the matching\s+GitHub issue/i,
   'propose must default to creating the local OpenSpec change and GitHub issue',
+);
+assert.match(
+  driver,
+  /validate-issue-body\.mjs[\s\S]*validate-proposal-shape\.mjs/,
+  'propose must validate proposal shape immediately after the issue body',
+);
+assert.doesNotMatch(
+  driver,
+  /validate-proposal-shape\.mjs[\s\S]*--allow-missing/,
+  'new propose runs must not fabricate or silently accept a missing proposal-review manifest',
 );
 assert.match(
   lifecycle,

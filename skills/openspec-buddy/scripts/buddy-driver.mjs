@@ -182,6 +182,7 @@ function describeNext(opts) {
     commands.push([path.join(scriptDir, 'check-config.sh'), opts.noIssue ? 'local' : 'core']);
     if (opts.change) {
       commands.push([path.join(scriptDir, 'validate-issue-body.mjs'), `openspec/changes/${opts.change}/.buddy/issue.md`]);
+      commands.push([path.join(scriptDir, 'validate-proposal-shape.mjs'), `openspec/changes/${opts.change}/.buddy/proposal-review.yaml`]);
     } else {
       notes.push('Pass --change <change_id> to get the exact issue-body validation command.');
     }
@@ -223,11 +224,21 @@ function runDriver(opts) {
       stdio: 'pipe',
     });
     if (result.status !== 0) {
+      const output = compactOutput(result);
+      if (mode === 'propose' && command[0] === path.join(scriptDir, 'validate-proposal-shape.mjs') && /proposal-review\.yaml not found/.test(output)) {
+        emitHandoff({
+          mode,
+          commands: [command],
+          notes: [output, 'Create the proposal-review manifest before any GitHub Issue mutation.'],
+          fields,
+        });
+        return;
+      }
       emitBlocked({
         mode,
         command,
         reason: `${command[0]} exited with status ${result.status ?? 1}`,
-        output: compactOutput(result),
+        output,
       });
       process.exit(result.status ?? 1);
     }
