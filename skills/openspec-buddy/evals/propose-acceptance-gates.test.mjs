@@ -15,6 +15,7 @@ const coreLifecycle = read('skills/openspec-buddy/references/core-lifecycle.md')
 const autoDriverStates = read('skills/openspec-buddy-auto/references/driver-states.md');
 const executionLoop = read('skills/openspec-buddy-auto/references/execution-loop.md');
 const issueTemplate = read('skills/openspec-buddy/references/issue-template.md');
+const issueRelationships = read('skills/openspec-buddy/references/issue-relationships.md');
 const projectCoordination = read('skills/openspec-buddy/references/project-coordination.md');
 const readme = read('README.md');
 const exploreRoutingPath = 'skills/openspec-buddy/references/explore-routing.md';
@@ -67,6 +68,63 @@ assert.match(
   /only an independent reviewer may approve which checklist items are checked/i,
   'propose must keep AC unchecked until implementation evidence is independently reviewed',
 );
+for (const field of [
+  'split_status',
+  'vertical_slice_status',
+  'blocking_edges_status',
+  'wide_refactor_strategy',
+  'children',
+]) {
+  assert.match(
+    coreLifecycle,
+    new RegExp(`\\b${field}\\b`),
+    `proposal review guidance must document ${field}`,
+  );
+}
+assert.match(
+  coreLifecycle,
+  /independently claimable,\s+testable,\s+reviewable,\s+and deliverable as one PR/i,
+  'each series child must pass the independence test',
+);
+assert.match(
+  coreLifecycle,
+  /database, API, UI, and test steps[\s\S]*same change/i,
+  'vertical implementation steps may remain tasks within one change',
+);
+assert.match(
+  coreLifecycle,
+  /expand-migrate-contract[\s\S]*pseudo-slices[\s\S]*pass independently/i,
+  'broad mechanical migrations must use the explicit strategy instead of invalid pseudo-slices',
+);
+assert.match(
+  issueRelationships,
+  /series-required[\s\S]*tracking parent[\s\S]*child changes/i,
+  'series-required proposals must create a tracking parent and executable child changes',
+);
+assert.match(
+  issueRelationships,
+  /native GitHub `blockedBy`[\s\S]*authoritative[\s\S]*metadata[\s\S]*mirror/i,
+  'native blockedBy relationships must remain authoritative over Buddy metadata',
+);
+assert.match(
+  issueTemplate,
+  /\.buddy\/proposal-review\.yaml[\s\S]*split_status:[\s\S]*vertical_slice_status:[\s\S]*blocking_edges_status:[\s\S]*wide_refactor_strategy:[\s\S]*children:/i,
+  'issue template reference must include a complete proposal-review manifest example',
+);
+const issueFrontMatter = issueTemplate.match(/```markdown\n---\n([\s\S]*?)\n---/)?.[1] ?? '';
+for (const field of [
+  'split_status',
+  'vertical_slice_status',
+  'blocking_edges_status',
+  'wide_refactor_strategy',
+  'children',
+]) {
+  assert.doesNotMatch(
+    issueFrontMatter,
+    new RegExp(`^${field}:`, 'm'),
+    `${field} belongs in proposal-review.yaml, not Issue front matter`,
+  );
+}
 assert.match(
   buddySkill,
   /Do not check Acceptance Checklist items from the implementation thread/i,

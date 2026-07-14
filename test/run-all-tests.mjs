@@ -46,6 +46,7 @@ const commands = [
   node('skills/openspec-buddy/evals/propose-default-artifacts.test.mjs'),
   node('skills/openspec-buddy/evals/propose-acceptance-gates.test.mjs'),
   node('skills/openspec-buddy/evals/propose-issue-body-validation.test.mjs'),
+  node('skills/openspec-buddy/evals/validate-proposal-shape.test.mjs'),
   node('skills/openspec-buddy/evals/no-issue-no-pr.test.mjs'),
   bash('skills/openspec-buddy/evals/project-cache.test.sh'),
   bash('skills/openspec-buddy/evals/relationship-cache-invalidation.test.sh'),

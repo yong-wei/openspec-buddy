@@ -28,6 +28,12 @@ function makeExecutable(file, body) {
   assert.match(result.stdout, /HANDOFF/);
   assert.match(result.stdout, /validate-issue-body\.mjs/);
   assert.match(result.stdout, /openspec\/changes\/add-driver-gate\/\.buddy\/issue\.md/);
+  assert.match(result.stdout, /validate-proposal-shape\.mjs/);
+  assert.match(result.stdout, /openspec\/changes\/add-driver-gate\/\.buddy\/proposal-review\.yaml/);
+  assert.ok(
+    result.stdout.indexOf('validate-issue-body.mjs') < result.stdout.indexOf('validate-proposal-shape.mjs'),
+    'proposal shape validation must immediately follow issue body validation',
+  );
   assert.match(result.stdout, /independent proposal review/i);
 }
 
@@ -35,7 +41,31 @@ function makeExecutable(file, body) {
   const result = run(['--dry-run', '--mode', 'propose', '--change', 'local-change', '--no-issue']);
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /check-config\.sh local/);
+  assert.match(result.stdout, /validate-proposal-shape\.mjs/);
   assert.doesNotMatch(result.stdout, /--local-only/);
+}
+
+{
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'buddy-driver-propose-missing-manifest-'));
+  const scriptDir = path.join(tmp, 'skills/openspec-buddy/scripts');
+  fs.mkdirSync(scriptDir, { recursive: true });
+  fs.cpSync(helper, path.join(scriptDir, 'buddy-driver.mjs'));
+  const logFile = path.join(tmp, 'commands.log');
+  makeExecutable(path.join(scriptDir, 'check-config.sh'), `#!/usr/bin/env bash\necho check-config >> ${JSON.stringify(logFile)}\n`);
+  makeExecutable(path.join(scriptDir, 'validate-issue-body.mjs'), `#!/usr/bin/env bash\necho validate-issue-body >> ${JSON.stringify(logFile)}\n`);
+  fs.copyFileSync(
+    path.join(path.dirname(helper), 'validate-proposal-shape.mjs'),
+    path.join(scriptDir, 'validate-proposal-shape.mjs'),
+  );
+  spawnSync('git', ['init', '-q'], { cwd: tmp });
+  const result = spawnSync('node', [path.join(scriptDir, 'buddy-driver.mjs'), '--mode', 'propose', '--change', 'missing-manifest'], {
+    cwd: tmp,
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^HANDOFF$/m);
+  assert.match(result.stdout, /proposal-review\.yaml not found/);
+  assert.equal(fs.readFileSync(logFile, 'utf8').trim(), ['check-config', 'validate-issue-body'].join('\n'));
 }
 
 {
