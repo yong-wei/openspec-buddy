@@ -23,6 +23,7 @@ const commands = [
   node('skills/openspec-buddy/evals/build-pr-labels.test.mjs'),
   node('skills/openspec-buddy/evals/buddy-driver.test.mjs'),
   node('skills/openspec-buddy/evals/classify-review-response.test.mjs'),
+  node('skills/openspec-buddy/evals/detect-method-skills.test.mjs'),
   bash('skills/openspec-buddy/evals/cache-signal.test.sh'),
   bash('skills/openspec-buddy/evals/cache-metrics.test.sh'),
   bash('skills/openspec-buddy/evals/bound-worktree-guard.test.sh'),
