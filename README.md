@@ -74,6 +74,11 @@ openspec-buddy init
 
 配置会写入当前项目的 `.env.openspec-buddy`。这个文件通常不提交到 Git；如需给团队提供模板，可参考 `.env.openspec-buddy.example`。
 
+合并门禁默认要求观察到 CI 信号。只有仓库明确不使用 CI 时，才应在
+`.env.openspec-buddy` 中设置 `OPENSPEC_BUDDY_ALLOW_NO_CI=true`；默认值
+`false` 会在完整观察窗口持续没有 check suite、check run 或 legacy status
+时拒绝合并。
+
 长期隔离工作树建议再设置本地绑定分支，避免代理从 detached HEAD 或其他
 工作树分支进入 claim/auto 流程：
 

@@ -27,6 +27,7 @@ if ! truthy "${OPENSPEC_BUDDY_AUTO_CONTROLLER_CHILD:-}"; then
 fi
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$script_dir/load-config.sh"
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
@@ -47,8 +48,10 @@ fi
 
 base_branch="${OPENSPEC_BUDDY_BASE_BRANCH:-integration}"
 pr_file="$tmp_dir/pr.json"
+check_suites_file="$tmp_dir/check-suites.json"
 check_runs_file="$tmp_dir/check-runs.json"
 status_file="$tmp_dir/status.json"
+ci_detail_file="$tmp_dir/ci-detail.txt"
 review_output="$tmp_dir/review.out"
 
 gate_log() {
@@ -87,6 +90,13 @@ verify_ci_and_mergeability() {
   local draft
   local state
   local base
+  local ci_observation_attempts=7
+  local ci_observation_interval=5
+  local attempt
+  local ci_status
+  local final_ci_status=2
+  local all_samples_zero=true
+  local allow_no_ci=false
   mergeable="$(pr_field mergeable)"
   mergeable_state="$(pr_field mergeable_state)"
   draft="$(pr_field draft)"
@@ -100,14 +110,36 @@ verify_ci_and_mergeability() {
     fail "PR #$pr_number merge state is not clean: $mergeable_state."
   fi
 
-  gh api "repos/$repo_nwo/commits/$head/check-runs?per_page=100" > "$check_runs_file"
-  gh api "repos/$repo_nwo/commits/$head/status" > "$status_file"
-  if ! node -e '
+  if truthy "${OPENSPEC_BUDDY_ALLOW_NO_CI:-false}"; then
+    allow_no_ci=true
+  fi
+
+  for ((attempt = 1; attempt <= ci_observation_attempts; attempt++)); do
+    gh api "repos/$repo_nwo/commits/$head/check-suites?per_page=100" > "$check_suites_file"
+    gh api "repos/$repo_nwo/commits/$head/check-runs?per_page=100" > "$check_runs_file"
+    gh api "repos/$repo_nwo/commits/$head/status?per_page=100" > "$status_file"
+    set +e
+    node -e '
 const fs = require("node:fs");
-const checks = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-const status = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const suites = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+const checks = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const status = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
 const allowed = new Set(["success", "neutral", "skipped"]);
+const checkSuites = Array.isArray(suites.check_suites) ? suites.check_suites : [];
 const checkRuns = Array.isArray(checks.check_runs) ? checks.check_runs : [];
+if (typeof suites.total_count === "number" && suites.total_count > checkSuites.length) {
+  process.stderr.write(`CI check suites response is incomplete: expected ${suites.total_count}, received ${checkSuites.length}.\n`);
+  process.exit(1);
+}
+if (typeof checks.total_count === "number" && checks.total_count > checkRuns.length) {
+  process.stderr.write(`CI check runs response is incomplete: expected ${checks.total_count}, received ${checkRuns.length}.\n`);
+  process.exit(1);
+}
+const badSuite = checkSuites.find((suite) => suite.status !== "completed" || !allowed.has(String(suite.conclusion || "").toLowerCase()));
+if (badSuite) {
+  process.stderr.write(`CI check suite is not successful: ${badSuite.app?.name || "unnamed"} (${badSuite.status}/${badSuite.conclusion}).\n`);
+  process.exit(1);
+}
 const badCheck = checkRuns.find((run) => run.status !== "completed" || !allowed.has(String(run.conclusion || "").toLowerCase()));
 if (badCheck) {
   process.stderr.write(`CI check is not successful: ${badCheck.name || "unnamed"} (${badCheck.status}/${badCheck.conclusion}).\n`);
@@ -115,14 +147,58 @@ if (badCheck) {
 }
 const combinedState = String(status.state || "").toLowerCase();
 const legacyStatuses = Array.isArray(status.statuses) ? status.statuses : [];
-const checksOnlyPending = combinedState === "pending" && legacyStatuses.length === 0 && checkRuns.length > 0;
+if (typeof status.total_count === "number" && status.total_count > legacyStatuses.length) {
+  process.stderr.write(`Legacy CI status response is incomplete: expected ${status.total_count}, received ${legacyStatuses.length}.\n`);
+  process.exit(1);
+}
+const badLegacyStatus = legacyStatuses.find((item) => String(item.state || "").toLowerCase() !== "success");
+if (badLegacyStatus) {
+  process.stderr.write(`Legacy CI status is not successful: ${badLegacyStatus.context || "unnamed"} (${badLegacyStatus.state}).\n`);
+  process.exit(1);
+}
+if (checkSuites.length === 0 && checkRuns.length === 0 && legacyStatuses.length === 0) {
+  process.exit(2);
+}
+const checksOnlyPending = combinedState === "pending" && legacyStatuses.length === 0;
 if (combinedState && combinedState !== "success" && !checksOnlyPending) {
   process.stderr.write(`Combined CI status is not successful: ${combinedState}.\n`);
   process.exit(1);
 }
-' "$check_runs_file" "$status_file"; then
-    fail "CI checks are failing or pending for PR #$pr_number."
-  fi
+' "$check_suites_file" "$check_runs_file" "$status_file" 2> "$ci_detail_file"
+    ci_status="$?"
+    set -e
+    final_ci_status="$ci_status"
+
+    case "$ci_status" in
+      0) all_samples_zero=false ;;
+      2) ;;
+      *)
+        cat "$ci_detail_file" >&2
+        fail "CI checks are failing or pending for PR #$pr_number."
+        ;;
+    esac
+
+    if [[ "$attempt" -lt "$ci_observation_attempts" ]]; then
+      sleep "$ci_observation_interval"
+    fi
+  done
+
+  case "$final_ci_status" in
+    0) return 0 ;;
+    2)
+      if [[ "$all_samples_zero" == true && "$allow_no_ci" == true ]]; then
+        return 0
+      fi
+      if [[ "$all_samples_zero" == true ]]; then
+        fail "No CI signals were observed for PR #$pr_number. Set OPENSPEC_BUDDY_ALLOW_NO_CI=true only for repositories that intentionally have no CI."
+      fi
+      fail "CI signals disappeared before the observation window ended for PR #$pr_number."
+      ;;
+    *)
+      cat "$ci_detail_file" >&2
+      fail "CI checks are failing or pending for PR #$pr_number."
+      ;;
+  esac
 }
 
 fetch_pr_truth
