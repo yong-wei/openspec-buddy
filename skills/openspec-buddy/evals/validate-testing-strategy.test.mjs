@@ -53,7 +53,7 @@ Rationale: The change only updates static text or mechanical synchronization`);
 
 const missingSeam = run("missing-seam", required().replace(/Public seam:.*\n/, "Public seam:\n"));
 assert.equal(missingSeam.status, 1);
-assert.match(missingSeam.stderr, /Public seam.*required/i);
+assert.match(missingSeam.stderr, /Public seam.*must not be blank/i);
 
 const missingCoverage = run("missing-coverage", required().replace("AC-2 automated", "no second mapping"));
 assert.equal(missingCoverage.status, 1);
@@ -61,7 +61,7 @@ assert.match(missingCoverage.stderr, /AC-2.*not mapped/i);
 
 const manualOnly = run("manual-only", required().replace(
   "AC coverage: AC-1 automated; AC-2 automated\nManual-only acceptance: none",
-  "AC coverage: AC-1 automated\nManual-only acceptance: AC-2 requires visual confirmation of terminal rendering",
+  "AC coverage: AC-1 automated\nManual-only acceptance: AC-2: visual confirmation of terminal rendering",
 ));
 assert.equal(manualOnly.status, 0, manualOnly.stderr);
 
@@ -78,6 +78,61 @@ const duplicate = run("duplicate", `${required()}\nPublic seam: another eval`);
 assert.equal(duplicate.status, 1);
 assert.match(duplicate.stderr, /Public seam.*duplicate/i);
 
+for (const field of [
+  "Change class",
+  "Seam status",
+  "Public behavior",
+  "Public seam",
+  "Existing seam reused",
+  "AC coverage",
+  "Manual-only acceptance",
+  "Rationale",
+]) {
+  const blank = run(`blank-${field.replaceAll(" ", "-")}`, required().replace(new RegExp(`${field}:.*`), `${field}:   `));
+  assert.equal(blank.status, 1, `${field} should reject blank values`);
+  assert.match(blank.stderr, new RegExp(`${field}.*must not be blank`, "i"));
+}
+
+for (const field of ["Public behavior", "Public seam"]) {
+  const none = run(`required-none-${field.replaceAll(" ", "-")}`, required().replace(new RegExp(`${field}:.*`), `${field}: none`));
+  assert.equal(none.status, 1);
+  assert.match(none.stderr, new RegExp(`${field}.*must not be none`, "i"));
+}
+
+const manualEntries = run("manual-entries", required().replace(
+  "AC coverage: AC-1 automated; AC-2 automated\nManual-only acceptance: none",
+  "AC coverage: AC-1 automated\nManual-only acceptance: AC-2: inspect terminal output; AC-3: confirm screen-reader announcement",
+), "- [ ] AC-1: First.\n- [ ] AC-2: Second.\n- [ ] AC-3: Third.\n");
+assert.equal(manualEntries.status, 0, manualEntries.stderr);
+
+const isolatedManualReason = run("isolated-manual-reason", required().replace(
+  "AC coverage: AC-1 automated; AC-2 automated\nManual-only acceptance: none",
+  "AC coverage: AC-1 automated\nManual-only acceptance: AC-2: AC-3; AC-3: visual inspection",
+), "- [ ] AC-1: First.\n- [ ] AC-2: Second.\n- [ ] AC-3: Third.\n");
+assert.equal(isolatedManualReason.status, 1);
+assert.match(isolatedManualReason.stderr, /AC-2.*reason/i);
+
+const duplicateManual = run("duplicate-manual", required().replace(
+  "AC coverage: AC-1 automated; AC-2 automated\nManual-only acceptance: none",
+  "AC coverage: AC-1 automated\nManual-only acceptance: AC-2: inspect output; AC-2: inspect rendering",
+));
+assert.equal(duplicateManual.status, 1);
+assert.match(duplicateManual.stderr, /AC-2.*duplicate manual-only/i);
+
+const unknownManual = run("unknown-manual", required().replace(
+  "Manual-only acceptance: none",
+  "Manual-only acceptance: AC-9: inspect output",
+));
+assert.equal(unknownManual.status, 1);
+assert.match(unknownManual.stderr, /AC-9.*unknown/i);
+
+const overlappingMapping = run("overlapping-mapping", required().replace(
+  "Manual-only acceptance: none",
+  "Manual-only acceptance: AC-2: inspect output",
+));
+assert.equal(overlappingMapping.status, 1);
+assert.match(overlappingMapping.stderr, /AC-2.*both AC coverage and Manual-only acceptance/i);
+
 const missingSectionDesign = path.join(tmpDir, "missing-section-design.md");
 const missingSectionIssue = path.join(tmpDir, "missing-section-issue.md");
 fs.writeFileSync(missingSectionDesign, "# Design\n\nNo testing contract.\n");
@@ -88,6 +143,10 @@ const missingSection = spawnSync(process.execPath, [validator, missingSectionDes
 });
 assert.equal(missingSection.status, 1);
 assert.match(missingSection.stderr, /Testing Strategy.*missing/i);
+
+const duplicateSection = run("duplicate-section", `${required()}\n\n## Testing Strategy\n${required()}`);
+assert.equal(duplicateSection.status, 1);
+assert.match(duplicateSection.stderr, /Testing Strategy.*duplicate/i);
 
 const unknownEnum = run("unknown-enum", required("risky"));
 assert.equal(unknownEnum.status, 1);

@@ -55,6 +55,7 @@ for (const [offset, rawLine] of sectionMatches[0][1].split(/\r?\n/).entries()) {
 
 for (const name of fieldNames) {
   if (!Object.hasOwn(fields, name)) errors.push(`${name}: missing required field`);
+  else if (!fields[name]) errors.push(`${name}: must not be blank; use none when intentionally empty`);
 }
 
 const placeholder = /\b(?:TBD|TODO)\b|decide\s+during\s+implementation/i;
@@ -82,8 +83,8 @@ if (notApplicableClasses.has(changeClass) && !["required", "not-applicable"].inc
 }
 
 if (seamStatus === "required") {
-  for (const name of ["Public behavior", "Public seam", "AC coverage"]) {
-    if (!fields[name]) errors.push(`${name}: required when Seam status is required`);
+  for (const name of ["Public behavior", "Public seam"]) {
+    if (fields[name]?.toLowerCase() === "none") errors.push(`${name}: must not be none when Seam status is required`);
   }
 }
 if (seamStatus === "not-applicable") {
@@ -101,12 +102,37 @@ if (seamStatus === "not-applicable") {
 const issueAcIds = [...new Set(issue.match(/\bAC-\d+\b/g) ?? [])];
 if (issueAcIds.length === 0) errors.push("issue.md: no AC-N identifiers found");
 
+const issueAcSet = new Set(issueAcIds);
+const coverageAcIds = new Set(fields["AC coverage"]?.match(/\bAC-\d+\b/g) ?? []);
+const manualAcIds = new Set();
+const manualText = fields["Manual-only acceptance"] ?? "";
+
+if (manualText && manualText.toLowerCase() !== "none") {
+  for (const entry of manualText.split(";")) {
+    const match = entry.trim().match(/^(AC-\d+):\s*(.+)$/);
+    if (!match) {
+      errors.push(`Manual-only acceptance: invalid entry ${entry.trim() || "(blank)"}; expected AC-N: reason`);
+      continue;
+    }
+    const [, acId, reason] = match;
+    if (manualAcIds.has(acId)) errors.push(`${acId}: duplicate manual-only entry`);
+    manualAcIds.add(acId);
+    if (!issueAcSet.has(acId)) errors.push(`${acId}: unknown manual-only AC`);
+    const reasonWithoutAcIds = reason.replace(/\bAC-\d+\b/g, "").replace(/[\s:;,.-]/g, "");
+    if (!reasonWithoutAcIds || placeholder.test(reason)) {
+      errors.push(`${acId}: manual-only entry requires its own non-placeholder reason`);
+    }
+  }
+}
+
+for (const acId of coverageAcIds) {
+  if (!issueAcSet.has(acId)) errors.push(`${acId}: unknown AC in AC coverage`);
+}
+
 for (const acId of issueAcIds) {
-  const coverageHasAc = new RegExp(`\\b${acId}\\b`).test(fields["AC coverage"] ?? "");
-  const manualText = fields["Manual-only acceptance"] ?? "";
-  const manualHasAc = new RegExp(`\\b${acId}\\b`).test(manualText);
-  const manualJustified = manualHasAc && manualText.replace(new RegExp(`\\b${acId}\\b`, "g"), "").replace(/[\s:;,.-]/g, "").length > 0;
-  if (!coverageHasAc && !manualJustified) {
+  if (coverageAcIds.has(acId) && manualAcIds.has(acId)) {
+    errors.push(`${acId}: mapped in both AC coverage and Manual-only acceptance`);
+  } else if (!coverageAcIds.has(acId) && !manualAcIds.has(acId)) {
     errors.push(`${acId}: not mapped in AC coverage or justified as manual-only`);
   }
 }

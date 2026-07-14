@@ -6,7 +6,9 @@
 - Added `medium-risk` to the seam-required change classes alongside `behavioral` and `high-risk`.
 - Enforced explicit verification method and rationale for documentation or mechanical `not-applicable` contracts.
 - Required every `AC-N` found in the issue body to appear in automated coverage or a justified manual-only entry.
-- Rejected missing or duplicate sections and fields, unsupported structures and enums, blank required seam fields, and placeholders.
+- Required all eight fields to be non-empty, with explicit `none` where permitted; required public behavior/seam and not-applicable verification/rationale cannot use `none`.
+- Parsed manual-only acceptance as isolated `AC-N: reason` entries, rejecting duplicate, unknown, overlapping, placeholder, and AC-ID-only mappings.
+- Rejected missing or duplicate sections and fields, unsupported structures and enums, blank fields, and placeholders.
 - Registered the evaluator in the standard fast test runner.
 
 ## TDD Evidence
@@ -25,3 +27,4 @@ All commands exited 0.
 ## Concerns
 
 - The contract intentionally supports single-line field values only. Multi-line lists or continuation syntax fail explicitly rather than being interpreted ambiguously.
+- Multiple manual-only entries use semicolon-separated `AC-N: reason` items on that single line.
