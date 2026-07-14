@@ -19,6 +19,19 @@ const issueRelationships = read('skills/openspec-buddy/references/issue-relation
 const projectCoordination = read('skills/openspec-buddy/references/project-coordination.md');
 const readme = read('README.md');
 const exploreRoutingPath = 'skills/openspec-buddy/references/explore-routing.md';
+const buddyDriver = read('skills/openspec-buddy/scripts/buddy-driver.mjs');
+const autoDriver = read('skills/openspec-buddy-auto/scripts/buddy-auto-driver.mjs');
+const autoEvals = JSON.parse(read('skills/openspec-buddy-auto/evals/evals.json'));
+
+const testingStrategyTemplate = `## Testing Strategy
+Change class: behavioral | medium-risk | high-risk | documentation | mechanical
+Seam status: required | not-applicable
+Public behavior: <observable behavior or none>
+Public seam: <highest public seam or explicit verification method>
+Existing seam reused: <existing test seam or none>
+AC coverage: AC-1: public seam evidence; AC-2: integration seam evidence
+Manual-only acceptance: AC-3: <why automation is not applicable> | <manual evidence check>
+Rationale: <why this seam is sufficient or why no public seam applies>`;
 
 assert.ok(
   fs.existsSync(path.join(repoRoot, exploreRoutingPath)),
@@ -26,6 +39,74 @@ assert.ok(
 );
 
 const exploreRouting = read(exploreRoutingPath);
+
+assert.match(
+  buddyDriver,
+  /validate-issue-body\.mjs[\s\S]*validate-proposal-shape\.mjs[\s\S]*validate-testing-strategy\.mjs[\s\S]*design\.md/,
+  'manual propose must validate the approved testing strategy after issue-body and proposal-shape validation',
+);
+assert.doesNotMatch(
+  autoDriver,
+  /validate-testing-strategy\.mjs/,
+  'testing strategy validation must not alter Buddy Auto compatibility paths',
+);
+assert.ok(
+  issueTemplate.includes(testingStrategyTemplate),
+  'issue template reference must include the exact single-line Testing Strategy contract',
+);
+assert.match(
+  coreLifecycle,
+  /behavioral, `medium-risk`, and `high-risk`[\s\S]*`Seam status: required`[\s\S]*documentation and mechanical[\s\S]*`not-applicable`[\s\S]*verification method[\s\S]*rationale/i,
+  'propose guidance must define the testing strategy applicability matrix',
+);
+assert.match(
+  coreLifecycle,
+  /Every issue AC[\s\S]*exactly once[\s\S]*`AC coverage`[\s\S]*`Manual-only acceptance`[\s\S]*semicolon/i,
+  'propose guidance must explain the exact mutually exclusive AC maps',
+);
+assert.match(
+  coreLifecycle,
+  /manual-only entry[\s\S]*automation[\s\S]*`\|`[\s\S]*manual evidence check[\s\S]*semicolon-separated/i,
+  'manual-only mappings must document both pipe-delimited segments and multi-AC separation',
+);
+assert.match(
+  coreLifecycle,
+  /Seam status: required[\s\S]*`Rationale`[\s\S]*substantive[\s\S]*seam[\s\S]*sufficient/i,
+  'required seam contracts must include a substantive sufficiency rationale',
+);
+assert.match(
+  coreLifecycle,
+  /already approved[\s\S]*public seam[\s\S]*(?:must not|never)[\s\S]*product-level seam selection/i,
+  'apply must consume the approved seam without selecting it again',
+);
+assert.match(
+  coreLifecycle,
+  /Matt TDD[\s\S]*implementation method only[\s\S]*red-before-green[\s\S]*public-interface tests[\s\S]*one vertical cycle at a time[\s\S]*minimal\s+implementation/i,
+  'apply must document optional Matt TDD and the Buddy-native fallback',
+);
+assert.match(
+  executionLoop,
+  /approved testing seam[\s\S]*(?:must not|never)[\s\S]*product-level seam selection/i,
+  'Auto must consume the approved testing seam without restarting selection',
+);
+assert.match(
+  executionLoop,
+  /provider availability[\s\S]*(?:must not|never)[\s\S]*Buddy state[\s\S]*receipts[\s\S]*artifacts[\s\S]*gates/i,
+  'optional TDD provider availability must not alter deterministic Auto state',
+);
+assert.doesNotMatch(
+  `${coreLifecycle}\n${executionLoop}`,
+  /all refactoring (?:must )?waits? for review/i,
+  'Matt refactoring guidance must not become a Buddy lifecycle gate',
+);
+assert.ok(
+  autoEvals.evals.some(({ expected_output: output }) =>
+    /approved testing seam/i.test(output)
+    && /never restarts product-level seam selection/i.test(output)
+    && /provider availability/i.test(output)
+    && /receipts/i.test(output)),
+  'Auto eval contract must preserve approved seam selection and provider-neutral receipts',
+);
 
 assert.match(
   buddySkill,

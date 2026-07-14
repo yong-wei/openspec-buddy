@@ -16,7 +16,7 @@
     {
       "id": 2,
       "prompt": "在 goal 模式下自动处理所有剩余 OpenSpec change。",
-      "expected_output": "每轮只 claim 一个 change；每轮重算候选后，在所有可执行 issue-backed change 中选择 issue 编号最小的一个，current series 与 downstream blocking 只作为诊断信息，不作为优先级；实现线程不能自主勾选 Acceptance Checklist，只能提交 Proposed satisfied: AC-... 与 evidence；提交、开 PR 或 --no-pr 本地合并前必须由独立审查返回 approved_to_commit、approved_ac、rejected_ac、scope_status、regression_risk、required_fixes，只有 approved_ac 可以勾选；实现和验证完成后先在 claim branch 上运行 openspec validate <change_id> --strict 校验 active change/delta spec，再归档 OpenSpec change，把代码、测试、主 spec 与 archive 目录放入同一个 PR；PR 合并后只同步 issue 为 status:archived、Project Status 为 Done 且设置 End；若配置 buddy.boundBranch，必须切回绑定协调分支、快进到 buddy.boundBase（未配置时默认 origin/$OPENSPEC_BUDDY_BASE_BRANCH）并通过 verify-bound-worktree.sh --phase goal-loop-start 后再重算候选；无可执行项或预算耗尽时停止。",
+      "expected_output": "每轮只 claim 一个 change；每轮重算候选后，在所有可执行 issue-backed change 中选择 issue 编号最小的一个，current series 与 downstream blocking 只作为诊断信息，不作为优先级；实现阶段消费设计中已批准的 approved testing seam，never restarts product-level seam selection；可选 TDD provider availability 只影响实现方法，不得改变 Buddy state、receipts、artifacts 或 gates；实现线程不能自主勾选 Acceptance Checklist，只能提交 Proposed satisfied: AC-... 与 evidence；提交、开 PR 或 --no-pr 本地合并前必须由独立审查返回 approved_to_commit、approved_ac、rejected_ac、scope_status、regression_risk、required_fixes，只有 approved_ac 可以勾选；实现和验证完成后先在 claim branch 上运行 openspec validate <change_id> --strict 校验 active change/delta spec，再归档 OpenSpec change，把代码、测试、主 spec 与 archive 目录放入同一个 PR；PR 合并后只同步 issue 为 status:archived、Project Status 为 Done 且设置 End；若配置 buddy.boundBranch，必须切回绑定协调分支、快进到 buddy.boundBase（未配置时默认 origin/$OPENSPEC_BUDDY_BASE_BRANCH）并通过 verify-bound-worktree.sh --phase goal-loop-start 后再重算候选；无可执行项或预算耗尽时停止。",
       "files": []
     },
     {

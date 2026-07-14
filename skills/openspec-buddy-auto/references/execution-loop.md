@@ -46,6 +46,19 @@ lock in that path.
 When the controller returns an implementation handoff, the agent may edit code
 only for that claimed change and must keep commits scoped to that change.
 
+The handoff consumes the approved testing seam from the change design. Auto
+must not restart product-level seam selection, ask the user to choose a new
+seam, or rewrite the approved mappings as part of state progression. A
+contradictory contract is proposal/design work and must be reported rather than
+silently changed by Auto.
+
+Matt TDD may be used as an optional implementation method. If that provider is
+unavailable, use the Buddy-native fallback: red-before-green,
+public-interface tests, one vertical cycle at a time, and minimal
+implementation. Provider availability must never change Buddy state, receipts,
+artifacts, or gates. Provider-specific refactoring guidance does not add an
+Auto lifecycle gate.
+
 Before leaving implementation:
 
 - OpenSpec task progress must reach `remaining: 0`.
