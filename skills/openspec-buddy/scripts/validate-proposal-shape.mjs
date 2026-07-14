@@ -35,7 +35,7 @@ function scalar(value) {
 }
 
 function parseManifest(source) {
-  const result = {};
+  const result = Object.create(null);
   let listKey = null;
 
   for (const [index, rawLine] of source.split(/\r?\n/).entries()) {

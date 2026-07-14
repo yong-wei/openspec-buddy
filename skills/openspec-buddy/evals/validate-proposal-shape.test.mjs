@@ -64,6 +64,16 @@ children: []
 assert.equal(invalidEnum.status, 1);
 assert.match(invalidEnum.stderr, /split_status.*single-change.*series-required/i);
 
+const specialKey = run(createChange("special-key", `split_status: single-change
+vertical_slice_status: valid
+blocking_edges_status: valid
+wide_refactor_strategy: none
+children: []
+__proto__: hidden
+`));
+assert.equal(specialKey.status, 1);
+assert.match(specialKey.stderr, /__proto__.*unknown field/i);
+
 const incompleteEdges = run(createChange("incomplete-edges", `split_status: single-change
 vertical_slice_status: valid
 blocking_edges_status: incomplete
