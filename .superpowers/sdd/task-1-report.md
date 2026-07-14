@@ -10,7 +10,7 @@
 - Required all eight fields to be non-empty. Required seams demand substantive public behavior; documentation/mechanical `not-applicable` contracts may declare exact `Public behavior: none`, while any other value must remain substantive. Public seam and rationale always require substantive verification method and reasoning.
 - Parsed AC coverage as `AC-N: evidence` and manual-only acceptance as `AC-N: automation rationale | manual evidence check`, rejecting missing segments and non-substantive content independently.
 - Rejected duplicate, unknown, overlapping, placeholder, punctuation-only, AC-ID-only, and negative empty AC mappings such as `not covered`.
-- Treated only bare negative phrases as empty semantics; substantive explanations such as `not automated because ...` remain valid.
+- Treated only bare negative phrases as empty semantics; `not automated because ...` remains valid only when the suffix independently contains a substantive, non-placeholder reason.
 - Rejected missing or duplicate sections and fields, unsupported structures and enums, blank fields, and placeholders.
 - Registered the evaluator in the standard fast test runner.
 

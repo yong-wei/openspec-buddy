@@ -60,6 +60,11 @@ for (const name of fieldNames) {
 
 const placeholder = /\b(?:TBD|TODO)\b|decide\s+during\s+implementation/i;
 function hasSubstantiveContent(value) {
+  const negativeBecause = value.trim().match(
+    /^not[\s-]+(?:applicable|automated|covered|tested|verified)\b[\s,:-]*because\b([\s\S]*)$/i,
+  );
+  if (negativeBecause) return hasSubstantiveContent(negativeBecause[1]);
+
   const normalized = value.toLowerCase().replace(/[^a-z0-9]+/g, "");
   const contentWithoutAcIds = value.replace(/\bAC-\d+\b/g, "").match(/[\p{L}\p{N}]/gu)?.join("") ?? "";
   return Boolean(contentWithoutAcIds) &&

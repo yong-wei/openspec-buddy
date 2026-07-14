@@ -73,6 +73,25 @@ Manual-only acceptance: none
 Rationale: not applicable because docs-only verification uses rendered output inspection`);
 assert.equal(explainedNotApplicable.status, 0, explainedNotApplicable.stderr);
 
+for (const danglingRationale of [
+  "not applicable because",
+  "not applicable because ---",
+  "not applicable because none",
+  "not applicable because TODO",
+  "not applicable because not verified",
+]) {
+  const result = run(`dangling-rationale-${danglingRationale}`.replaceAll(/[^a-z0-9]+/gi, "-"), `Change class: documentation
+Seam status: not-applicable
+Public behavior: none
+Public seam: inspect the rendered Markdown section
+Existing seam reused: none
+AC coverage: AC-1: rendered document inspection; AC-2: link integrity check
+Manual-only acceptance: none
+Rationale: ${danglingRationale}`);
+  assert.equal(result.status, 1, `Rationale ${danglingRationale} should fail`);
+  assert.match(result.stderr, /Rationale.*substantive/i);
+}
+
 for (const invalidBehavior of ["---", "?", "TODO", "not verified", "n/a", "not-applicable"]) {
   const result = run(`not-applicable-behavior-${invalidBehavior}`.replaceAll(/[^a-z0-9]+/gi, "-"), `Change class: documentation
 Seam status: not-applicable
@@ -105,6 +124,21 @@ const explainedManualOnly = run("explained-manual-only", required().replace(
   "AC coverage: AC-1: public CLI test\nManual-only acceptance: AC-2: not automated because visual state has no deterministic harness | inspect the rendered output",
 ));
 assert.equal(explainedManualOnly.status, 0, explainedManualOnly.stderr);
+
+for (const danglingWhy of [
+  "not automated because",
+  "not automated because ---",
+  "not automated because none",
+  "not automated because TODO",
+  "not automated because not covered",
+]) {
+  const result = run(`dangling-manual-why-${danglingWhy}`.replaceAll(/[^a-z0-9]+/gi, "-"), required().replace(
+    "AC coverage: AC-1: public CLI test; AC-2: integration seam test\nManual-only acceptance: none",
+    `AC coverage: AC-1: public CLI test\nManual-only acceptance: AC-2: ${danglingWhy} | inspect the rendered output`,
+  ));
+  assert.equal(result.status, 1, `manual why ${danglingWhy} should fail`);
+  assert.match(result.stderr, /AC-2.*automation rationale.*substantive reason/i);
+}
 
 const externalAcMentions = run("external-ac-mentions", required(), `## Goal
 
