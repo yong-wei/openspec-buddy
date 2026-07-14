@@ -25,7 +25,7 @@ function detect({
   roots = [],
   home = temporaryDirectory('buddy-method-home-'),
   codexHome,
-  cwd = repoRoot,
+  cwd = temporaryDirectory('buddy-method-project-empty-'),
 } = {}) {
   const env = {
     ...process.env,
