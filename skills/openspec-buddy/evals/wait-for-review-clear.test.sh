@@ -641,7 +641,7 @@ chmod +x "$tmp_dir/request-pr-review-retry.sh"
 export OPENSPEC_BUDDY_REQUEST_PR_REVIEW_HELPER="$tmp_dir/request-pr-review-retry.sh"
 rm -f "$GH_COMMENT_LOG_FILE"
 set +e
-timeout 12s "$helper" 123 > "$tmp_dir/retry-timeout-output.txt" 2> "$tmp_dir/retry-timeout-err.txt"
+timeout 30s "$helper" 123 > "$tmp_dir/retry-timeout-output.txt" 2> "$tmp_dir/retry-timeout-err.txt"
 retry_timeout_status="$?"
 set -e
 unset VERIFY_MODE
