@@ -120,9 +120,14 @@ if (manifest.wide_refactor_strategy === "expand-migrate-contract") {
   const changeDir = path.dirname(path.dirname(path.resolve(manifestPath)));
   const designPath = path.join(changeDir, "design.md");
   const design = fs.existsSync(designPath) ? fs.readFileSync(designPath, "utf8") : "";
-  const missingTerms = ["expand", "migrate", "contract"].filter(
-    (term) => !new RegExp(`\\b${term}\\b`, "i").test(design),
-  );
+  const strategyTerms = [
+    ["expand", /\b(?:expand|expansion)\b/i],
+    ["migrate", /\b(?:migrate|migration)\b/i],
+    ["contract", /\b(?:contract|contraction)\b/i],
+  ];
+  const missingTerms = strategyTerms
+    .filter(([, pattern]) => !pattern.test(design))
+    .map(([term]) => term);
   if (missingTerms.length > 0) {
     errors.push(`design.md: expand-migrate-contract strategy must name ${missingTerms.join(", ")}`);
   }

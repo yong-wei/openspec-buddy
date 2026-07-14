@@ -110,6 +110,14 @@ children: []
 `, "# Design\n\nExpand the new representation, migrate consumers, then contract the old path.\n"));
 assert.equal(expandMigrateContract.status, 0, expandMigrateContract.stderr);
 
+const expansionMigrationContraction = run(createChange("expansion-migration-contraction", `split_status: single-change
+vertical_slice_status: valid
+blocking_edges_status: valid
+wide_refactor_strategy: expand-migrate-contract
+children: []
+`, "# Design\n\nThe expansion introduces the new representation, migration moves consumers, and contraction removes the old path.\n"));
+assert.equal(expansionMigrationContraction.status, 0, expansionMigrationContraction.stderr);
+
 const incompleteStrategyDesign = run(createChange("incomplete-strategy-design", `split_status: single-change
 vertical_slice_status: valid
 blocking_edges_status: valid
