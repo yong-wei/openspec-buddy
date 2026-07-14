@@ -36,6 +36,16 @@ children: []
 assert.equal(single.status, 0, single.stderr);
 assert.match(single.stdout, /Proposal shape valid/);
 
+const singleWithChildren = run(createChange("single-with-children", `split_status: single-change
+vertical_slice_status: valid
+blocking_edges_status: valid
+wide_refactor_strategy: none
+children:
+  - unexpected-child
+`));
+assert.equal(singleWithChildren.status, 1);
+assert.match(singleWithChildren.stderr, /children.*single-change.*empty/i);
+
 const series = run(createChange("series", `split_status: series-required
 vertical_slice_status: valid
 blocking_edges_status: valid

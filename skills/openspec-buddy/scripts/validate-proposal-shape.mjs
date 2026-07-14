@@ -106,6 +106,9 @@ if (!Object.hasOwn(manifest, "children")) {
 if (manifest.split_status === "series-required" && (!Array.isArray(manifest.children) || manifest.children.length === 0)) {
   errors.push("children: series-required requires a non-empty child list");
 }
+if (manifest.split_status === "single-change" && Array.isArray(manifest.children) && manifest.children.length > 0) {
+  errors.push("children: single-change requires an empty child list");
+}
 if (manifest.vertical_slice_status === "invalid") {
   errors.push("vertical_slice_status: invalid proposals are not ready");
 }
