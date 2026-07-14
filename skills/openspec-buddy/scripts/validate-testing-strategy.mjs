@@ -63,9 +63,8 @@ function hasSubstantiveContent(value) {
   const normalized = value.toLowerCase().replace(/[^a-z0-9]+/g, "");
   const contentWithoutAcIds = value.replace(/\bAC-\d+\b/g, "").match(/[\p{L}\p{N}]/gu)?.join("") ?? "";
   return Boolean(contentWithoutAcIds) &&
-    !["none", "na", "notapplicable"].includes(normalized) &&
-    !placeholder.test(value) &&
-    !/^not[\s-]+(?:applicable|automated|covered|tested|verified)\b/i.test(value.trim());
+    !["none", "na", "notapplicable", "notautomated", "notcovered", "nottested", "notverified"].includes(normalized) &&
+    !placeholder.test(value);
 }
 
 for (const [name, value] of Object.entries(fields)) {
@@ -118,8 +117,16 @@ if (seamStatus === "not-applicable") {
   }
 }
 
-const issueAcIds = [...new Set(issue.match(/\bAC-\d+\b/g) ?? [])];
-if (issueAcIds.length === 0) errors.push("issue.md: no AC-N identifiers found");
+const acceptanceSections = [...issue.matchAll(/^## Acceptance Checklist[ \t]*\r?$([\s\S]*?)(?=^##[ \t]|(?![\s\S]))/gm)];
+if (acceptanceSections.length === 0) errors.push("issue.md: Acceptance Checklist section missing");
+if (acceptanceSections.length > 1) errors.push("issue.md: duplicate Acceptance Checklist section");
+const acceptanceSection = acceptanceSections[0]?.[1] ?? "";
+const issueAcIds = [...new Set(
+  [...acceptanceSection.matchAll(/^-\s+\[ \]\s+(AC-\d+):/gm)].map((match) => match[1]),
+)];
+if (acceptanceSections.length > 0 && issueAcIds.length === 0) {
+  errors.push("issue.md: Acceptance Checklist must contain at least one unchecked - [ ] AC-N: item");
+}
 
 const issueAcSet = new Set(issueAcIds);
 function parseAcMap(label, text) {

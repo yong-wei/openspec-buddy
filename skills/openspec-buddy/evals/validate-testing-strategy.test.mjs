@@ -9,7 +9,9 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../
 const validator = path.join(repoRoot, "skills/openspec-buddy/scripts/validate-testing-strategy.mjs");
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "buddy-testing-strategy-"));
 
-function files(name, strategy, issue = "- [ ] AC-1: First outcome.\n- [ ] AC-2: Second outcome.\n") {
+const checklist = (items) => `## Acceptance Checklist\n\n${items}`;
+
+function files(name, strategy, issue = checklist("- [ ] AC-1: First outcome.\n- [ ] AC-2: Second outcome.\n")) {
   const designPath = path.join(tmpDir, `${name}-design.md`);
   const issuePath = path.join(tmpDir, `${name}-issue.md`);
   fs.writeFileSync(designPath, `# Design\n\n## Testing Strategy\n${strategy}\n\n## Risks\n\nNone.\n`);
@@ -61,6 +63,16 @@ Manual-only acceptance: none
 Rationale: The change only updates static documentation`);
 assert.equal(notApplicableObservable.status, 0, notApplicableObservable.stderr);
 
+const explainedNotApplicable = run("explained-not-applicable", `Change class: documentation
+Seam status: not-applicable
+Public behavior: none
+Public seam: inspect the rendered Markdown section
+Existing seam reused: none
+AC coverage: AC-1: rendered document inspection; AC-2: link integrity check
+Manual-only acceptance: none
+Rationale: not applicable because docs-only verification uses rendered output inspection`);
+assert.equal(explainedNotApplicable.status, 0, explainedNotApplicable.stderr);
+
 for (const invalidBehavior of ["---", "?", "TODO", "not verified", "n/a", "not-applicable"]) {
   const result = run(`not-applicable-behavior-${invalidBehavior}`.replaceAll(/[^a-z0-9]+/gi, "-"), `Change class: documentation
 Seam status: not-applicable
@@ -87,6 +99,42 @@ const manualOnly = run("manual-only", required().replace(
   "AC coverage: AC-1: public CLI test\nManual-only acceptance: AC-2: terminal rendering lacks a deterministic visual harness | inspect the rendered output",
 ));
 assert.equal(manualOnly.status, 0, manualOnly.stderr);
+
+const explainedManualOnly = run("explained-manual-only", required().replace(
+  "AC coverage: AC-1: public CLI test; AC-2: integration seam test\nManual-only acceptance: none",
+  "AC coverage: AC-1: public CLI test\nManual-only acceptance: AC-2: not automated because visual state has no deterministic harness | inspect the rendered output",
+));
+assert.equal(explainedManualOnly.status, 0, explainedManualOnly.stderr);
+
+const externalAcMentions = run("external-ac-mentions", required(), `## Goal
+
+Migrate behavior previously discussed as AC-9.
+
+## Acceptance Checklist
+
+Historical context mentions AC-8 but is not a checklist item.
+- [ ] AC-1: First outcome.
+- [ ] AC-2: Second outcome.
+
+## Tasks
+
+- Task evidence references AC-77 from an external issue.
+`);
+assert.equal(externalAcMentions.status, 0, externalAcMentions.stderr);
+
+const nonChecklistAc = run("non-checklist-ac", required(), `## Goal
+
+- [ ] AC-1: This is outside the acceptance section.
+Evidence mentions AC-2.
+`);
+assert.equal(nonChecklistAc.status, 1);
+assert.match(nonChecklistAc.stderr, /Acceptance Checklist.*missing/i);
+
+const realChecklistAcMissingMapping = run("real-checklist-ac-missing-mapping", required(), checklist(
+  "Historical AC-9 mention.\n- [ ] AC-1: First.\n- [ ] AC-2: Second.\n- [ ] AC-3: Third.\n",
+));
+assert.equal(realChecklistAcMissingMapping.status, 1);
+assert.match(realChecklistAcMissingMapping.stderr, /AC-3.*not mapped/i);
 
 for (const placeholder of ["TBD", "TODO", "decide during implementation"]) {
   const result = run(`placeholder-${placeholder.replaceAll(" ", "-")}`, required().replace(
@@ -125,13 +173,13 @@ for (const field of ["Public behavior", "Public seam", "Rationale"]) {
 const manualEntries = run("manual-entries", required().replace(
   "AC coverage: AC-1: public CLI test; AC-2: integration seam test\nManual-only acceptance: none",
   "AC coverage: AC-1: public CLI test\nManual-only acceptance: AC-2: terminal rendering lacks a deterministic harness | inspect terminal output; AC-3: screen-reader output lacks a CI harness | confirm screen-reader announcement",
-), "- [ ] AC-1: First.\n- [ ] AC-2: Second.\n- [ ] AC-3: Third.\n");
+), checklist("- [ ] AC-1: First.\n- [ ] AC-2: Second.\n- [ ] AC-3: Third.\n"));
 assert.equal(manualEntries.status, 0, manualEntries.stderr);
 
 const isolatedManualReason = run("isolated-manual-reason", required().replace(
   "AC coverage: AC-1: public CLI test; AC-2: integration seam test\nManual-only acceptance: none",
   "AC coverage: AC-1: public CLI test\nManual-only acceptance: AC-2: AC-3 | inspect output; AC-3: visual state lacks a deterministic harness | inspect rendering",
-), "- [ ] AC-1: First.\n- [ ] AC-2: Second.\n- [ ] AC-3: Third.\n");
+), checklist("- [ ] AC-1: First.\n- [ ] AC-2: Second.\n- [ ] AC-3: Third.\n"));
 assert.equal(isolatedManualReason.status, 1);
 assert.match(isolatedManualReason.stderr, /AC-2.*reason/i);
 
@@ -159,7 +207,7 @@ assert.match(overlappingMapping.stderr, /AC-2.*both AC coverage and Manual-only 
 const multipleCoverage = run("multiple-coverage", required().replace(
   "AC coverage: AC-1: public CLI test; AC-2: integration seam test",
   "AC coverage: AC-1: public CLI test; AC-2: integration seam test; AC-3: parser boundary test",
-), "- [ ] AC-1: First.\n- [ ] AC-2: Second.\n- [ ] AC-3: Third.\n");
+), checklist("- [ ] AC-1: First.\n- [ ] AC-2: Second.\n- [ ] AC-3: Third.\n"));
 assert.equal(multipleCoverage.status, 0, multipleCoverage.stderr);
 
 const duplicateCoverage = run("duplicate-coverage", required().replace(
