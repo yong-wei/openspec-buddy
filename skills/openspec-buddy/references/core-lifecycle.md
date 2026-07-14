@@ -15,6 +15,15 @@ Use `--issue`, `--pr`, `--change`, `--no-issue`, or `--run-next` when the
 driver asks for them. Do not substitute manual `gh`, `git`, `sleep`, or
 handwritten GraphQL checks for a Buddy helper.
 
+## Explore
+
+Explore is a read-only manual Buddy phase for resolving uncertainty before a
+claim, proposal, or implementation decision. It may inspect repository and
+primary-source evidence, clarify intent, or run a disposable experiment, but
+it must not mutate repository or GitHub state. Follow
+`references/explore-routing.md` for question classification, optional method
+selection, and the native fallback.
+
 ## Claim
 
 Use claim for an existing GitHub issue. The claim helper is the hard gate:

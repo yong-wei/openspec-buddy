@@ -72,6 +72,7 @@ Default GitHub-backed flows require `OPENSPEC_BUDDY_BASE_BRANCH`,
 ## References
 
 - `references/core-lifecycle.md`: claim, propose, apply, review, achieve stage rules
+- `references/explore-routing.md`: read-only explore question and method routing
 - `references/claim-locking.md`: claim race and partial-claim handling
 - `references/issue-template.md`: issue body template
 - `references/metadata-schema.md`: Buddy metadata format
