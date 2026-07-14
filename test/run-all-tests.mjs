@@ -18,6 +18,8 @@ const commands = [
   { label: 'node --check bin/openspec-buddy.mjs', cmd: 'node', args: ['--check', 'bin/openspec-buddy.mjs'], tier: 'fast' },
   sh('node --test test/*.test.mjs', 'node --test test/*.test.mjs', 'fast'),
   node('skills/openspec-buddy/evals/validate-testing-strategy.test.mjs'),
+  node('skills/openspec-buddy/evals/validate-triage.test.mjs'),
+  node('skills/openspec-buddy/evals/collect-triage-evidence.test.mjs'),
 
   bash('skills/openspec-buddy/evals/load-config-dotenv.test.sh'),
   node('skills/openspec-buddy/evals/build-pr-development-note.test.mjs'),

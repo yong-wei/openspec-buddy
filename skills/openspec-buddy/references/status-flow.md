@@ -41,6 +41,24 @@ Never create a duplicate issue just to carry Buddy metadata for the source
 issue; the original issue is either the executable change or the tracking
 parent.
 
+## Triage Dispositions
+
+Triage feeds the existing status model; it does not introduce another label
+system:
+
+| Triage result | Existing Buddy transition |
+| --- | --- |
+| executable | continue the ordinary claim or proposal path |
+| series-parent | use `status:tracking` for the source and `status:ready` for independently executable children |
+| blocked | use `status:blocked` with the recorded dependency or conflict evidence |
+| insufficient information / needs-human | use `status:needs-human` and wait for human input |
+| complete or superseded / close | close with the recorded implementation or supersession evidence |
+
+Complete or superseded work must close with evidence and must not create a
+duplicate issue or another change. For a claimed issue, the close disposition
+is applied only after claim ownership and the evidence-bound triage result are
+revalidated. For a local proposal, stop before GitHub Issue creation.
+
 In the default pre-archive PR flow, the OpenSpec files move to
 `openspec/changes/archive/` before review, but the GitHub issue remains
 `status:in-review` until the PR merges. After merge, `mark-achieved.sh` moves

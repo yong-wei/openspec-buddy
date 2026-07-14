@@ -12,6 +12,9 @@ function read(relativePath) {
 const buddySkill = read('skills/openspec-buddy/SKILL.md');
 const buddyAutoSkill = read('skills/openspec-buddy-auto/SKILL.md');
 const coreLifecycle = read('skills/openspec-buddy/references/core-lifecycle.md');
+const claimLocking = read('skills/openspec-buddy/references/claim-locking.md');
+const statusFlow = read('skills/openspec-buddy/references/status-flow.md');
+const triageContract = read('skills/openspec-buddy/references/triage-contract.md');
 const autoDriverStates = read('skills/openspec-buddy-auto/references/driver-states.md');
 const executionLoop = read('skills/openspec-buddy-auto/references/execution-loop.md');
 const issueTemplate = read('skills/openspec-buddy/references/issue-template.md');
@@ -39,6 +42,37 @@ assert.ok(
 );
 
 const exploreRouting = read(exploreRoutingPath);
+
+assert.match(
+  coreLifecycle,
+  /ordinary (?:open )?issue[\s\S]*minimal claim\s+lock[\s\S]*triage[\s\S]*local proposal[\s\S]*triage[\s\S]*before[\s\S]*GitHub\s+Issue mutation/i,
+  'lifecycle guidance must distinguish claim-first issue triage from triage-first local propose',
+);
+assert.match(
+  claimLocking,
+  /prepared changes?[\s\S]*(?:missing|without)[\s\S]*triage\.json[\s\S]*backfill[\s\S]*(?:preserv|remain)[\s\S]*(?:claim lock|existing artifacts)/i,
+  'prepared changes must receive a non-destructive triage backfill path',
+);
+assert.match(
+  `${claimLocking}\n${triageContract}`,
+  /issue [`\x60]?updatedAt[`\x60]?[\s\S]*base SHA[\s\S]*(?:change|mismatch)[\s\S]*(?:invalid|stale)/i,
+  'triage guidance must invalidate judgments when issue updatedAt or base SHA changes',
+);
+assert.match(
+  statusFlow,
+  /complete[\s\S]*superseded[\s\S]*evidence[\s\S]*close[\s\S]*(?:must not|do not|without)[\s\S]*(?:duplicate|another) change/i,
+  'complete or superseded work must close with evidence without creating duplicate changes',
+);
+assert.match(
+  statusFlow,
+  /insufficient information[\s\S]*status:needs-human/i,
+  'insufficient triage information must map to status:needs-human',
+);
+assert.match(
+  coreLifecycle,
+  /Matt[^\n]*skills?[\s\S]*optional method[\s\S]*Buddy-native fallback[\s\S]*provider availability[\s\S]*(?:must not|never)[\s\S]*state[\s\S]*artifacts[\s\S]*gates/i,
+  'triage methods must be optional and provider-neutral',
+);
 
 assert.match(
   buddyDriver,

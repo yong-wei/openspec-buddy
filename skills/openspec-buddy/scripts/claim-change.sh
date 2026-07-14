@@ -2,12 +2,19 @@
 set -euo pipefail
 
 issue_number="${1:-}"
+resume_active=0
+if [[ "${2:-}" == "--resume-active" ]]; then
+  resume_active=1
+elif [[ -n "${2:-}" ]]; then
+  echo "Usage: claim-change.sh <issue-number> [--resume-active]" >&2
+  exit 2
+fi
 if [[ "$issue_number" == "-h" || "$issue_number" == "--help" ]]; then
-  echo "Usage: claim-change.sh <issue-number>"
+  echo "Usage: claim-change.sh <issue-number> [--resume-active]"
   exit 0
 fi
 if [[ -z "$issue_number" ]]; then
-  echo "Usage: claim-change.sh <issue-number>" >&2
+  echo "Usage: claim-change.sh <issue-number> [--resume-active]" >&2
   exit 2
 fi
 
@@ -88,7 +95,11 @@ if (statuses.length !== 1) {
 process.stdout.write(statuses[0]);
 ' "$issue_file")"
 if [[ "$issue_status" == "status:claimed" ]]; then
-  stale_recovery=1
+  if [[ "$resume_active" == "1" ]]; then
+    stale_recovery=2
+  else
+    stale_recovery=1
+  fi
 elif [[ "$issue_status" != "status:ready" ]]; then
   echo "Issue #$issue_number is not status:ready." >&2
   exit 1
@@ -105,7 +116,9 @@ repo_name="${repo_nwo#*/}"
 viewer="$(gh api user --jq .login)"
 
 "$script_dir/verify-claim-worktree.sh" --branch "$claim_branch" --allow-coordination-branch >/dev/null
-if [[ "$stale_recovery" == "1" ]]; then
+if [[ "$stale_recovery" == "2" ]]; then
+  buddy_verify_active_claim_resume "$issue_number" "$change_id" "$claim_branch" "$base_branch" "$viewer" "$repo_nwo" "$tmp_dir/resume-before-relationships" > "$tmp_dir/resume-active.json"
+elif [[ "$stale_recovery" == "1" ]]; then
   buddy_stale_claim_recoverable "$issue_number" "$change_id" "$claim_branch" "$repo_nwo" "$tmp_dir/stale-recovery-before-relationships"
 else
   buddy_preflight_claim_truth_check "$issue_number" "$change_id" "$claim_branch" "$viewer" "$repo_nwo" "$tmp_dir/preflight-before-relationships"
@@ -154,16 +167,28 @@ node "$script_dir/find-coupling-conflicts.mjs" "$issues_file" "$issue_number" "$
 
 git fetch origin "$base_branch" >/dev/null
 base_sha="$(git rev-parse "origin/$base_branch")"
-claim_id="$(uuidgen 2>/dev/null || node -e 'console.log(crypto.randomUUID())')"
-lease_until="$(node -e 'const hours=Number(process.env.OPENSPEC_BUDDY_CLAIM_TTL_HOURS); console.log(new Date(Date.now()+hours*3600*1000).toISOString())')"
+if [[ "$stale_recovery" == "2" ]]; then
+  buddy_verify_active_claim_resume "$issue_number" "$change_id" "$claim_branch" "$base_branch" "$viewer" "$repo_nwo" "$tmp_dir/resume-before-mutation" > "$tmp_dir/resume-active.json"
+  claim_id="$(node -e 'const fs=require("node:fs"); const claim=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(claim?.claim_id || "");' "$tmp_dir/resume-active.json")"
+  lease_until="$(node -e 'const fs=require("node:fs"); const claim=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(claim?.lease_until || "");' "$tmp_dir/resume-active.json")"
+  base_sha="$(node -e 'const fs=require("node:fs"); const claim=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(claim?.base_sha || "");' "$tmp_dir/resume-active.json")"
+  [[ -n "$claim_id" && -n "$lease_until" && -n "$base_sha" ]] || { echo "Active claim is missing claim_id, lease_until, or base_sha." >&2; exit 1; }
+else
+  claim_id="$(uuidgen 2>/dev/null || node -e 'console.log(crypto.randomUUID())')"
+  lease_until="$(node -e 'const hours=Number(process.env.OPENSPEC_BUDDY_CLAIM_TTL_HOURS); console.log(new Date(Date.now()+hours*3600*1000).toISOString())')"
+fi
 
-if [[ "$stale_recovery" == "1" ]]; then
+if [[ "$stale_recovery" == "2" ]]; then
+  buddy_verify_active_claim_resume "$issue_number" "$change_id" "$claim_branch" "$base_branch" "$viewer" "$repo_nwo" "$tmp_dir/resume-final-check" > "$tmp_dir/resume-active.json"
+elif [[ "$stale_recovery" == "1" ]]; then
   buddy_stale_claim_recoverable "$issue_number" "$change_id" "$claim_branch" "$repo_nwo" "$tmp_dir/stale-recovery-before-lock"
 else
   buddy_preflight_claim_truth_check "$issue_number" "$change_id" "$claim_branch" "$viewer" "$repo_nwo" "$tmp_dir/preflight-before-lock"
 fi
-claim_lock_written=1
-buddy_write_minimal_claim_lock "$issue_number" "$change_id" "$claim_branch" "$base_branch" "$base_sha" "$viewer" "$claim_id" "$lease_until" "$issue_file"
+if [[ "$stale_recovery" != "2" ]]; then
+  claim_lock_written=1
+  buddy_write_minimal_claim_lock "$issue_number" "$change_id" "$claim_branch" "$base_branch" "$base_sha" "$viewer" "$claim_id" "$lease_until" "$issue_file"
+fi
 buddy_verify_claim_lock_rest "$issue_number" "$change_id" "$viewer" "$claim_id" "$lease_until" "$repo_nwo" "$tmp_dir/verify-lock" "$claim_branch"
 "$script_dir/verify-claim-worktree.sh" --issue "$issue_number" --allow-coordination-branch >/dev/null
 buddy_worktree_record_claim "$cache_dir" "$issue_number" "$change_id" "$claim_branch" "$claim_id" "$base_branch"

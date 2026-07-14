@@ -29,6 +29,100 @@ lease_until=""
 claim_lock_written=0
 claim_completed=0
 viewer="$(gh api user --jq .login)"
+repo_nwo="$(buddy_repo_nwo)"
+
+buddy_claim_triage_gate() {
+  local number="$1"
+  local selected_change_id="$2"
+  local selected_base_branch="$3"
+  local selected_claim_branch="$4"
+  local live_issue_file="$tmp_dir/triage-live-issue.json"
+  local triage_file="openspec/changes/$selected_change_id/.buddy/triage.json"
+  local expected_updated_at
+  local expected_base_sha
+  local validation_output
+  local disposition
+  local reason
+
+  if ! buddy_verify_active_claim_resume "$number" "$selected_change_id" "$selected_claim_branch" "$selected_base_branch" "$viewer" "$repo_nwo" "$tmp_dir/triage-owner-before-read" >/dev/null; then
+    return 1
+  fi
+  # This read must occur after the minimal claim lock is verified. Its updatedAt
+  # is the remote truth to which the agent-owned judgment is bound.
+  gh issue view "$number" --json id,number,title,labels,assignees,body,url,state,updatedAt > "$live_issue_file"
+  expected_updated_at="$(node -e 'const fs=require("fs"); const issue=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(issue.updatedAt || "");' "$live_issue_file")"
+  git fetch origin "$selected_base_branch" >/dev/null
+  expected_base_sha="$(git rev-parse "origin/$selected_base_branch")"
+
+  if [[ ! -f "$triage_file" ]]; then
+    printf 'HANDOFF\nmode: claim\ntriage_disposition: pending\nrequired_action: Collect bounded evidence, record agent-owned judgment in %s, and rerun claim. The verified minimal claim lock remains active.\n' "$triage_file"
+    return 10
+  fi
+
+  if ! validation_output="$(node "$script_dir/validate-triage.mjs" "$triage_file" --issue "$number" --change-id "$selected_change_id" --issue-updated-at "$expected_updated_at" --base-sha "$expected_base_sha")"; then
+    return 1
+  fi
+  disposition="$(node -e 'const value=JSON.parse(process.argv[1]); process.stdout.write(value.disposition || "");' "$validation_output")"
+  [[ "$disposition" == "executable" ]] && return 0
+
+  reason="$(node -e 'const fs=require("fs"); const value=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(value.readiness.reason);' "$triage_file")"
+  # Recheck the same remote version and active owner immediately before a
+  # disposition writes status or closes the issue.
+  if ! buddy_verify_active_claim_resume "$number" "$selected_change_id" "$selected_claim_branch" "$selected_base_branch" "$viewer" "$repo_nwo" "$tmp_dir/triage-owner-before-mutation" "$expected_updated_at" >/dev/null; then
+    return 1
+  fi
+  case "$disposition" in
+    series-parent)
+      "$script_dir/set-status-label.sh" "$number" "status:tracking"
+      ;;
+    needs-human)
+      "$script_dir/set-status-label.sh" "$number" "status:needs-human"
+      ;;
+    blocked)
+      "$script_dir/set-status-label.sh" "$number" "status:blocked"
+      ;;
+    close)
+      gh issue close "$number" --comment "OpenSpec Buddy triage close: $reason"
+      ;;
+    *)
+      echo "Unsupported triage disposition: $disposition" >&2
+      return 1
+      ;;
+  esac
+  case "$disposition" in
+    series-parent) expected_state="OPEN"; expected_status="status:tracking" ;;
+    needs-human) expected_state="OPEN"; expected_status="status:needs-human" ;;
+    blocked) expected_state="OPEN"; expected_status="status:blocked" ;;
+    close) expected_state="CLOSED"; expected_status="" ;;
+  esac
+  gh issue view "$number" --json state,labels > "$tmp_dir/triage-post-mutation.json"
+  node -e '
+const fs=require("fs");
+const issue=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));
+const expectedState=process.argv[2];
+const expectedStatus=process.argv[3];
+const statuses=(issue.labels || []).map((label) => label.name).filter((name) => name.startsWith("status:"));
+if (String(issue.state).toUpperCase() !== expectedState || (expectedStatus && (statuses.length !== 1 || statuses[0] !== expectedStatus))) {
+  process.stderr.write(`Triage disposition verification failed: state=${issue.state}, statuses=${statuses.join(",")}\n`);
+  process.exit(1);
+}
+' "$tmp_dir/triage-post-mutation.json" "$expected_state" "$expected_status"
+  printf 'HANDOFF\nmode: claim\ntriage_disposition: %s\nrequired_action: %s\n' "$disposition" "$reason"
+  return 10
+}
+
+run_claim_triage_gate() {
+  local gate_status
+  set +e
+  buddy_claim_triage_gate "$@"
+  gate_status=$?
+  set -e
+  if [[ "$gate_status" == "10" ]]; then
+    claim_completed=1
+    exit 0
+  fi
+  return "$gate_status"
+}
 
 cleanup() {
   if [[ -n "$created_branch_lock" && -n "$issue_number" && -n "$change_id" && -n "$claim_branch" && -n "$viewer" && -n "$claim_id" && -n "$lease_until" && -n "$repo_nwo" ]]; then
@@ -77,7 +171,17 @@ issue_number="$(node -e 'const fs=require("fs"); const issue=JSON.parse(fs.readF
 node -e 'const fs=require("fs"); const issue=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(issue.body || "");' "$issue_file" > "$body_file"
 
 if node "$script_dir/parse-issue-metadata.mjs" "$body_file" > "$metadata_file" 2> "$tmp_dir/parse-error.txt"; then
-  "$script_dir/claim-change.sh" "$issue_number"
+  change_id="$(node -e 'const fs=require("fs"); const data=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(data.change_id);' "$metadata_file")"
+  claim_branch="$(node -e 'const fs=require("fs"); const data=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(data.claim_branch);' "$metadata_file")"
+  base_branch="$(node -e 'const fs=require("fs"); const data=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(data.base_branch);' "$metadata_file")"
+  issue_status="$(node -e 'const fs=require("fs"); const issue=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write((issue.labels || []).map((label) => label.name).find((name) => name.replace(/^status:\\s+/, "status:") === "status:claimed") ? "claimed" : "other");' "$issue_file")"
+  if [[ "$issue_status" == "claimed" ]]; then
+    if ! run_claim_triage_gate "$issue_number" "$change_id" "$base_branch" "$claim_branch"; then
+      exit 1
+    fi
+    exec "$script_dir/claim-change.sh" "$issue_number" --resume-active
+  fi
+  exec "$script_dir/claim-change.sh" "$issue_number"
   exit 0
 fi
 
@@ -124,41 +228,11 @@ claim_branch="$(node -e 'const fs=require("fs"); const data=JSON.parse(fs.readFi
 coupling_group="$(buddy_resolve_coupling_group "$metadata_file" "$issue_file")"
 base_branch="$(node -e 'const fs=require("fs"); const data=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(data.base_branch);' "$metadata_file")"
 
-repo_nwo="$(buddy_repo_nwo)"
 owner="${repo_nwo%%/*}"
 repo_name="${repo_nwo#*/}"
 viewer="$(gh api user --jq .login)"
 
 "$script_dir/verify-claim-worktree.sh" --branch "$claim_branch" --allow-coordination-branch >/dev/null
-buddy_preflight_claim_truth_check "$issue_number" "$change_id" "$claim_branch" "$viewer" "$repo_nwo" "$tmp_dir/preflight-before-relationships"
-
-blocked_by_file="$tmp_dir/blocked-by.json"
-OPENSPEC_BUDDY_CACHE_REFRESH=1 buddy_issue_relationships_graphql "$owner" "$repo_name" "$issue_number" > "$blocked_by_file"
-
-if ! node -e '
-const fs = require("fs");
-const data = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-const issue = Array.isArray(data) ? data[0] : null;
-function normalizedLabels(item) {
-  return (item?.labels?.nodes || []).map((label) => label.name.replace(/^status:\s+/, "status:"));
-}
-const blockers = (issue?.blockedBy?.nodes || []).filter((issue) => {
-  const labels = normalizedLabels(issue);
-  return issue.state !== "CLOSED" && !labels.includes("status:archived") && !labels.includes("status:merged");
-});
-if (blockers.length > 0) {
-  process.stderr.write(JSON.stringify(blockers.map((issue) => ({ number: issue.number, title: issue.title })), null, 2));
-  process.stderr.write("\n");
-  process.exit(1);
-}
-' "$blocked_by_file"; then
-  echo "Issue #$issue_number still has open blockedBy relationships." >&2
-  exit 1
-fi
-
-buddy_open_issues_rest "all" > "$tmp_dir/issues-for-coupling.json"
-node "$script_dir/find-coupling-conflicts.mjs" "$tmp_dir/issues-for-coupling.json" "$issue_number" "$coupling_group" > /dev/null
-
 git fetch origin "$base_branch" >/dev/null
 base_sha="$(git rev-parse "origin/$base_branch")"
 claim_id="$(uuidgen 2>/dev/null || node -e 'console.log(crypto.randomUUID())')"
@@ -170,6 +244,12 @@ buddy_write_minimal_claim_lock "$issue_number" "$change_id" "$claim_branch" "$ba
 buddy_verify_claim_lock_rest "$issue_number" "$change_id" "$viewer" "$claim_id" "$lease_until" "$repo_nwo" "$tmp_dir/verify-lock" "$claim_branch"
 "$script_dir/verify-claim-worktree.sh" --issue "$issue_number" --allow-coordination-branch >/dev/null
 buddy_worktree_record_claim "$cache_dir" "$issue_number" "$change_id" "$claim_branch" "$claim_id" "$base_branch"
+
+if ! run_claim_triage_gate "$issue_number" "$change_id" "$base_branch" "$claim_branch"; then
+  exit 1
+fi
+claim_completed=1
+exec "$script_dir/claim-change.sh" "$issue_number" --resume-active
 
 buddy_invalidate_issue_cache "$cache_dir" "$issue_number"
 buddy_invalidate_ready_scan_cache "$cache_dir"

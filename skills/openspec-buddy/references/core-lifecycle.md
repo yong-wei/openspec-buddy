@@ -43,6 +43,12 @@ GitHub truth, writes only the minimal claim lock, then re-reads GitHub truth.
 Only after the lock belongs to this run and worktree may it create or reuse the
 Development branch, Project fields, and remote claim branch.
 
+An ordinary open issue is claim-first: acquire and verify the minimal claim
+lock, re-read live issue truth, then run triage. Missing triage produces a
+`HANDOFF` while the verified lock remains active; it does not authorize later
+coordination or implementation mutations. The triage judgment must be bound to
+the re-read issue `updatedAt` and inspected base SHA.
+
 If the issue is ordinary, claim adopts that same issue by adding hidden Buddy
 metadata. If the issue is too large, decompose it into child issues and make the
 source issue a `type:series-parent` tracking record.
@@ -51,6 +57,19 @@ source issue a `type:series-parent` tracking record.
 
 Use propose to create a local OpenSpec change and, by default, the matching
 GitHub issue.
+
+A local proposal is triage-first. Collect bounded repository evidence and
+validate `.buddy/triage.json` before proposal validation and before any GitHub
+Issue mutation. This ordering avoids creating a duplicate issue or change when
+the requested behavior is already complete, superseded, blocked, or not yet
+specified well enough to execute.
+
+Matt skills for grilling or research are an optional method for producing a
+triage judgment. When they are not installed, use the Buddy-native fallback:
+inspect the issue, specs, active and archived changes, bounded matching code
+paths, and the current Git base, then record the agent-owned judgment in the
+same triage contract. Provider availability must not change Buddy state,
+artifacts, status mapping, or lifecycle gates.
 
 Required local artifact:
 

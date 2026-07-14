@@ -28,6 +28,21 @@ Only `status: owned` authorizes continuation. `missing` and `expired` return to
 the claim path, `foreign` refuses takeover, and a REST failure blocks because
 it is not evidence that the claim is absent.
 
+## Triage Backfill And Freshness
+
+Prepared changes created before the triage contract may be missing
+`.buddy/triage.json`. Treat this as a compatibility backfill, not as immediate
+invalidation: after live ownership is verified, keep the existing artifacts and
+preserve the verified claim lock, return `HANDOFF`, and require the triage file
+before Development, Project, or implementation mutation continues. Do not
+recreate the change or acquire a second claim.
+
+The backfilled judgment is valid only for the facts it inspected. Pass the
+current issue `updatedAt` and base SHA to `validate-triage.mjs`. If either value
+changes or mismatches the recorded binding, the triage judgment is stale and
+invalid. Re-read live ownership and evidence, regenerate the judgment, and
+validate it again; never reuse a stale result as permission to mutate state.
+
 ## Stale Claim Recovery
 
 Do not reclaim automatically unless every condition is true:

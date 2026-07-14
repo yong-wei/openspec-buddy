@@ -60,6 +60,7 @@ function claimFields(body) {
   }
   return fields;
 }
+
 const active = new Map();
 const ordered = [...(Array.isArray(comments) ? comments : [])]
   .filter((comment) => /OpenSpec Buddy Claim/.test(comment?.body || ""))
@@ -72,11 +73,58 @@ for (const comment of ordered) {
     active.delete(fields.claim_id);
     continue;
   }
-  active.set(fields.claim_id, { ...fields, created_at: comment.created_at || comment.createdAt || "" });
+  active.set(fields.claim_id, {
+    ...fields,
+    created_at: comment.created_at || comment.createdAt || "",
+    comment_user_login: comment.user?.login || comment.author?.login || "",
+  });
 }
 const latest = [...active.values()].sort((left, right) => String(left.created_at || "").localeCompare(String(right.created_at || ""))).at(-1) || null;
 process.stdout.write(JSON.stringify(latest));
 ' "$comments_file" > "$output_file"
+}
+
+buddy_verify_active_claim_resume() {
+  local issue_number="$1" change_id="$2" claim_branch="$3" base_branch="$4"
+  local viewer="$5" repo_nwo="$6" tmp_dir="$7" expected_updated_at="${8:-}"
+  mkdir -p "$tmp_dir"
+  local issue_file="$tmp_dir/issue.json" comments_file="$tmp_dir/comments.json"
+  local active_file="$tmp_dir/active.json" identity_file="$tmp_dir/identity.json" current_base_sha
+  buddy_claim_issue_rest "$repo_nwo" "$issue_number" "$issue_file"
+  buddy_claim_comments_rest "$repo_nwo" "$issue_number" "$comments_file"
+  buddy_claim_active_comment_to_file "$comments_file" "$active_file"
+  buddy_worktree_identity_json "$(buddy_cache_dir)" > "$identity_file"
+  git fetch origin "$base_branch" >/dev/null
+  current_base_sha="$(git rev-parse "origin/$base_branch")"
+  node -e '
+const fs = require("node:fs");
+const [issueFile, activeFile, identityFile, changeId, branch, viewer, baseSha, expectedUpdatedAt, baseBranch] = process.argv.slice(1);
+const issue = JSON.parse(fs.readFileSync(issueFile, "utf8"));
+const active = JSON.parse(fs.readFileSync(activeFile, "utf8"));
+const identity = JSON.parse(fs.readFileSync(identityFile, "utf8"));
+const labels = (Array.isArray(issue.labels) ? issue.labels : issue.labels?.nodes || []).map((label) => typeof label === "string" ? label : label?.name).filter(Boolean).map((name) => name.replace(/^status:\s+/, "status:"));
+const assignees = (Array.isArray(issue.assignees) ? issue.assignees : issue.assignees?.nodes || []).map((entry) => typeof entry === "string" ? entry : entry?.login).filter(Boolean);
+const updatedAt = issue.updated_at || issue.updatedAt || "";
+const now = process.env.OPENSPEC_BUDDY_NOW ? Date.parse(process.env.OPENSPEC_BUDDY_NOW) : Date.now();
+const fail = (message) => { process.stderr.write(`Active claim resume rejected: ${message}\n`); process.exit(1); };
+if (String(issue.state || "").toUpperCase() !== "OPEN") fail("issue is not open");
+if (labels.filter((label) => label.startsWith("status:")).length !== 1 || !labels.includes("status:claimed")) fail("issue is not exactly status:claimed");
+if (!assignees.includes(viewer)) fail("current viewer is not the assignee");
+if (!active) fail("no active claim exists");
+if (String(active.agent || "").replace(/^@/, "") !== viewer) fail("active claim belongs to another agent");
+if (active.change_id !== changeId || active.branch !== branch) fail("active claim change or branch does not match");
+if (!active.claim_id || !active.lease_until || !active.base_branch || !active.base_sha) fail("active claim evidence is incomplete");
+if (active.comment_user_login !== viewer) fail("claim comment was not authored by the current claiming actor");
+if (active.base_branch !== baseBranch) fail("active claim base_branch does not match");
+if (!Number.isFinite(Date.parse(active.lease_until)) || Date.parse(active.lease_until) <= now) fail("active claim lease has expired; use stale recovery and reacquire");
+if (active.base_sha !== baseSha) fail("active claim base_sha is stale; use stale recovery and reacquire");
+if (!active.worktree_path_hash || !active.worktree_alias || !active.coordination_branch) fail("active claim worktree identity is incomplete; use stale recovery and reacquire");
+if (active.worktree_path_hash !== identity.path_hash) fail("active claim belongs to another worktree");
+if (active.worktree_alias !== identity.alias) fail("active claim belongs to another worktree alias");
+if (active.coordination_branch !== identity.coordination_branch) fail("active claim coordination branch does not match");
+if (expectedUpdatedAt && updatedAt !== expectedUpdatedAt) fail("issue updatedAt changed before mutation");
+process.stdout.write(JSON.stringify(active));
+' "$issue_file" "$active_file" "$identity_file" "$change_id" "$claim_branch" "$viewer" "$current_base_sha" "$expected_updated_at" "$base_branch"
 }
 
 buddy_claim_branch_head_sha() {
@@ -223,7 +271,11 @@ function latestActiveClaim(comments) {
       active.delete(fields.claim_id);
       continue;
     }
-    active.set(fields.claim_id, { ...fields, created_at: comment.created_at || comment.createdAt || "" });
+    active.set(fields.claim_id, {
+      ...fields,
+      created_at: comment.created_at || comment.createdAt || "",
+      comment_user_login: comment.user?.login || comment.author?.login || "",
+    });
   }
   return [...active.values()].sort((left, right) => String(left.created_at || "").localeCompare(String(right.created_at || ""))).at(-1);
 }
@@ -493,7 +545,11 @@ function latestActiveClaim(comments) {
       active.delete(fields.claim_id);
       continue;
     }
-    active.set(fields.claim_id, { ...fields, created_at: comment.created_at || comment.createdAt || "" });
+    active.set(fields.claim_id, {
+      ...fields,
+      created_at: comment.created_at || comment.createdAt || "",
+      comment_user_login: comment.user?.login || comment.author?.login || "",
+    });
   }
   return [...active.values()].sort((left, right) => String(left.created_at || "").localeCompare(String(right.created_at || ""))).at(-1);
 }
