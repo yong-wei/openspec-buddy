@@ -536,7 +536,7 @@ function unauthorizedMergeRecoveryValid(opts, state) {
   const violation = state.stages?.unauthorized_merge || {};
   const recovery = state.stages?.unauthorized_merge_recovered || {};
   const receiptOptions = {
-    require: ['repository', 'issue', 'pr', 'head'],
+    require: ['repository', 'issue', 'pr', 'head', 'remoteHead', 'mergedAt'],
     repository: opts.repository,
     issue: String(opts.issue || ''),
     pr: String(opts.pr || ''),
@@ -546,6 +546,8 @@ function unauthorizedMergeRecoveryValid(opts, state) {
     && validReceipt(state, 'unauthorized_merge', receiptOptions)
     && validReceipt(state, 'unauthorized_merge_recovered', receiptOptions)
     && Boolean(recovery.recoveryReason)
+    && violation.remoteHead === String(opts.head || '')
+    && Boolean(violation.mergedAt)
     && Boolean(recovery.mergedAt)
     && recovery.remoteHead === String(opts.head || '')
     && recovery.command === evidenceDigest('unauthorized-merge-recovery', recovery.recoveryReason)
@@ -568,12 +570,12 @@ function recoverUnauthorizedMerge(opts, state) {
   }
   const violation = state.stages?.unauthorized_merge || {};
   if (!stateMatchesContext(opts, state) || !validReceipt(state, 'unauthorized_merge', {
-    require: ['repository', 'issue', 'pr', 'head'],
+    require: ['repository', 'issue', 'pr', 'head', 'remoteHead', 'mergedAt'],
     repository: opts.repository,
     issue: String(opts.issue || ''),
     pr: String(opts.pr || ''),
     head: String(opts.head || ''),
-  })) {
+  }) || violation.remoteHead !== String(opts.head || '') || !violation.mergedAt) {
     return { attempted: true, ok: false, reason: 'Explicit recovery requires a matching signed violation context for this repository, issue, PR, and head.' };
   }
   const truth = freshRemotePrTruth(state, opts.pr);
@@ -591,7 +593,27 @@ function recoverUnauthorizedMerge(opts, state) {
 }
 
 function emitUnauthorizedMerge(opts, reason) {
-  recordStage(opts, 'unauthorized_merge', [evidenceDigest('unauthorized-merge', reason)], { violationReason: reason });
+  const state = readState(opts);
+  const truth = freshRemotePrTruth(state, opts.pr);
+  const remoteHead = truth?.head?.sha || truth?.headRefOid || '';
+  const mergedAt = truth?.merged_at || truth?.mergedAt || '';
+  if (!remotePrIsMerged(truth) || !mergedAt || !remoteHead || String(remoteHead) !== String(opts.head || '')) {
+    emitBlocked({
+      stage: 'unauthorized-merge',
+      reason: 'Cannot record an unauthorized merge without fresh merged PR truth for the exact current head.',
+      command: [],
+      output: `issue: ${opts.issue}\npr: ${opts.pr}\nhead: ${opts.head}`,
+    });
+    process.exit(1);
+  }
+  recordStage(opts, 'unauthorized_merge', [evidenceDigest('unauthorized-merge', reason)], {
+    violationReason: reason,
+    remoteHead,
+    mergedAt,
+    ...(truth.merge_commit_sha || truth.mergeCommit
+      ? { mergeCommit: truth.merge_commit_sha || truth.mergeCommit }
+      : {}),
+  });
   emitBlocked({
     stage: 'unauthorized-merge',
     reason,

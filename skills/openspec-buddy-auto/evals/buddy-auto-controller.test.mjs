@@ -235,6 +235,8 @@ function controllerPath(envInfo) {
     command: '',
     source: 'buddy-auto-driver/run-next',
     violationReason: 'merged without controller authorization',
+    remoteHead: 'merged-head',
+    mergedAt: '2026-07-14T00:00:00Z',
   };
   violation.signature = signReceipt(driverState, 'unauthorized_merge', violation, { stateDir: driverStateDir });
   driverState.stages.unauthorized_merge = violation;
