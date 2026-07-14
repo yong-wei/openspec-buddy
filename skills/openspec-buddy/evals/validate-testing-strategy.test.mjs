@@ -29,7 +29,7 @@ Seam status: required
 Public behavior: CLI rejects invalid testing contracts
 Public seam: node skills/openspec-buddy/evals/validate-testing-strategy.test.mjs
 Existing seam reused: Node assertion eval runner
-AC coverage: AC-1 automated; AC-2 automated
+AC coverage: AC-1: public CLI test; AC-2: integration seam test
 Manual-only acceptance: none
 Rationale: Exercises the public CLI exit status and diagnostics`;
 
@@ -45,7 +45,7 @@ Seam status: not-applicable
 Public behavior: none
 Public seam: rtk git diff --check
 Existing seam reused: none
-AC coverage: AC-1 verified by diff inspection; AC-2 verified by diff inspection
+AC coverage: AC-1: verified by diff inspection; AC-2: verified by diff inspection
 Manual-only acceptance: none
 Rationale: The change only updates static text or mechanical synchronization`);
   assert.equal(result.status, 0, result.stderr);
@@ -55,13 +55,13 @@ const missingSeam = run("missing-seam", required().replace(/Public seam:.*\n/, "
 assert.equal(missingSeam.status, 1);
 assert.match(missingSeam.stderr, /Public seam.*must not be blank/i);
 
-const missingCoverage = run("missing-coverage", required().replace("AC-2 automated", "no second mapping"));
+const missingCoverage = run("missing-coverage", required().replace("; AC-2: integration seam test", ""));
 assert.equal(missingCoverage.status, 1);
 assert.match(missingCoverage.stderr, /AC-2.*not mapped/i);
 
 const manualOnly = run("manual-only", required().replace(
-  "AC coverage: AC-1 automated; AC-2 automated\nManual-only acceptance: none",
-  "AC coverage: AC-1 automated\nManual-only acceptance: AC-2: visual confirmation of terminal rendering",
+  "AC coverage: AC-1: public CLI test; AC-2: integration seam test\nManual-only acceptance: none",
+  "AC coverage: AC-1: public CLI test\nManual-only acceptance: AC-2: visual confirmation of terminal rendering",
 ));
 assert.equal(manualOnly.status, 0, manualOnly.stderr);
 
@@ -100,21 +100,21 @@ for (const field of ["Public behavior", "Public seam"]) {
 }
 
 const manualEntries = run("manual-entries", required().replace(
-  "AC coverage: AC-1 automated; AC-2 automated\nManual-only acceptance: none",
-  "AC coverage: AC-1 automated\nManual-only acceptance: AC-2: inspect terminal output; AC-3: confirm screen-reader announcement",
+  "AC coverage: AC-1: public CLI test; AC-2: integration seam test\nManual-only acceptance: none",
+  "AC coverage: AC-1: public CLI test\nManual-only acceptance: AC-2: inspect terminal output; AC-3: confirm screen-reader announcement",
 ), "- [ ] AC-1: First.\n- [ ] AC-2: Second.\n- [ ] AC-3: Third.\n");
 assert.equal(manualEntries.status, 0, manualEntries.stderr);
 
 const isolatedManualReason = run("isolated-manual-reason", required().replace(
-  "AC coverage: AC-1 automated; AC-2 automated\nManual-only acceptance: none",
-  "AC coverage: AC-1 automated\nManual-only acceptance: AC-2: AC-3; AC-3: visual inspection",
+  "AC coverage: AC-1: public CLI test; AC-2: integration seam test\nManual-only acceptance: none",
+  "AC coverage: AC-1: public CLI test\nManual-only acceptance: AC-2: AC-3; AC-3: visual inspection",
 ), "- [ ] AC-1: First.\n- [ ] AC-2: Second.\n- [ ] AC-3: Third.\n");
 assert.equal(isolatedManualReason.status, 1);
 assert.match(isolatedManualReason.stderr, /AC-2.*reason/i);
 
 const duplicateManual = run("duplicate-manual", required().replace(
-  "AC coverage: AC-1 automated; AC-2 automated\nManual-only acceptance: none",
-  "AC coverage: AC-1 automated\nManual-only acceptance: AC-2: inspect output; AC-2: inspect rendering",
+  "AC coverage: AC-1: public CLI test; AC-2: integration seam test\nManual-only acceptance: none",
+  "AC coverage: AC-1: public CLI test\nManual-only acceptance: AC-2: inspect output; AC-2: inspect rendering",
 ));
 assert.equal(duplicateManual.status, 1);
 assert.match(duplicateManual.stderr, /AC-2.*duplicate manual-only/i);
@@ -132,6 +132,43 @@ const overlappingMapping = run("overlapping-mapping", required().replace(
 ));
 assert.equal(overlappingMapping.status, 1);
 assert.match(overlappingMapping.stderr, /AC-2.*both AC coverage and Manual-only acceptance/i);
+
+const multipleCoverage = run("multiple-coverage", required().replace(
+  "AC coverage: AC-1: public CLI test; AC-2: integration seam test",
+  "AC coverage: AC-1: public CLI test; AC-2: integration seam test; AC-3: parser boundary test",
+), "- [ ] AC-1: First.\n- [ ] AC-2: Second.\n- [ ] AC-3: Third.\n");
+assert.equal(multipleCoverage.status, 0, multipleCoverage.stderr);
+
+const duplicateCoverage = run("duplicate-coverage", required().replace(
+  "AC coverage: AC-1: public CLI test; AC-2: integration seam test",
+  "AC coverage: AC-1: public CLI test; AC-1: another test; AC-2: integration seam test",
+));
+assert.equal(duplicateCoverage.status, 1);
+assert.match(duplicateCoverage.stderr, /AC-1.*duplicate AC coverage/i);
+
+const unknownCoverage = run("unknown-coverage", required().replace(
+  "AC coverage: AC-1: public CLI test; AC-2: integration seam test",
+  "AC coverage: AC-1: public CLI test; AC-2: integration seam test; AC-9: unknown test",
+));
+assert.equal(unknownCoverage.status, 1);
+assert.match(unknownCoverage.stderr, /AC-9.*unknown AC coverage/i);
+
+for (const invalidReason of ["none", "n/a", "not-applicable", "---", "AC-3", "TODO", "not covered"]) {
+  const slug = invalidReason.replaceAll(/[^a-z0-9]+/gi, "-");
+  const invalidCoverage = run(`invalid-coverage-${slug}`, required().replace(
+    "AC-2: integration seam test",
+    `AC-2: ${invalidReason}`,
+  ));
+  assert.equal(invalidCoverage.status, 1, `coverage reason ${invalidReason} should fail`);
+  assert.match(invalidCoverage.stderr, /AC-2.*AC coverage.*reason/i);
+
+  const invalidManual = run(`invalid-manual-${slug}`, required().replace(
+    "AC coverage: AC-1: public CLI test; AC-2: integration seam test\nManual-only acceptance: none",
+    `AC coverage: AC-1: public CLI test\nManual-only acceptance: AC-2: ${invalidReason}`,
+  ));
+  assert.equal(invalidManual.status, 1, `manual reason ${invalidReason} should fail`);
+  assert.match(invalidManual.stderr, /AC-2.*Manual-only acceptance.*reason/i);
+}
 
 const missingSectionDesign = path.join(tmpDir, "missing-section-design.md");
 const missingSectionIssue = path.join(tmpDir, "missing-section-issue.md");

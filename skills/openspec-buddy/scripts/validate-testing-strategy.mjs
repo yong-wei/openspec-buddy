@@ -103,31 +103,39 @@ const issueAcIds = [...new Set(issue.match(/\bAC-\d+\b/g) ?? [])];
 if (issueAcIds.length === 0) errors.push("issue.md: no AC-N identifiers found");
 
 const issueAcSet = new Set(issueAcIds);
-const coverageAcIds = new Set(fields["AC coverage"]?.match(/\bAC-\d+\b/g) ?? []);
-const manualAcIds = new Set();
-const manualText = fields["Manual-only acceptance"] ?? "";
+function parseAcMap(label, text) {
+  const acIds = new Set();
+  if (!text || text.toLowerCase() === "none") return acIds;
 
-if (manualText && manualText.toLowerCase() !== "none") {
-  for (const entry of manualText.split(";")) {
+  for (const entry of text.split(";")) {
     const match = entry.trim().match(/^(AC-\d+):\s*(.+)$/);
     if (!match) {
-      errors.push(`Manual-only acceptance: invalid entry ${entry.trim() || "(blank)"}; expected AC-N: reason`);
+      errors.push(`${label}: invalid entry ${entry.trim() || "(blank)"}; expected AC-N: reason`);
       continue;
     }
     const [, acId, reason] = match;
-    if (manualAcIds.has(acId)) errors.push(`${acId}: duplicate manual-only entry`);
-    manualAcIds.add(acId);
-    if (!issueAcSet.has(acId)) errors.push(`${acId}: unknown manual-only AC`);
-    const reasonWithoutAcIds = reason.replace(/\bAC-\d+\b/g, "").replace(/[\s:;,.-]/g, "");
-    if (!reasonWithoutAcIds || placeholder.test(reason)) {
-      errors.push(`${acId}: manual-only entry requires its own non-placeholder reason`);
+    const shortLabel = label === "Manual-only acceptance" ? "manual-only" : label;
+    if (acIds.has(acId)) errors.push(`${acId}: duplicate ${shortLabel} entry`);
+    acIds.add(acId);
+    if (!issueAcSet.has(acId)) errors.push(`${acId}: unknown ${shortLabel} entry`);
+
+    const normalized = reason.toLowerCase().replace(/[^a-z0-9]+/g, "");
+    const contentWithoutAcIds = reason.replace(/\bAC-\d+\b/g, "").match(/[\p{L}\p{N}]/gu)?.join("") ?? "";
+    const negativeEmptyMeaning = /\bnot[\s-]+(?:applicable|automated|covered|tested|verified)\b/i.test(reason);
+    if (
+      !contentWithoutAcIds ||
+      ["none", "na", "notapplicable"].includes(normalized) ||
+      placeholder.test(reason) ||
+      negativeEmptyMeaning
+    ) {
+      errors.push(`${acId}: ${label} entry requires its own non-placeholder affirmative reason`);
     }
   }
+  return acIds;
 }
 
-for (const acId of coverageAcIds) {
-  if (!issueAcSet.has(acId)) errors.push(`${acId}: unknown AC in AC coverage`);
-}
+const coverageAcIds = parseAcMap("AC coverage", fields["AC coverage"] ?? "");
+const manualAcIds = parseAcMap("Manual-only acceptance", fields["Manual-only acceptance"] ?? "");
 
 for (const acId of issueAcIds) {
   if (coverageAcIds.has(acId) && manualAcIds.has(acId)) {
