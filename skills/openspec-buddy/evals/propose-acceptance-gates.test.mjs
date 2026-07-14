@@ -30,7 +30,7 @@ Public behavior: <observable behavior or none>
 Public seam: <highest public seam or explicit verification method>
 Existing seam reused: <existing test seam or none>
 AC coverage: AC-1: public seam evidence; AC-2: integration seam evidence
-Manual-only acceptance: AC-3: reason
+Manual-only acceptance: AC-3: <why automation is not applicable> | <manual evidence check>
 Rationale: <why this seam is sufficient or why no public seam applies>`;
 
 assert.ok(
@@ -63,6 +63,16 @@ assert.match(
   coreLifecycle,
   /Every issue AC[\s\S]*exactly once[\s\S]*`AC coverage`[\s\S]*`Manual-only acceptance`[\s\S]*semicolon/i,
   'propose guidance must explain the exact mutually exclusive AC maps',
+);
+assert.match(
+  coreLifecycle,
+  /manual-only entry[\s\S]*automation[\s\S]*`\|`[\s\S]*manual evidence check[\s\S]*semicolon-separated/i,
+  'manual-only mappings must document both pipe-delimited segments and multi-AC separation',
+);
+assert.match(
+  coreLifecycle,
+  /Seam status: required[\s\S]*`Rationale`[\s\S]*substantive[\s\S]*seam[\s\S]*sufficient/i,
+  'required seam contracts must include a substantive sufficiency rationale',
 );
 assert.match(
   coreLifecycle,

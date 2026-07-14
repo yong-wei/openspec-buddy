@@ -22,12 +22,20 @@
   body that starts with YAML front matter and contains `change_id`, with
   regression assertions that the preceding Testing Strategy fence is not used
   as the Issue body.
+- Synchronized the manual-only contract with the substantive validator rule:
+  each entry now records why automation is not applicable, a literal `|`, and
+  the manual evidence check; multiple AC entries remain semicolon-separated.
+- Required `Rationale` for required seams to substantively explain why the
+  selected seam is sufficient for the public behavior and AC coverage.
 
 ## TDD Evidence
 
 - Red: `rtk node skills/openspec-buddy/evals/propose-acceptance-gates.test.mjs`
   failed because the exact Testing Strategy contract was absent.
 - Green: the same focused eval passed after the documentation changes.
+- Red/green follow-up: the documentation contract eval rejected the stale
+  one-segment manual-only template, then passed after the template and guidance
+  adopted the two-segment validator syntax.
 
 ## Verification
 

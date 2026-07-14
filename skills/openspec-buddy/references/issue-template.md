@@ -14,15 +14,19 @@ Public behavior: <observable behavior or none>
 Public seam: <highest public seam or explicit verification method>
 Existing seam reused: <existing test seam or none>
 AC coverage: AC-1: public seam evidence; AC-2: integration seam evidence
-Manual-only acceptance: AC-3: reason
+Manual-only acceptance: AC-3: <why automation is not applicable> | <manual evidence check>
 Rationale: <why this seam is sufficient or why no public seam applies>
 ```
 
-Each field stays on one line. AC maps use semicolon-separated `AC-N: reason`
-entries. Every Acceptance Checklist AC appears exactly once across `AC
+Each field stays on one line. AC maps use semicolon-separated entries. Automated
+entries use `AC-N: public seam evidence`. Manual-only entries use `AC-N: why
+automation is not applicable | manual evidence check`; both sides of `|` are
+required. Every Acceptance Checklist AC appears exactly once across `AC
 coverage` and `Manual-only acceptance`; write `none` only when a whole map is
 empty. For `not-applicable`, put the explicit verification command or method in
-`Public seam` and the justification in `Rationale`.
+`Public seam` and the justification in `Rationale`. For `required`, `Rationale`
+must substantively explain why the selected seam is sufficient for the declared
+public behavior and AC coverage.
 
 ```markdown
 ---

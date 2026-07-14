@@ -100,16 +100,19 @@ The change design must also declare its testing contract in one
 changes require `Seam status: required`. Documentation and mechanical changes
 may use `not-applicable`, but `Public seam` must then name an explicit
 verification method and `Rationale` must explain why a public seam does not
-apply.
+apply. For `Seam status: required`, `Rationale` must give a substantive
+explanation of why the selected seam is sufficient for the public behavior and
+AC coverage; a label or restatement of the seam is not enough.
 
 `Public behavior` names the observable outcome. `Public seam` names the highest
 public interface at which that outcome can be verified, rather than an internal
 helper. `Existing seam reused` identifies the established test boundary when
 one exists. Every issue AC must appear exactly once across `AC coverage` and
-`Manual-only acceptance`. Write each map as semicolon-separated `AC-N: reason`
-entries; use `none` only when the entire map is empty. A manual-only entry must
-state why automated verification is unsuitable and what check supplies the
-evidence.
+`Manual-only acceptance`; use `none` only when the entire map is empty. A
+manual-only entry must state why automation is not applicable, then a literal
+`|`, then the manual evidence check: `AC-N: automation rationale | manual
+evidence check`. Both sides of `|` must be substantive. Multiple AC entries in
+either map remain semicolon-separated.
 
 Implementation threads may propose `Proposed satisfied: AC-...` with evidence,
 but only an independent reviewer may approve which checklist items are checked.
