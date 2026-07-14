@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { signReceipt } from '../scripts/receipt-truth.mjs';
+import { signReceipt, validSignedReceipt } from '../scripts/receipt-truth.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '../../..');
@@ -937,6 +937,30 @@ fi
   state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
   assert.equal(state.stages.unauthorized_merge_recovered.recoveryReason, 'user-approved audit recovery for PR 707');
   assert.ok(state.stages.achieved);
+
+  for (const [field, replacement] of [
+    ['violationSignature', 'tampered-violation-signature'],
+    ['remoteHead', 'tampered-head'],
+    ['mergedAt', '2026-07-15T00:00:00Z'],
+  ]) {
+    const tampered = structuredClone(state);
+    tampered.stages.unauthorized_merge_recovered[field] = replacement;
+    assert.equal(
+      validSignedReceipt(tampered, 'unauthorized_merge_recovered', { stateDir: mergedBridgeStateDir }),
+      false,
+      `${field} must be covered by the recovery receipt signature`,
+    );
+    fs.writeFileSync(stateFile, `${JSON.stringify(tampered, null, 2)}\n`);
+    const rejected = run(['--issue', '675', '--pr', '707', '--head', 'merged-head'], {
+      env: {
+        OPENSPEC_BUDDY_AUTO_STATE_DIR: mergedBridgeStateDir,
+        OPENSPEC_BUDDY_CORE_SCRIPT_DIR: mergedBridgeCoreDir,
+      },
+    });
+    assert.notEqual(rejected.status, 0);
+    assert.match(rejected.stdout, /stage: unauthorized-merge/);
+    fs.writeFileSync(stateFile, `${JSON.stringify(state, null, 2)}\n`);
+  }
 
   const completedRerun = run(['--issue', '675', '--pr', '707', '--head', 'merged-head'], {
     env: {

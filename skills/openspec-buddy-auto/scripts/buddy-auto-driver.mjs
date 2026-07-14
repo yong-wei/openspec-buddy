@@ -546,6 +546,8 @@ function unauthorizedMergeRecoveryValid(opts, state) {
     && validReceipt(state, 'unauthorized_merge', receiptOptions)
     && validReceipt(state, 'unauthorized_merge_recovered', receiptOptions)
     && Boolean(recovery.recoveryReason)
+    && Boolean(recovery.mergedAt)
+    && recovery.remoteHead === String(opts.head || '')
     && recovery.command === evidenceDigest('unauthorized-merge-recovery', recovery.recoveryReason)
     && recovery.violationSignature === violation.signature;
 }
