@@ -7,13 +7,13 @@
 
 这两个技能不替代 OpenSpec 自身的设计和实现技能。推荐配合方式是：
 
-1. 对已有 GitHub issue，先用 `openspec-buddy claim [issue]` 建立 claim；不指定 issue 时会选择最小编号的可领取开放 issue。
-2. 对还没有 issue 的新变更，用 `openspec-buddy propose` 默认创建本地 OpenSpec change 并登记 GitHub Issue；proposal review 通过 `.buddy/proposal-review.yaml` 明确记录纵向切片、series children、依赖完整性和宽范围迁移策略，并通过 `design.md` 的 `## Testing Strategy` 确定公共测试 seam 与每项 AC 的证据映射，二者都在 Issue 变更前校验。该 issue 会带上协作标签、父子/依赖关系和 GitHub Project `Todo` 状态。若明确希望单人本地推进，不登记 GitHub，可使用 `openspec-buddy propose --no-issue`，此时只创建 `openspec/changes/<change_id>`，不创建或更新 GitHub Issue。
+1. 对已有 GitHub issue，先用 `openspec-buddy claim [issue]` 建立最小 claim lock，再通过 `.buddy/triage.json` 记录问题真实性、重复实现、spec/active change 冲突、信息充分性和执行 disposition；不指定 issue 时会选择最小编号的可领取开放 issue。已安装的研究类方法技能可以辅助收集证据，未安装时使用 Buddy 原生仓库与 GitHub 检查，工件和门禁不变。
+2. 对还没有 issue 的新变更，用 `openspec-buddy propose` 默认创建本地 OpenSpec change 并登记 GitHub Issue；`.buddy/triage.json` 先完成真实性与重复检查，proposal review 通过 `.buddy/proposal-review.yaml` 明确记录纵向切片、series children、依赖完整性和宽范围迁移策略，并通过 `design.md` 的 `## Testing Strategy` 确定公共测试 seam 与每项 AC 的证据映射，三项合同都在 Issue 变更前校验。该 issue 会带上协作标签、父子/依赖关系和 GitHub Project `Todo` 状态。若明确希望单人本地推进，不登记 GitHub，可使用 `openspec-buddy propose --no-issue`，此时只创建 `openspec/changes/<change_id>`，不创建或更新 GitHub Issue。
 3. 用 `openspec-buddy apply` 在已 claim 的 GitHub Issue 上完成代码、测试和 spec 同步。
 4. 用 `openspec-buddy achieve` 在 PR 合并后同步 GitHub Issue、GitHub Project 和 OpenSpec 归档记录。
 5. 需要连续处理一组开放 issue 或已登记变更时，再使用 `openspec-buddy-auto`，让它按 claim、依赖、状态、review 和 CI 闸门逐个推进。对于 `--no-issue` 创建的本地 change，auto 应先识别本地候选再执行；`openspec-buddy-auto --no-pr` 只适用于这类 local-only change，只做本地 review、验证与合并，不开 PR。对 GitHub issue-backed change，仍保持一变更一 PR 的协调闭环。
 
-核心约束是：一个可执行协调变更对应一个 GitHub Issue、一个 `change_id`、一个声明分支、一个 OpenSpec change 和一个 PR。复杂开放 issue 会先被 claim，再拆分成多个子 issue；原 issue 只作为跟踪父 issue。GitHub 负责跨分支、跨代理、跨工作树的协作状态；OpenSpec 仍然是需求、任务和 spec 的本地事实源。
+核心约束是：一个可执行协调变更对应一个 GitHub Issue、一个 `change_id`、一个声明分支、一个 OpenSpec change 和一个 PR。复杂开放 issue 会先被 claim，再拆分成多个可独立执行的子 issue；只有子 issue 已关联并全部处于 `status:ready` 后，原 issue 才转换为跟踪父 issue。GitHub 负责跨分支、跨代理、跨工作树的协作状态；OpenSpec 仍然是需求、任务和 spec 的本地事实源。
 
 ## 安装
 

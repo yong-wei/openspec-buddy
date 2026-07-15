@@ -1,7 +1,7 @@
 # Recent Summary
 
 状态: active
-最后更新: 2026-07-14
+最后更新: 2026-07-15
 摘要: 记录本仓库初始化后的最近稳定状态。
 上游:
 - [00-index.md](00-index.md)
@@ -39,6 +39,7 @@
 - `v0.23.0` 发布线为手动 Buddy propose 增加 `.buddy/proposal-review.yaml` 形态合同和确定性校验：每个可执行 child change 必须形成可独立认领、测试、审核并由单个 PR 交付的纵向路径；GitHub `blockedBy` 保持依赖真源，宽范围机械迁移使用 `expand-migrate-contract`。同时，Buddy Auto single mode 只在核验远端合并真相并生成绑定 issue/change/PR/head 的签名恢复证据后，才允许恢复外部合并的 PR。
 - `v0.23.1` 发布线补齐 review-wait cache-refresh eval 的负载容错：首次外层预算耗尽时清理专属缓存和后代进程，再以双倍预算重试一次；首次运行前也清空缓存，避免旧缓存掩盖刷新回归。
 - `v0.24.0` 发布线为 proposal `design.md` 增加 `## Testing Strategy` 确定性合同：行为型及中高风险变更必须预先确定公共测试 seam，每个 Acceptance Checklist AC 必须映射到自动证据或带不可自动化原因的人工检查；Apply 与 Auto 只消费已批准 seam，Matt TDD 是否可用不改变 Buddy 状态、回执、工件或门禁。
+- `v0.25.0` 发布线为 claim/propose 增加证据绑定的真实性、重复实现、spec/active change 冲突与 readiness triage 合同；普通和预备 Issue 均先取得最小 claim lock，再按现有 Buddy 状态机推进。series parent 只有在已关联的可执行子 Issue 全部为开放 `type:change + status:ready` 后才能转换 tracking；失败清理、终态 Release 与 stale recovery 保持远端状态和 claim 真源一致。
 
 ## 当前警惕点
 
