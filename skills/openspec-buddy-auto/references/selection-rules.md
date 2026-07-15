@@ -42,6 +42,22 @@ After claim, immediately classify the issue:
 - Complex issue: keep the source issue claimed while creating child change
   issues, then make the source issue a `status:tracking` series parent.
 
+The classification input is the validated final disposition from
+`.buddy/triage.json`. Auto consumes that disposition only. It does not run
+research, grilling, prototyping, or any other exploratory method while selecting
+or advancing work. Evidence interpretation and the triage judgment remain
+agent-owned outside the Auto state machine.
+
+Map the disposition into the existing status model:
+
+- `executable`: continue the claimed change.
+- `series-parent`: create independently executable children, then use
+  `status:tracking` on the parent.
+- `needs-human`: use `status:needs-human`.
+- `blocked`: use `status:blocked` with the dependency or conflict evidence.
+- `close`: close with the explicit triage reason and do not create a duplicate
+  change.
+
 For an ordinary open issue, claim and normalize that original issue in place by
 adding Buddy metadata at the top. Do not create a second issue that mirrors the
 same task; child issues are only for executable pieces of a genuinely complex

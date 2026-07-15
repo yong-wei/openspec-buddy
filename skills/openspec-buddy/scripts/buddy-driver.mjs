@@ -140,6 +140,12 @@ function repoState() {
   };
 }
 
+function proposeBaseSha() {
+  const headSha = run('git', ['rev-parse', 'HEAD'], { optional: true });
+  if (!headSha) throw new Error('Unable to resolve proposal base SHA from HEAD.');
+  return headSha;
+}
+
 function inferMode(opts) {
   if (opts.mode) return opts.mode;
   if (opts.noIssue || opts.change) return 'propose';
@@ -181,6 +187,16 @@ function describeNext(opts) {
   } else if (mode === 'propose') {
     commands.push([path.join(scriptDir, 'check-config.sh'), opts.noIssue ? 'local' : 'core']);
     if (opts.change) {
+      commands.push([
+        path.join(scriptDir, 'validate-triage.mjs'),
+        `openspec/changes/${opts.change}/.buddy/triage.json`,
+        '--issue',
+        'local',
+        '--change-id',
+        opts.change,
+        '--base-sha',
+        proposeBaseSha(),
+      ]);
       commands.push([path.join(scriptDir, 'validate-issue-body.mjs'), `openspec/changes/${opts.change}/.buddy/issue.md`]);
       commands.push([path.join(scriptDir, 'validate-proposal-shape.mjs'), `openspec/changes/${opts.change}/.buddy/proposal-review.yaml`]);
       commands.push([
@@ -230,6 +246,15 @@ function runDriver(opts) {
     });
     if (result.status !== 0) {
       const output = compactOutput(result);
+      if (mode === 'propose' && command[0] === path.join(scriptDir, 'validate-triage.mjs') && /triage\.json not found/.test(output)) {
+        emitHandoff({
+          mode,
+          commands: [command],
+          notes: [output, 'Collect bounded evidence and record agent-owned triage judgment before proposal validation or any GitHub Issue mutation.'],
+          fields,
+        });
+        return;
+      }
       if (mode === 'propose' && command[0] === path.join(scriptDir, 'validate-proposal-shape.mjs') && /proposal-review\.yaml not found/.test(output)) {
         emitHandoff({
           mode,
@@ -259,6 +284,30 @@ function runDriver(opts) {
         output,
       });
       process.exit(result.status ?? 1);
+    }
+    if (mode === 'propose' && command[0] === path.join(scriptDir, 'validate-triage.mjs')) {
+      let disposition = '';
+      try {
+        disposition = JSON.parse(result.stdout).disposition || '';
+      } catch {
+        emitBlocked({ mode, command, reason: 'validate-triage.mjs returned invalid JSON', output: compactOutput(result) });
+        process.exit(1);
+      }
+      if (disposition !== 'executable') {
+        const transitions = {
+          'series-parent': 'Use the existing tracking-parent and executable-child flow; do not create a second status system.',
+          'needs-human': 'Map the result to status:needs-human and wait for human input.',
+          blocked: 'Map the result to status:blocked with the recorded dependency or conflict evidence.',
+          close: 'Close or abandon the proposal with the explicit triage reason; do not create a duplicate change or Issue.',
+        };
+        emitHandoff({
+          mode,
+          commands: [],
+          notes: [transitions[disposition] || `Consume triage disposition ${disposition} through the existing Buddy status flow.`],
+          fields: [...fields, ['triage_disposition', disposition]],
+        });
+        return;
+      }
     }
   }
   emitDone({ mode, commands, state });

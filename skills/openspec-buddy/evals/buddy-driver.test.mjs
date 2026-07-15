@@ -22,16 +22,31 @@ function makeExecutable(file, body) {
   fs.writeFileSync(file, body, { mode: 0o755 });
 }
 
+function initializeGit(directory) {
+  spawnSync('git', ['init', '-q'], { cwd: directory });
+  spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd: directory });
+  spawnSync('git', ['config', 'user.name', 'Test'], { cwd: directory });
+  fs.writeFileSync(path.join(directory, '.git-seed'), 'seed\n');
+  spawnSync('git', ['add', '.git-seed'], { cwd: directory });
+  spawnSync('git', ['commit', '-qm', 'seed'], { cwd: directory });
+}
+
 {
   const result = run(['--dry-run', '--mode', 'propose', '--change', 'add-driver-gate']);
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /HANDOFF/);
+  assert.match(result.stdout, /validate-triage\.mjs/);
+  assert.match(result.stdout, /validate-triage\.mjs[^\n]*--issue local --change-id add-driver-gate --base-sha [0-9a-f]{7,64}/);
   assert.match(result.stdout, /validate-issue-body\.mjs/);
   assert.match(result.stdout, /openspec\/changes\/add-driver-gate\/\.buddy\/issue\.md/);
   assert.match(result.stdout, /validate-proposal-shape\.mjs/);
   assert.match(result.stdout, /openspec\/changes\/add-driver-gate\/\.buddy\/proposal-review\.yaml/);
   assert.match(result.stdout, /validate-testing-strategy\.mjs/);
   assert.match(result.stdout, /openspec\/changes\/add-driver-gate\/design\.md/);
+  assert.ok(
+    result.stdout.indexOf('validate-triage.mjs') < result.stdout.indexOf('validate-issue-body.mjs'),
+    'triage validation must precede existing proposal gates',
+  );
   assert.ok(
     result.stdout.indexOf('validate-issue-body.mjs') < result.stdout.indexOf('validate-proposal-shape.mjs'),
     'proposal shape validation must immediately follow issue body validation',
@@ -41,6 +56,106 @@ function makeExecutable(file, body) {
     'testing strategy validation must follow proposal shape validation',
   );
   assert.match(result.stdout, /independent proposal review/i);
+}
+
+{
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'buddy-driver-stale-triage-base-'));
+  const scriptDir = path.join(tmp, 'skills/openspec-buddy/scripts');
+  const buddyDir = path.join(tmp, 'openspec/changes/stale-triage/.buddy');
+  fs.mkdirSync(scriptDir, { recursive: true });
+  fs.mkdirSync(buddyDir, { recursive: true });
+  fs.cpSync(helper, path.join(scriptDir, 'buddy-driver.mjs'));
+  fs.copyFileSync(path.join(path.dirname(helper), 'validate-triage.mjs'), path.join(scriptDir, 'validate-triage.mjs'));
+  makeExecutable(path.join(scriptDir, 'check-config.sh'), '#!/usr/bin/env bash\nexit 0\n');
+  fs.writeFileSync(path.join(buddyDir, 'triage.json'), `${JSON.stringify({
+    subject: { issue: null, change_id: 'stale-triage' },
+    truth: { problem_reproduced: 'yes', evidence: ['Observed repository behavior'] },
+    duplication: { existing_implementation: 'none', conflicting_specs: [], active_changes: [], superseded_by: null },
+    readiness: { information: 'sufficient', disposition: 'executable', reason: 'Evidence supports execution' },
+    binding: { issue_updated_at: null, base_sha: 'deadbee', generated_at: '2026-07-14T10:00:00Z' },
+  }, null, 2)}\n`);
+  initializeGit(tmp);
+  const configuredBase = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: tmp, encoding: 'utf8' }).stdout.trim();
+  spawnSync('git', ['update-ref', 'refs/remotes/origin/integration', configuredBase], { cwd: tmp });
+  fs.writeFileSync(path.join(tmp, 'seed'), 'seed\n');
+  spawnSync('git', ['add', 'seed'], { cwd: tmp });
+  spawnSync('git', ['commit', '-qm', 'seed'], { cwd: tmp });
+  const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: tmp, encoding: 'utf8' }).stdout.trim();
+  const result = spawnSync('node', [path.join(scriptDir, 'buddy-driver.mjs'), '--mode', 'propose', '--change', 'stale-triage'], {
+    cwd: tmp,
+    encoding: 'utf8',
+    env: { ...process.env, OPENSPEC_BUDDY_BASE_BRANCH: 'integration' },
+  });
+  assert.notEqual(head, configuredBase, 'fixture must distinguish local HEAD from configured origin base');
+  assert.notEqual(result.status, 0);
+  assert.match(result.stdout, /^BLOCKED$/m);
+  assert.match(result.stdout, new RegExp(`validate-triage\\.mjs[^\\n]*--base-sha ${head}`));
+
+  const wrongIdentity = JSON.parse(fs.readFileSync(path.join(buddyDir, 'triage.json'), 'utf8'));
+  wrongIdentity.subject.issue = 42;
+  wrongIdentity.binding.issue_updated_at = '2026-07-14T10:00:00Z';
+  wrongIdentity.binding.base_sha = head;
+  fs.writeFileSync(path.join(buddyDir, 'triage.json'), `${JSON.stringify(wrongIdentity, null, 2)}\n`);
+  const identityResult = spawnSync('node', [path.join(scriptDir, 'buddy-driver.mjs'), '--mode', 'propose', '--change', 'stale-triage'], {
+    cwd: tmp,
+    encoding: 'utf8',
+    env: { ...process.env, OPENSPEC_BUDDY_BASE_BRANCH: 'integration' },
+  });
+  assert.notEqual(identityResult.status, 0);
+  assert.match(identityResult.stdout, /^BLOCKED$/m);
+  assert.match(identityResult.stdout, /--issue local --change-id stale-triage/);
+}
+
+{
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'buddy-driver-missing-head-'));
+  const scriptDir = path.join(tmp, 'skills/openspec-buddy/scripts');
+  fs.mkdirSync(scriptDir, { recursive: true });
+  fs.cpSync(helper, path.join(scriptDir, 'buddy-driver.mjs'));
+  spawnSync('git', ['init', '-q'], { cwd: tmp });
+  const result = spawnSync('node', [path.join(scriptDir, 'buddy-driver.mjs'), '--dry-run', '--mode', 'propose', '--change', 'no-head'], {
+    cwd: tmp,
+    encoding: 'utf8',
+    env: { ...process.env, OPENSPEC_BUDDY_BASE_BRANCH: 'integration' },
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Unable to resolve proposal base SHA from HEAD/);
+}
+
+for (const mismatch of ['issue', 'change']) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), `buddy-driver-local-identity-${mismatch}-`));
+  const scriptDir = path.join(tmp, 'skills/openspec-buddy/scripts');
+  const buddyDir = path.join(tmp, 'openspec/changes/local-identity/.buddy');
+  fs.mkdirSync(scriptDir, { recursive: true });
+  fs.mkdirSync(buddyDir, { recursive: true });
+  fs.cpSync(helper, path.join(scriptDir, 'buddy-driver.mjs'));
+  fs.copyFileSync(path.join(path.dirname(helper), 'validate-triage.mjs'), path.join(scriptDir, 'validate-triage-real.mjs'));
+  const logFile = path.join(tmp, 'commands.log');
+  const githubLog = path.join(tmp, 'github.log');
+  makeExecutable(path.join(scriptDir, 'check-config.sh'), `#!/usr/bin/env bash\necho check-config >> ${JSON.stringify(logFile)}\n`);
+  makeExecutable(path.join(scriptDir, 'validate-triage.mjs'), `#!/usr/bin/env bash\necho validate-triage >> ${JSON.stringify(logFile)}\nexec node ${JSON.stringify(path.join(scriptDir, 'validate-triage-real.mjs'))} "$@"\n`);
+  for (const name of ['validate-issue-body.mjs', 'validate-proposal-shape.mjs', 'validate-testing-strategy.mjs']) {
+    makeExecutable(path.join(scriptDir, name), `#!/usr/bin/env bash\necho ${name} >> ${JSON.stringify(logFile)}\n`);
+  }
+  makeExecutable(path.join(tmp, 'gh'), `#!/usr/bin/env bash\necho gh >> ${JSON.stringify(githubLog)}\nexit 99\n`);
+  initializeGit(tmp);
+  const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: tmp, encoding: 'utf8' }).stdout.trim();
+  const triage = {
+    subject: { issue: mismatch === 'issue' ? 31 : null, change_id: mismatch === 'change' ? 'other-change' : 'local-identity' },
+    truth: { problem_reproduced: 'yes', evidence: ['Observed repository behavior'] },
+    duplication: { existing_implementation: 'none', conflicting_specs: [], active_changes: [], superseded_by: null },
+    readiness: { information: 'sufficient', disposition: 'executable', reason: 'Evidence supports execution' },
+    binding: { issue_updated_at: mismatch === 'issue' ? '2026-07-14T10:00:00Z' : null, base_sha: head, generated_at: '2026-07-14T10:00:00Z' },
+  };
+  fs.writeFileSync(path.join(buddyDir, 'triage.json'), `${JSON.stringify(triage)}\n`);
+  const result = spawnSync('node', [path.join(scriptDir, 'buddy-driver.mjs'), '--mode', 'propose', '--change', 'local-identity', '--no-issue'], {
+    cwd: tmp,
+    encoding: 'utf8',
+    env: { ...process.env, PATH: `${tmp}:${process.env.PATH}` },
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stdout, /^BLOCKED$/m);
+  assert.equal(fs.readFileSync(logFile, 'utf8').trim(), ['check-config', 'validate-triage'].join('\n'));
+  assert.equal(fs.existsSync(githubLog), false, 'identity mismatch must stop before GitHub mutation');
 }
 
 {
@@ -66,6 +181,7 @@ for (const missingArtifact of ['design', 'section']) {
   const logFile = path.join(tmp, 'commands.log');
   const githubLog = path.join(tmp, 'github.log');
   makeExecutable(path.join(scriptDir, 'check-config.sh'), `#!/usr/bin/env bash\necho check-config >> ${JSON.stringify(logFile)}\n`);
+  makeExecutable(path.join(scriptDir, 'validate-triage.mjs'), `#!/usr/bin/env bash\necho validate-triage >> ${JSON.stringify(logFile)}\necho '{"disposition":"executable"}'\n`);
   makeExecutable(path.join(scriptDir, 'validate-issue-body.mjs'), `#!/usr/bin/env bash\necho validate-issue-body >> ${JSON.stringify(logFile)}\n`);
   makeExecutable(path.join(scriptDir, 'validate-proposal-shape.mjs'), `#!/usr/bin/env bash\necho validate-proposal-shape >> ${JSON.stringify(logFile)}\n`);
   makeExecutable(path.join(tmp, 'gh'), `#!/usr/bin/env bash\necho gh >> ${JSON.stringify(githubLog)}\n`);
@@ -73,7 +189,7 @@ for (const missingArtifact of ['design', 'section']) {
   if (missingArtifact === 'section') {
     fs.writeFileSync(path.join(changeDir, 'design.md'), '# Design\n\nNo testing contract.\n');
   }
-  spawnSync('git', ['init', '-q'], { cwd: tmp });
+  initializeGit(tmp);
   const result = spawnSync('node', [path.join(scriptDir, 'buddy-driver.mjs'), '--mode', 'propose', '--change', 'missing-testing'], {
     cwd: tmp,
     encoding: 'utf8',
@@ -86,6 +202,7 @@ for (const missingArtifact of ['design', 'section']) {
   assert.equal(fs.existsSync(githubLog), false, 'proposal validation failure must not invoke GitHub mutation');
   assert.equal(fs.readFileSync(logFile, 'utf8').trim(), [
     'check-config',
+    'validate-triage',
     'validate-issue-body',
     'validate-proposal-shape',
   ].join('\n'));
@@ -98,12 +215,13 @@ for (const missingArtifact of ['design', 'section']) {
   fs.cpSync(helper, path.join(scriptDir, 'buddy-driver.mjs'));
   const logFile = path.join(tmp, 'commands.log');
   makeExecutable(path.join(scriptDir, 'check-config.sh'), `#!/usr/bin/env bash\necho check-config >> ${JSON.stringify(logFile)}\n`);
+  makeExecutable(path.join(scriptDir, 'validate-triage.mjs'), `#!/usr/bin/env bash\necho validate-triage >> ${JSON.stringify(logFile)}\necho '{"disposition":"executable"}'\n`);
   makeExecutable(path.join(scriptDir, 'validate-issue-body.mjs'), `#!/usr/bin/env bash\necho validate-issue-body >> ${JSON.stringify(logFile)}\n`);
   fs.copyFileSync(
     path.join(path.dirname(helper), 'validate-proposal-shape.mjs'),
     path.join(scriptDir, 'validate-proposal-shape.mjs'),
   );
-  spawnSync('git', ['init', '-q'], { cwd: tmp });
+  initializeGit(tmp);
   const result = spawnSync('node', [path.join(scriptDir, 'buddy-driver.mjs'), '--mode', 'propose', '--change', 'missing-manifest'], {
     cwd: tmp,
     encoding: 'utf8',
@@ -111,7 +229,28 @@ for (const missingArtifact of ['design', 'section']) {
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /^HANDOFF$/m);
   assert.match(result.stdout, /proposal-review\.yaml not found/);
-  assert.equal(fs.readFileSync(logFile, 'utf8').trim(), ['check-config', 'validate-issue-body'].join('\n'));
+  assert.equal(fs.readFileSync(logFile, 'utf8').trim(), ['check-config', 'validate-triage', 'validate-issue-body'].join('\n'));
+}
+
+{
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'buddy-driver-propose-triage-disposition-'));
+  const scriptDir = path.join(tmp, 'skills/openspec-buddy/scripts');
+  fs.mkdirSync(scriptDir, { recursive: true });
+  fs.cpSync(helper, path.join(scriptDir, 'buddy-driver.mjs'));
+  const logFile = path.join(tmp, 'commands.log');
+  makeExecutable(path.join(scriptDir, 'check-config.sh'), `#!/usr/bin/env bash\necho check-config >> ${JSON.stringify(logFile)}\n`);
+  makeExecutable(path.join(scriptDir, 'validate-triage.mjs'), `#!/usr/bin/env bash\necho validate-triage >> ${JSON.stringify(logFile)}\necho '{"disposition":"needs-human"}'\n`);
+  makeExecutable(path.join(scriptDir, 'validate-issue-body.mjs'), `#!/usr/bin/env bash\necho issue-mutation >> ${JSON.stringify(logFile)}\n`);
+  initializeGit(tmp);
+  const result = spawnSync('node', [path.join(scriptDir, 'buddy-driver.mjs'), '--mode', 'propose', '--change', 'triaged'], {
+    cwd: tmp,
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^HANDOFF$/m);
+  assert.match(result.stdout, /^triage_disposition: needs-human$/m);
+  assert.match(result.stdout, /status:needs-human/);
+  assert.equal(fs.readFileSync(logFile, 'utf8').trim(), ['check-config', 'validate-triage'].join('\n'));
 }
 
 {
@@ -146,7 +285,7 @@ for (const missingArtifact of ['design', 'section']) {
   const skillRoot = path.join(tmp, 'method-skills');
   fs.mkdirSync(path.join(skillRoot, 'research'), { recursive: true });
   fs.writeFileSync(path.join(skillRoot, 'research', 'SKILL.md'), '# research\n');
-  spawnSync('git', ['init', '-q'], { cwd: tmp });
+  initializeGit(tmp);
   const result = spawnSync('node', [path.join(scriptDir, 'buddy-driver.mjs'), '--mode', 'explore', '--explore-question', 'facts'], {
     cwd: tmp,
     encoding: 'utf8',
@@ -172,7 +311,7 @@ for (const missingArtifact of ['design', 'section']) {
   const scriptDir = path.join(tmp, 'skills/openspec-buddy/scripts');
   fs.mkdirSync(scriptDir, { recursive: true });
   fs.cpSync(helper, path.join(scriptDir, 'buddy-driver.mjs'));
-  spawnSync('git', ['init', '-q'], { cwd: tmp });
+  initializeGit(tmp);
   const result = spawnSync('node', [path.join(scriptDir, 'buddy-driver.mjs'), '--mode', 'explore', '--explore-question', 'interaction-state'], {
     cwd: tmp,
     encoding: 'utf8',
@@ -229,7 +368,7 @@ for (const [question, method] of [
   const logFile = path.join(tmp, 'commands.log');
   makeExecutable(path.join(scriptDir, 'check-config.sh'), `#!/usr/bin/env bash\necho check >> ${JSON.stringify(logFile)}\n`);
   makeExecutable(path.join(scriptDir, 'claim-issue.sh'), `#!/usr/bin/env bash\necho claim >> ${JSON.stringify(logFile)}\n`);
-  spawnSync('git', ['init', '-q'], { cwd: tmp });
+  initializeGit(tmp);
   const result = spawnSync('node', [path.join(scriptDir, 'buddy-driver.mjs')], {
     cwd: tmp,
     encoding: 'utf8',
@@ -242,7 +381,7 @@ for (const [question, method] of [
 
 {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'buddy-driver-'));
-  spawnSync('git', ['init', '-q'], { cwd: tmp });
+  initializeGit(tmp);
   fs.writeFileSync(path.join(tmp, 'README.md'), 'x\n');
   spawnSync('git', ['add', 'README.md'], { cwd: tmp });
   spawnSync('git', ['commit', '-q', '-m', 'init'], {
@@ -269,7 +408,7 @@ for (const [question, method] of [
   makeExecutable(path.join(scriptDir, 'sync-base-branch.sh'), `#!/usr/bin/env bash\necho sync >> ${JSON.stringify(logFile)}\n`);
   makeExecutable(path.join(scriptDir, 'claim-change.sh'), `#!/usr/bin/env bash\necho claim-change "$@" >> ${JSON.stringify(logFile)}\n`);
   makeExecutable(path.join(scriptDir, 'mark-in-progress.sh'), `#!/usr/bin/env bash\necho mark-in-progress "$@" >> ${JSON.stringify(logFile)}\n`);
-  spawnSync('git', ['init', '-q'], { cwd: tmp });
+  initializeGit(tmp);
   const result = spawnSync('node', [path.join(scriptDir, 'buddy-driver.mjs'), '--mode', 'apply', '--issue', '9'], {
     cwd: tmp,
     encoding: 'utf8',
