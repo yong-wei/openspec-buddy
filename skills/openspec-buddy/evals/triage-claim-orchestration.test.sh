@@ -88,7 +88,11 @@ if [[ "$1 $2" == "issue view" ]]; then
   [[ -f "$TEST_ROOT/post-status" ]] && status="$(cat "$TEST_ROOT/post-status")"
   state=OPEN
   if [[ "$*" == *"state,labels"* ]]; then
-    printf '{"state":"%s","labels":[{"name":"%s"}]}\n' "$state" "$status"
+    if [[ -f "$TEST_ROOT/series-parent-type" ]]; then
+      printf '{"state":"%s","labels":[{"name":"%s"},{"name":"type:series-parent"}]}\n' "$state" "$status"
+    else
+      printf '{"state":"%s","labels":[{"name":"%s"}]}\n' "$state" "$status"
+    fi
   else
     body='# Test'
     if [[ "$status" == status:claimed ]]; then
@@ -111,6 +115,11 @@ area: workflow
 fi
 if [[ "$1 $2 $3" == "issue develop --help" ]]; then exit 0; fi
 if [[ "$1 $2 $3" == "issue develop --list" ]]; then printf 'issue-31-test\n'; exit 0; fi
+if [[ "$1 $2 $3 $4 $5" == "issue edit 31 --add-label type:series-parent" ]]; then
+  [[ "${FAIL_TYPE_WRITE:-0}" != 1 ]] || exit 1
+  [[ "${SUPPRESS_TYPE_POST_READ:-0}" == 1 ]] || touch "$TEST_ROOT/series-parent-type"
+  exit 0
+fi
 printf 'unexpected gh call: %s\n' "$*" >&2
 exit 1
 EOF
@@ -151,6 +160,39 @@ sed -i.bak "s/abc1234/$(git rev-parse origin\/integration)/" "$tmp/openspec/chan
 grep -q '^active-verify-bound$' "$CALL_LOG"
 grep -q '^status-mutation status:needs-human$' "$CALL_LOG"
 grep -q 'gh issue view 31 --json state,labels' "$CALL_LOG"
+
+# A series-parent disposition writes both the semantic type and tracking
+# status, and verifies that both survived the remote mutation.
+node -e '
+const fs=require("fs"); const f=process.argv[1]; const v=JSON.parse(fs.readFileSync(f,"utf8"));
+v.readiness={information:"sufficient",disposition:"series-parent",reason:"Work must be split into child changes"};
+fs.writeFileSync(f, `${JSON.stringify(v)}\n`);
+' "$tmp/openspec/changes/issue-31-test/.buddy/triage.json"
+printf claimed > "$tmp/mode"; rm -f "$tmp/post-status" "$tmp/series-parent-type"; : > "$CALL_LOG"
+"$scripts/claim-issue.sh" 31 > "$tmp/out"
+grep -q 'gh issue edit 31 --add-label type:series-parent' "$CALL_LOG"
+grep -q '^status-mutation status:tracking$' "$CALL_LOG"
+grep -q '^triage_disposition: series-parent$' "$tmp/out"
+
+# A successful label command is not enough: absence from the post-mutation
+# remote read must fail instead of returning a HANDOFF clearance.
+printf claimed > "$tmp/mode"; rm -f "$tmp/post-status" "$tmp/series-parent-type"; : > "$CALL_LOG"
+if SUPPRESS_TYPE_POST_READ=1 "$scripts/claim-issue.sh" 31 > "$tmp/out" 2> "$tmp/err"; then exit 1; fi
+! grep -q '^HANDOFF$' "$tmp/out"
+grep -q 'Triage disposition verification failed' "$tmp/err"
+
+# A failed type-label write cannot be mistaken for a completed disposition.
+printf claimed > "$tmp/mode"; rm -f "$tmp/post-status" "$tmp/series-parent-type"; : > "$CALL_LOG"
+if FAIL_TYPE_WRITE=1 "$scripts/claim-issue.sh" 31 > "$tmp/out" 2> "$tmp/err"; then exit 1; fi
+! grep -q '^HANDOFF$' "$tmp/out"
+! grep -q '^status-mutation status:tracking$' "$CALL_LOG"
+
+# Restore the non-executable fixture used by the ownership mismatch cases.
+node -e '
+const fs=require("fs"); const f=process.argv[1]; const v=JSON.parse(fs.readFileSync(f,"utf8"));
+v.readiness={information:"insufficient",disposition:"needs-human",reason:"More detail required"};
+fs.writeFileSync(f, `${JSON.stringify(v)}\n`);
+' "$tmp/openspec/changes/issue-31-test/.buddy/triage.json"
 
 # Subject identity mismatches stop before every disposition or Development
 # mutation, even though the active claim itself is valid.

@@ -73,7 +73,12 @@ buddy_claim_triage_gate() {
   fi
   case "$disposition" in
     series-parent)
-      "$script_dir/set-status-label.sh" "$number" "status:tracking"
+      if ! gh issue edit "$number" --add-label "type:series-parent"; then
+        return 1
+      fi
+      if ! "$script_dir/set-status-label.sh" "$number" "status:tracking"; then
+        return 1
+      fi
       ;;
     needs-human)
       "$script_dir/set-status-label.sh" "$number" "status:needs-human"
@@ -90,23 +95,27 @@ buddy_claim_triage_gate() {
       ;;
   esac
   case "$disposition" in
-    series-parent) expected_state="OPEN"; expected_status="status:tracking" ;;
-    needs-human) expected_state="OPEN"; expected_status="status:needs-human" ;;
-    blocked) expected_state="OPEN"; expected_status="status:blocked" ;;
-    close) expected_state="CLOSED"; expected_status="" ;;
+    series-parent) expected_state="OPEN"; expected_status="status:tracking"; expected_type="type:series-parent" ;;
+    needs-human) expected_state="OPEN"; expected_status="status:needs-human"; expected_type="" ;;
+    blocked) expected_state="OPEN"; expected_status="status:blocked"; expected_type="" ;;
+    close) expected_state="CLOSED"; expected_status=""; expected_type="" ;;
   esac
   gh issue view "$number" --json state,labels > "$tmp_dir/triage-post-mutation.json"
-  node -e '
+  if ! node -e '
 const fs=require("fs");
 const issue=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));
 const expectedState=process.argv[2];
 const expectedStatus=process.argv[3];
-const statuses=(issue.labels || []).map((label) => label.name).filter((name) => name.startsWith("status:"));
-if (String(issue.state).toUpperCase() !== expectedState || (expectedStatus && (statuses.length !== 1 || statuses[0] !== expectedStatus))) {
-  process.stderr.write(`Triage disposition verification failed: state=${issue.state}, statuses=${statuses.join(",")}\n`);
+const expectedType=process.argv[4];
+const labels=(issue.labels || []).map((label) => label.name);
+const statuses=labels.filter((name) => name.startsWith("status:"));
+if (String(issue.state).toUpperCase() !== expectedState || (expectedStatus && (statuses.length !== 1 || statuses[0] !== expectedStatus)) || (expectedType && !labels.includes(expectedType))) {
+  process.stderr.write(`Triage disposition verification failed: state=${issue.state}, statuses=${statuses.join(",")}, labels=${labels.join(",")}\n`);
   process.exit(1);
 }
-' "$tmp_dir/triage-post-mutation.json" "$expected_state" "$expected_status"
+' "$tmp_dir/triage-post-mutation.json" "$expected_state" "$expected_status" "$expected_type"; then
+    return 1
+  fi
   printf 'HANDOFF\nmode: claim\ntriage_disposition: %s\nrequired_action: %s\n' "$disposition" "$reason"
   return 10
 }
