@@ -46,6 +46,7 @@ buddy_claim_triage_gate() {
   local series_parent_had_type=0
   local series_parent_type_added_by_tx=0
   local series_parent_original_status=""
+  local series_relationships_file="$tmp_dir/triage-series-parent-relationships.json"
   local mutation_owner_json
 
   if ! buddy_verify_active_claim_resume "$number" "$selected_change_id" "$selected_claim_branch" "$selected_base_branch" "$viewer" "$repo_nwo" "$tmp_dir/triage-owner-before-read" >/dev/null; then
@@ -80,6 +81,31 @@ buddy_claim_triage_gate() {
   if ! claim_id="$(node -e 'const value=JSON.parse(process.argv[1]); if (!value.claim_id) process.exit(1); process.stdout.write(value.claim_id);' "$mutation_owner_json")"; then return 1; fi
   if ! lease_until="$(node -e 'const value=JSON.parse(process.argv[1]); if (!value.lease_until) process.exit(1); process.stdout.write(value.lease_until);' "$mutation_owner_json")"; then return 1; fi
   claim_lock_written=1
+
+  if [[ "$disposition" == "series-parent" ]]; then
+    local owner="${repo_nwo%%/*}"
+    local repo_name="${repo_nwo#*/}"
+    if ! OPENSPEC_BUDDY_CACHE_REFRESH=1 buddy_issue_relationships_graphql "$owner" "$repo_name" "$number" > "$series_relationships_file"; then
+      return 1
+    fi
+    if ! node -e '
+const fs = require("fs");
+const data = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+const issue = Array.isArray(data) ? data[0] : null;
+const children = issue?.subIssues?.nodes || [];
+const invalid = children.filter((child) => {
+  const labels = (child.labels?.nodes || []).map((label) => label.name.replace(/^status:\s+/, "status:").replace(/^type:\s+/, "type:"));
+  const statuses = labels.filter((label) => label.startsWith("status:"));
+  return String(child.state).toUpperCase() !== "OPEN" || !labels.includes("type:change") || statuses.length !== 1 || statuses[0] !== "status:ready";
+});
+if (children.length === 0 || invalid.length > 0) {
+  process.exit(1);
+}
+' "$series_relationships_file"; then
+      printf 'HANDOFF\nmode: claim\ntriage_disposition: series-parent\nrequired_action: Create and link independently executable child issues at status:ready, then rerun claim. The verified minimal claim lock remains active.\n'
+      return 10
+    fi
+  fi
 
   rollback_series_parent_disposition() {
     local rollback_failed=0

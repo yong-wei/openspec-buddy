@@ -25,6 +25,14 @@ buddy_invalidate_issue_cache() { :; }
 buddy_invalidate_ready_scan_cache() { :; }
 buddy_open_issues_rest() { printf '[]\n'; }
 buddy_issue_relationships_graphql() {
+  if [[ "${SERIES_CHILDREN:-}" == "ready" ]]; then
+    printf '[{"subIssues":{"nodes":[{"number":32,"state":"OPEN","labels":{"nodes":[{"name":"type:change"},{"name":"status:ready"}]}}]}}]\n'
+    return
+  fi
+  if [[ "${SERIES_CHILDREN:-}" == "mixed-status" ]]; then
+    printf '[{"subIssues":{"nodes":[{"number":32,"state":"OPEN","labels":{"nodes":[{"name":"type:change"},{"name":"status:ready"}]}},{"number":33,"state":"OPEN","labels":{"nodes":[{"name":"type:change"},{"name":"status:ready"},{"name":"status:blocked"}]}}]}}]\n'
+    return
+  fi
   if [[ "${OPEN_BLOCKER:-0}" == 1 ]]; then
     printf '[{"blockedBy":{"nodes":[{"number":30,"title":"Open blocker","state":"OPEN","labels":{"nodes":[]}}]}}]\n'
   else
@@ -181,8 +189,8 @@ grep -q '^active-verify-bound$' "$CALL_LOG"
 grep -q '^status-mutation status:needs-human$' "$CALL_LOG"
 grep -q 'gh issue view 31 --json state,labels' "$CALL_LOG"
 
-# A series-parent disposition writes both the semantic type and tracking
-# status, and verifies that both survived the remote mutation.
+# A series-parent disposition without linked executable children remains
+# claimed and returns a decomposition handoff without mutating parent labels.
 node -e '
 const fs=require("fs"); const f=process.argv[1]; const v=JSON.parse(fs.readFileSync(f,"utf8"));
 v.readiness={information:"sufficient",disposition:"series-parent",reason:"Work must be split into child changes"};
@@ -190,6 +198,22 @@ fs.writeFileSync(f, `${JSON.stringify(v)}\n`);
 ' "$tmp/openspec/changes/issue-31-test/.buddy/triage.json"
 printf claimed > "$tmp/mode"; rm -f "$tmp/post-status" "$tmp/series-parent-type"; : > "$CALL_LOG"
 "$scripts/claim-issue.sh" 31 > "$tmp/out"
+! grep -q 'gh issue edit 31 --add-label type:series-parent' "$CALL_LOG"
+! grep -q '^status-mutation status:tracking$' "$CALL_LOG"
+grep -q '^triage_disposition: series-parent$' "$tmp/out"
+grep -q 'Create and link independently executable child issues' "$tmp/out"
+
+# One valid child cannot hide a sibling whose status truth is ambiguous.
+printf claimed > "$tmp/mode"; rm -f "$tmp/post-status" "$tmp/series-parent-type"; : > "$CALL_LOG"
+SERIES_CHILDREN=mixed-status "$scripts/claim-issue.sh" 31 > "$tmp/out"
+! grep -q 'gh issue edit 31 --add-label type:series-parent' "$CALL_LOG"
+! grep -q '^status-mutation status:tracking$' "$CALL_LOG"
+grep -q 'Create and link independently executable child issues' "$tmp/out"
+
+# Once linked children are open executable changes at status:ready, the parent
+# transition writes and verifies both its semantic type and tracking status.
+printf claimed > "$tmp/mode"; rm -f "$tmp/post-status" "$tmp/series-parent-type"; : > "$CALL_LOG"
+SERIES_CHILDREN=ready "$scripts/claim-issue.sh" 31 > "$tmp/out"
 grep -q 'gh issue edit 31 --add-label type:series-parent' "$CALL_LOG"
 grep -q '^status-mutation status:tracking$' "$CALL_LOG"
 grep -q '^triage_disposition: series-parent$' "$tmp/out"
@@ -199,7 +223,7 @@ grep -q '^triage_disposition: series-parent$' "$tmp/out"
 # before the outer cleanup releases the claim.
 printf claimed > "$tmp/mode"; rm -f "$tmp/post-status" "$tmp/series-parent-type"; : > "$CALL_LOG"
 rm -f "$tmp/released-lock"
-if FAIL_TRACKING_PROJECT=1 "$scripts/claim-issue.sh" 31 > "$tmp/out" 2> "$tmp/err"; then exit 1; fi
+if SERIES_CHILDREN=ready FAIL_TRACKING_PROJECT=1 "$scripts/claim-issue.sh" 31 > "$tmp/out" 2> "$tmp/err"; then exit 1; fi
 grep -q '^status-mutation status:tracking$' "$CALL_LOG"
 grep -q '^status-mutation status:claimed$' "$CALL_LOG"
 grep -q 'gh issue edit 31 --remove-label type:series-parent' "$CALL_LOG"
@@ -209,27 +233,27 @@ grep -q 'gh issue edit 31 --remove-label type:series-parent' "$CALL_LOG"
 
 # A pre-existing semantic type is preserved when the status write fails.
 printf claimed > "$tmp/mode"; printf status:claimed > "$tmp/post-status"; touch "$tmp/series-parent-type"; : > "$CALL_LOG"
-if FAIL_TRACKING_PROJECT=1 "$scripts/claim-issue.sh" 31 > "$tmp/out" 2> "$tmp/err"; then exit 1; fi
+if SERIES_CHILDREN=ready FAIL_TRACKING_PROJECT=1 "$scripts/claim-issue.sh" 31 > "$tmp/out" 2> "$tmp/err"; then exit 1; fi
 ! grep -q -- '--remove-label type:series-parent' "$CALL_LOG"
 [[ -f "$tmp/series-parent-type" ]]
 [[ "$(cat "$tmp/post-status")" == status:claimed ]]
 
 # Failed compensation is a hard diagnostic, never a completed disposition.
 printf claimed > "$tmp/mode"; rm -f "$tmp/post-status" "$tmp/series-parent-type"; : > "$CALL_LOG"
-if FAIL_TRACKING_PROJECT=1 FAIL_CLAIMED_PROJECT=1 "$scripts/claim-issue.sh" 31 > "$tmp/out" 2> "$tmp/err"; then exit 1; fi
+if SERIES_CHILDREN=ready FAIL_TRACKING_PROJECT=1 FAIL_CLAIMED_PROJECT=1 "$scripts/claim-issue.sh" 31 > "$tmp/out" 2> "$tmp/err"; then exit 1; fi
 grep -q 'series-parent rollback failed' "$tmp/err"
 ! grep -q '^HANDOFF$' "$tmp/out"
 
 # A successful label command is not enough: absence from the post-mutation
 # remote read must fail instead of returning a HANDOFF clearance.
 printf claimed > "$tmp/mode"; rm -f "$tmp/post-status" "$tmp/series-parent-type"; : > "$CALL_LOG"
-if SUPPRESS_TYPE_POST_READ=1 "$scripts/claim-issue.sh" 31 > "$tmp/out" 2> "$tmp/err"; then exit 1; fi
+if SERIES_CHILDREN=ready SUPPRESS_TYPE_POST_READ=1 "$scripts/claim-issue.sh" 31 > "$tmp/out" 2> "$tmp/err"; then exit 1; fi
 ! grep -q '^HANDOFF$' "$tmp/out"
 grep -q 'Triage disposition verification failed' "$tmp/err"
 
 # A failed type-label write cannot be mistaken for a completed disposition.
 printf claimed > "$tmp/mode"; rm -f "$tmp/post-status" "$tmp/series-parent-type"; : > "$CALL_LOG"
-if FAIL_TYPE_WRITE=1 "$scripts/claim-issue.sh" 31 > "$tmp/out" 2> "$tmp/err"; then exit 1; fi
+if SERIES_CHILDREN=ready FAIL_TYPE_WRITE=1 "$scripts/claim-issue.sh" 31 > "$tmp/out" 2> "$tmp/err"; then exit 1; fi
 ! grep -q '^HANDOFF$' "$tmp/out"
 ! grep -q '^status-mutation status:tracking$' "$CALL_LOG"
 ! grep -q -- '--remove-label type:series-parent' "$CALL_LOG"
@@ -237,11 +261,11 @@ if FAIL_TYPE_WRITE=1 "$scripts/claim-issue.sh" 31 > "$tmp/out" 2> "$tmp/err"; th
 # Failure to read final truth triggers rollback; failure to read compensation
 # truth is itself a hard BLOCKED diagnostic.
 printf claimed > "$tmp/mode"; rm -f "$tmp/post-status" "$tmp/series-parent-type"; : > "$CALL_LOG"
-if FAIL_FINAL_READ_ONCE=1 "$scripts/claim-issue.sh" 31 > "$tmp/out" 2> "$tmp/err"; then exit 1; fi
+if SERIES_CHILDREN=ready FAIL_FINAL_READ_ONCE=1 "$scripts/claim-issue.sh" 31 > "$tmp/out" 2> "$tmp/err"; then exit 1; fi
 grep -q '^status-mutation status:claimed$' "$CALL_LOG"
 [[ ! -f "$tmp/series-parent-type" ]]
 printf claimed > "$tmp/mode"; rm -f "$tmp/post-status" "$tmp/series-parent-type"; : > "$CALL_LOG"
-if FAIL_TRACKING_PROJECT=1 FAIL_ROLLBACK_READ=1 "$scripts/claim-issue.sh" 31 > "$tmp/out" 2> "$tmp/err"; then exit 1; fi
+if SERIES_CHILDREN=ready FAIL_TRACKING_PROJECT=1 FAIL_ROLLBACK_READ=1 "$scripts/claim-issue.sh" 31 > "$tmp/out" 2> "$tmp/err"; then exit 1; fi
 grep -q 'series-parent rollback failed' "$tmp/err"
 
 # Restore the non-executable fixture used by the ownership mismatch cases.
