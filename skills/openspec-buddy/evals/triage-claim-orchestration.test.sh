@@ -49,7 +49,7 @@ buddy_verify_active_claim_resume() {
   [[ "${FAIL_ACTIVE_VERIFY:-0}" != 1 ]]
   printf '{"claim_id":"claim-31","lease_until":"2026-07-15T12:00:00Z","base_sha":"%s"}\n' "$(git rev-parse origin/integration)"
 }
-buddy_release_claim_lock() { printf 'release-lock\n' >> "$CALL_LOG"; }
+buddy_release_claim_lock() { printf 'release-lock\n' >> "$CALL_LOG"; touch "$TEST_ROOT/released-lock"; }
 buddy_claim_branch_exists() { return 0; }
 EOF
 
@@ -67,15 +67,18 @@ printf 'project-mutation %s\n' "$*" >> "$CALL_LOG"
 EOF
   chmod +x "$scripts/$helper"
 done
+cat > "$scripts/set-project-status.sh" <<'EOF'
+#!/usr/bin/env bash
+printf 'project-mutation %s\n' "$*" >> "$CALL_LOG"
+if [[ "$2" == "status:tracking" && "${FAIL_TRACKING_PROJECT:-0}" == 1 ]]; then exit 1; fi
+if [[ "$2" == "status:claimed" && "${FAIL_CLAIMED_PROJECT:-0}" == 1 ]]; then exit 1; fi
+EOF
+chmod +x "$scripts/set-project-status.sh"
 cat > "$scripts/claim-change.sh" <<'EOF'
 #!/usr/bin/env bash
 printf 'claim-change %s\n' "$*" >> "$CALL_LOG"
 EOF
-cat > "$scripts/set-status-label.sh" <<'EOF'
-#!/usr/bin/env bash
-printf 'status-mutation %s\n' "$2" >> "$CALL_LOG"
-printf "$2" > "$TEST_ROOT/post-status"
-EOF
+cp "$skill_dir/scripts/set-status-label.sh" "$scripts/set-status-label.sh"
 chmod +x "$scripts/claim-change.sh" "$scripts/set-status-label.sh" "$scripts/claim-issue.sh"
 
 cat > "$tmp/bin/gh" <<'EOF'
@@ -88,6 +91,8 @@ if [[ "$1 $2" == "issue view" ]]; then
   [[ -f "$TEST_ROOT/post-status" ]] && status="$(cat "$TEST_ROOT/post-status")"
   state=OPEN
   if [[ "$*" == *"state,labels"* ]]; then
+    if [[ "${FAIL_FINAL_READ_ONCE:-0}" == 1 && "$status" == "status:tracking" ]]; then exit 1; fi
+    if [[ "${FAIL_ROLLBACK_READ:-0}" == 1 && "$status" == "status:claimed" ]]; then exit 1; fi
     if [[ -f "$TEST_ROOT/series-parent-type" ]]; then
       printf '{"state":"%s","labels":[{"name":"%s"},{"name":"type:series-parent"}]}\n' "$state" "$status"
     else
@@ -109,7 +114,7 @@ risk: low
 area: workflow
 ---'
     fi
-    node -e 'console.log(JSON.stringify({id:"I",number:31,title:"Test",labels:[{name:process.argv[1]}],assignees:[{login:"alice"}],body:process.argv[2],url:"https://example/31",state:"OPEN",updatedAt:"2026-07-14T10:00:00Z"}))' "$status" "$body"
+    node -e 'const labels=[{name:process.argv[1]}]; if (process.argv[3] === "1") labels.push({name:"type:series-parent"}); console.log(JSON.stringify({id:"I",number:31,title:"Test",labels,assignees:[{login:"alice"}],body:process.argv[2],url:"https://example/31",state:"OPEN",updatedAt:"2026-07-14T10:00:00Z"}))' "$status" "$body" "$([[ -f "$TEST_ROOT/series-parent-type" ]] && echo 1 || echo 0)"
   fi
   exit 0
 fi
@@ -118,6 +123,21 @@ if [[ "$1 $2 $3" == "issue develop --list" ]]; then printf 'issue-31-test\n'; ex
 if [[ "$1 $2 $3 $4 $5" == "issue edit 31 --add-label type:series-parent" ]]; then
   [[ "${FAIL_TYPE_WRITE:-0}" != 1 ]] || exit 1
   [[ "${SUPPRESS_TYPE_POST_READ:-0}" == 1 ]] || touch "$TEST_ROOT/series-parent-type"
+  exit 0
+fi
+if [[ "$1 $2 $3 $4 $5" == "issue edit 31 --remove-label type:series-parent" ]]; then
+  [[ "${FAIL_TYPE_ROLLBACK:-0}" != 1 ]] || exit 1
+  rm -f "$TEST_ROOT/series-parent-type"
+  exit 0
+fi
+if [[ "$1 $2 $3" == "issue edit 31" && "$*" == *"--add-label status:"* ]]; then
+  args=("$@")
+  for ((i=0; i<${#args[@]}; i++)); do
+    if [[ "${args[$i]}" == "--add-label" && "${args[$((i+1))]}" == status:* ]]; then
+      printf '%s' "${args[$((i+1))]}" > "$TEST_ROOT/post-status"
+      printf 'status-mutation %s\n' "${args[$((i+1))]}" >> "$CALL_LOG"
+    fi
+  done
   exit 0
 fi
 printf 'unexpected gh call: %s\n' "$*" >&2
@@ -174,6 +194,32 @@ grep -q 'gh issue edit 31 --add-label type:series-parent' "$CALL_LOG"
 grep -q '^status-mutation status:tracking$' "$CALL_LOG"
 grep -q '^triage_disposition: series-parent$' "$tmp/out"
 
+# If status synchronization fails after changing the label to tracking, the
+# disposition transaction restores claimed and removes only the type it added
+# before the outer cleanup releases the claim.
+printf claimed > "$tmp/mode"; rm -f "$tmp/post-status" "$tmp/series-parent-type"; : > "$CALL_LOG"
+rm -f "$tmp/released-lock"
+if FAIL_TRACKING_PROJECT=1 "$scripts/claim-issue.sh" 31 > "$tmp/out" 2> "$tmp/err"; then exit 1; fi
+grep -q '^status-mutation status:tracking$' "$CALL_LOG"
+grep -q '^status-mutation status:claimed$' "$CALL_LOG"
+grep -q 'gh issue edit 31 --remove-label type:series-parent' "$CALL_LOG"
+[[ -f "$tmp/released-lock" ]]
+[[ "$(cat "$tmp/post-status")" == status:claimed ]]
+[[ ! -f "$tmp/series-parent-type" ]]
+
+# A pre-existing semantic type is preserved when the status write fails.
+printf claimed > "$tmp/mode"; printf status:claimed > "$tmp/post-status"; touch "$tmp/series-parent-type"; : > "$CALL_LOG"
+if FAIL_TRACKING_PROJECT=1 "$scripts/claim-issue.sh" 31 > "$tmp/out" 2> "$tmp/err"; then exit 1; fi
+! grep -q -- '--remove-label type:series-parent' "$CALL_LOG"
+[[ -f "$tmp/series-parent-type" ]]
+[[ "$(cat "$tmp/post-status")" == status:claimed ]]
+
+# Failed compensation is a hard diagnostic, never a completed disposition.
+printf claimed > "$tmp/mode"; rm -f "$tmp/post-status" "$tmp/series-parent-type"; : > "$CALL_LOG"
+if FAIL_TRACKING_PROJECT=1 FAIL_CLAIMED_PROJECT=1 "$scripts/claim-issue.sh" 31 > "$tmp/out" 2> "$tmp/err"; then exit 1; fi
+grep -q 'series-parent rollback failed' "$tmp/err"
+! grep -q '^HANDOFF$' "$tmp/out"
+
 # A successful label command is not enough: absence from the post-mutation
 # remote read must fail instead of returning a HANDOFF clearance.
 printf claimed > "$tmp/mode"; rm -f "$tmp/post-status" "$tmp/series-parent-type"; : > "$CALL_LOG"
@@ -186,6 +232,17 @@ printf claimed > "$tmp/mode"; rm -f "$tmp/post-status" "$tmp/series-parent-type"
 if FAIL_TYPE_WRITE=1 "$scripts/claim-issue.sh" 31 > "$tmp/out" 2> "$tmp/err"; then exit 1; fi
 ! grep -q '^HANDOFF$' "$tmp/out"
 ! grep -q '^status-mutation status:tracking$' "$CALL_LOG"
+! grep -q -- '--remove-label type:series-parent' "$CALL_LOG"
+
+# Failure to read final truth triggers rollback; failure to read compensation
+# truth is itself a hard BLOCKED diagnostic.
+printf claimed > "$tmp/mode"; rm -f "$tmp/post-status" "$tmp/series-parent-type"; : > "$CALL_LOG"
+if FAIL_FINAL_READ_ONCE=1 "$scripts/claim-issue.sh" 31 > "$tmp/out" 2> "$tmp/err"; then exit 1; fi
+grep -q '^status-mutation status:claimed$' "$CALL_LOG"
+[[ ! -f "$tmp/series-parent-type" ]]
+printf claimed > "$tmp/mode"; rm -f "$tmp/post-status" "$tmp/series-parent-type"; : > "$CALL_LOG"
+if FAIL_TRACKING_PROJECT=1 FAIL_ROLLBACK_READ=1 "$scripts/claim-issue.sh" 31 > "$tmp/out" 2> "$tmp/err"; then exit 1; fi
+grep -q 'series-parent rollback failed' "$tmp/err"
 
 # Restore the non-executable fixture used by the ownership mismatch cases.
 node -e '

@@ -43,16 +43,20 @@ buddy_claim_triage_gate() {
   local validation_output
   local disposition
   local reason
+  local series_parent_had_type=0
+  local series_parent_type_added_by_tx=0
+  local series_parent_original_status=""
+  local mutation_owner_json
 
   if ! buddy_verify_active_claim_resume "$number" "$selected_change_id" "$selected_claim_branch" "$selected_base_branch" "$viewer" "$repo_nwo" "$tmp_dir/triage-owner-before-read" >/dev/null; then
     return 1
   fi
   # This read must occur after the minimal claim lock is verified. Its updatedAt
   # is the remote truth to which the agent-owned judgment is bound.
-  gh issue view "$number" --json id,number,title,labels,assignees,body,url,state,updatedAt > "$live_issue_file"
-  expected_updated_at="$(node -e 'const fs=require("fs"); const issue=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(issue.updatedAt || "");' "$live_issue_file")"
-  git fetch origin "$selected_base_branch" >/dev/null
-  expected_base_sha="$(git rev-parse "origin/$selected_base_branch")"
+  if ! gh issue view "$number" --json id,number,title,labels,assignees,body,url,state,updatedAt > "$live_issue_file"; then return 1; fi
+  if ! expected_updated_at="$(node -e 'const fs=require("fs"); const issue=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); if (!issue.updatedAt) process.exit(1); process.stdout.write(issue.updatedAt);' "$live_issue_file")"; then return 1; fi
+  if ! git fetch origin "$selected_base_branch" >/dev/null; then return 1; fi
+  if ! expected_base_sha="$(git rev-parse "origin/$selected_base_branch")"; then return 1; fi
 
   if [[ ! -f "$triage_file" ]]; then
     printf 'HANDOFF\nmode: claim\ntriage_disposition: pending\nrequired_action: Collect bounded evidence, record agent-owned judgment in %s, and rerun claim. The verified minimal claim lock remains active.\n' "$triage_file"
@@ -62,32 +66,86 @@ buddy_claim_triage_gate() {
   if ! validation_output="$(node "$script_dir/validate-triage.mjs" "$triage_file" --issue "$number" --change-id "$selected_change_id" --issue-updated-at "$expected_updated_at" --base-sha "$expected_base_sha")"; then
     return 1
   fi
-  disposition="$(node -e 'const value=JSON.parse(process.argv[1]); process.stdout.write(value.disposition || "");' "$validation_output")"
+  if ! disposition="$(node -e 'const value=JSON.parse(process.argv[1]); if (!value.disposition) process.exit(1); process.stdout.write(value.disposition);' "$validation_output")"; then return 1; fi
   [[ "$disposition" == "executable" ]] && return 0
 
-  reason="$(node -e 'const fs=require("fs"); const value=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(value.readiness.reason);' "$triage_file")"
+  if ! reason="$(node -e 'const fs=require("fs"); const value=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); if (!value.readiness?.reason) process.exit(1); process.stdout.write(value.readiness.reason);' "$triage_file")"; then return 1; fi
   # Recheck the same remote version and active owner immediately before a
   # disposition writes status or closes the issue.
-  if ! buddy_verify_active_claim_resume "$number" "$selected_change_id" "$selected_claim_branch" "$selected_base_branch" "$viewer" "$repo_nwo" "$tmp_dir/triage-owner-before-mutation" "$expected_updated_at" >/dev/null; then
+  if ! mutation_owner_json="$(buddy_verify_active_claim_resume "$number" "$selected_change_id" "$selected_claim_branch" "$selected_base_branch" "$viewer" "$repo_nwo" "$tmp_dir/triage-owner-before-mutation" "$expected_updated_at")"; then
     return 1
   fi
+  # A failed disposition must release the verified active claim, including on
+  # the claimed re-entry path where this process did not create the lock.
+  if ! claim_id="$(node -e 'const value=JSON.parse(process.argv[1]); if (!value.claim_id) process.exit(1); process.stdout.write(value.claim_id);' "$mutation_owner_json")"; then return 1; fi
+  if ! lease_until="$(node -e 'const value=JSON.parse(process.argv[1]); if (!value.lease_until) process.exit(1); process.stdout.write(value.lease_until);' "$mutation_owner_json")"; then return 1; fi
+  claim_lock_written=1
+
+  rollback_series_parent_disposition() {
+    local rollback_failed=0
+    local rollback_file="$tmp_dir/triage-series-parent-rollback.json"
+    if ! "$script_dir/set-status-label.sh" "$number" "$series_parent_original_status"; then
+      rollback_failed=1
+    fi
+    if [[ "$series_parent_type_added_by_tx" == "1" ]]; then
+      if ! gh issue edit "$number" --remove-label "type:series-parent"; then
+        rollback_failed=1
+      fi
+    fi
+    if ! gh issue view "$number" --json state,labels > "$rollback_file"; then
+      rollback_failed=1
+    elif ! node -e '
+const fs=require("fs");
+const issue=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));
+const expectedStatus=process.argv[2];
+const expectedType=process.argv[3] === "1";
+const labels=(issue.labels || []).map((label) => label.name);
+const statuses=labels.filter((name) => name.startsWith("status:"));
+const hasType=labels.includes("type:series-parent");
+if (String(issue.state).toUpperCase() !== "OPEN" || statuses.length !== 1 || statuses[0] !== expectedStatus || hasType !== expectedType) process.exit(1);
+' "$rollback_file" "$series_parent_original_status" "$series_parent_had_type"; then
+      rollback_failed=1
+    fi
+    if [[ "$rollback_failed" == "1" ]]; then
+      echo "BLOCKED: series-parent rollback failed; inspect issue #$number and restore $series_parent_original_status plus the original type:series-parent presence before retrying." >&2
+      return 1
+    fi
+    echo "Series-parent disposition failed and was rolled back to the verified pre-mutation labels." >&2
+    return 0
+  }
+
   case "$disposition" in
     series-parent)
-      if ! gh issue edit "$number" --add-label "type:series-parent"; then
+      series_parent_original_status="$(node -e '
+const fs=require("fs"); const issue=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));
+const labels=(issue.labels || []).map((label) => label.name);
+const statuses=labels.filter((name) => name.startsWith("status:"));
+if (statuses.length !== 1) process.exit(1);
+process.stdout.write(statuses[0]);
+' "$live_issue_file")" || return 1
+      if node -e 'const fs=require("fs"); const issue=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.exit((issue.labels || []).some((label) => label.name === "type:series-parent") ? 0 : 1);' "$live_issue_file"; then
+        series_parent_had_type=1
+      fi
+      if [[ "$series_parent_had_type" != "1" ]] && ! gh issue edit "$number" --add-label "type:series-parent"; then
+        rollback_series_parent_disposition || true
         return 1
       fi
+      if [[ "$series_parent_had_type" != "1" ]]; then
+        series_parent_type_added_by_tx=1
+      fi
       if ! "$script_dir/set-status-label.sh" "$number" "status:tracking"; then
+        rollback_series_parent_disposition || true
         return 1
       fi
       ;;
     needs-human)
-      "$script_dir/set-status-label.sh" "$number" "status:needs-human"
+      if ! "$script_dir/set-status-label.sh" "$number" "status:needs-human"; then return 1; fi
       ;;
     blocked)
-      "$script_dir/set-status-label.sh" "$number" "status:blocked"
+      if ! "$script_dir/set-status-label.sh" "$number" "status:blocked"; then return 1; fi
       ;;
     close)
-      gh issue close "$number" --comment "OpenSpec Buddy triage close: $reason"
+      if ! gh issue close "$number" --comment "OpenSpec Buddy triage close: $reason"; then return 1; fi
       ;;
     *)
       echo "Unsupported triage disposition: $disposition" >&2
@@ -100,7 +158,10 @@ buddy_claim_triage_gate() {
     blocked) expected_state="OPEN"; expected_status="status:blocked"; expected_type="" ;;
     close) expected_state="CLOSED"; expected_status=""; expected_type="" ;;
   esac
-  gh issue view "$number" --json state,labels > "$tmp_dir/triage-post-mutation.json"
+  if ! gh issue view "$number" --json state,labels > "$tmp_dir/triage-post-mutation.json"; then
+    if [[ "$disposition" == "series-parent" ]]; then rollback_series_parent_disposition || true; fi
+    return 1
+  fi
   if ! node -e '
 const fs=require("fs");
 const issue=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));
@@ -114,6 +175,9 @@ if (String(issue.state).toUpperCase() !== expectedState || (expectedStatus && (s
   process.exit(1);
 }
 ' "$tmp_dir/triage-post-mutation.json" "$expected_state" "$expected_status" "$expected_type"; then
+    if [[ "$disposition" == "series-parent" ]]; then
+      rollback_series_parent_disposition || true
+    fi
     return 1
   fi
   printf 'HANDOFF\nmode: claim\ntriage_disposition: %s\nrequired_action: %s\n' "$disposition" "$reason"
