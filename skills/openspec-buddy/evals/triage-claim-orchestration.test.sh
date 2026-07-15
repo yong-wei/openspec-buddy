@@ -59,6 +59,10 @@ buddy_verify_active_claim_resume() {
 }
 buddy_release_claim_lock() {
   printf 'release-lock\n' >> "$CALL_LOG"
+  if [[ "${FAIL_RELEASE_ONCE:-0}" == 1 && ! -f "$TEST_ROOT/release-failed-once" ]]; then
+    touch "$TEST_ROOT/release-failed-once"
+    return 1
+  fi
   if [[ "${FAIL_RELEASE:-0}" == 1 ]]; then return 1; fi
   touch "$TEST_ROOT/released-lock"
 }
@@ -202,6 +206,14 @@ printf claimed > "$tmp/mode"; rm -f "$tmp/post-status" "$tmp/released-lock"; : >
 if FAIL_RELEASE=1 "$scripts/claim-issue.sh" 31 > "$tmp/out" 2> "$tmp/err"; then exit 1; fi
 ! grep -q '^HANDOFF$' "$tmp/out"
 grep -q 'Failed to release claim after triage disposition: needs-human' "$tmp/err"
+
+# If the explicit terminal release fails but cleanup retries successfully, the
+# already verified terminal status must not be replaced with status:ready.
+printf claimed > "$tmp/mode"; rm -f "$tmp/post-status" "$tmp/released-lock" "$tmp/release-failed-once"; : > "$CALL_LOG"
+if FAIL_RELEASE_ONCE=1 "$scripts/claim-issue.sh" 31 > "$tmp/out" 2> "$tmp/err"; then exit 1; fi
+[[ "$(grep -c '^release-lock$' "$CALL_LOG")" -eq 2 ]]
+[[ "$(cat "$tmp/post-status")" == status:needs-human ]]
+! grep -q '^status-mutation status:ready$' "$CALL_LOG"
 
 # A series-parent disposition without linked executable children remains
 # claimed and returns a decomposition handoff without mutating parent labels.

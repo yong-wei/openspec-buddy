@@ -29,6 +29,7 @@ lease_until=""
 claim_lock_written=0
 claim_completed=0
 prepared_issue=0
+restore_ready_on_cleanup=1
 triage_terminal_disposition=""
 triage_terminal_reason=""
 viewer="$(gh api user --jq .login)"
@@ -209,6 +210,7 @@ if (String(issue.state).toUpperCase() !== expectedState || (expectedStatus && (s
     fi
     return 1
   fi
+  restore_ready_on_cleanup=0
   triage_terminal_disposition="$disposition"
   triage_terminal_reason="$reason"
   return 11
@@ -241,7 +243,7 @@ cleanup() {
     buddy_delete_claim_branch_if_owned "$issue_number" "$change_id" "$claim_branch" "$viewer" "$claim_id" "$lease_until" "$repo_nwo" "$tmp_dir/cleanup" || true
   fi
   if [[ "$claim_lock_written" == "1" && "$claim_completed" != "1" && -n "$issue_number" && -n "$change_id" && -n "$claim_branch" && -n "$viewer" && -n "$claim_id" && -n "$lease_until" ]]; then
-    if buddy_release_claim_lock "$issue_number" "$change_id" "$claim_branch" "$viewer" "$claim_id" "$lease_until" "claim did not complete" >/dev/null 2>&1; then
+    if buddy_release_claim_lock "$issue_number" "$change_id" "$claim_branch" "$viewer" "$claim_id" "$lease_until" "claim did not complete" >/dev/null 2>&1 && [[ "$restore_ready_on_cleanup" == "1" ]]; then
       "$script_dir/set-status-label.sh" "$issue_number" "status:ready" >/dev/null 2>&1 || echo "BLOCKED: claim was released but issue #$issue_number could not be restored to status:ready." >&2
     fi
   fi
