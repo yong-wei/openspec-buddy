@@ -54,10 +54,14 @@ buddy_write_minimal_claim_lock() { printf 'minimal-lock\n' >> "$CALL_LOG"; print
 buddy_verify_claim_lock_rest() { printf 'verify-lock\n' >> "$CALL_LOG"; }
 buddy_verify_active_claim_resume() {
   printf 'active-verify%s\n' "${8:+-bound}" >> "$CALL_LOG"
-  [[ "${FAIL_ACTIVE_VERIFY:-0}" != 1 ]]
+  if [[ "${FAIL_ACTIVE_VERIFY:-0}" == 1 ]]; then return 1; fi
   printf '{"claim_id":"claim-31","lease_until":"2026-07-15T12:00:00Z","base_sha":"%s"}\n' "$(git rev-parse origin/integration)"
 }
-buddy_release_claim_lock() { printf 'release-lock\n' >> "$CALL_LOG"; touch "$TEST_ROOT/released-lock"; }
+buddy_release_claim_lock() {
+  printf 'release-lock\n' >> "$CALL_LOG"
+  if [[ "${FAIL_RELEASE:-0}" == 1 ]]; then return 1; fi
+  touch "$TEST_ROOT/released-lock"
+}
 buddy_claim_branch_exists() { return 0; }
 EOF
 
@@ -183,11 +187,21 @@ cat > "$tmp/openspec/changes/issue-31-test/.buddy/triage.json" <<'EOF'
 EOF
 sed -i.bak "s/abc1234/$(git rev-parse origin\/integration)/" "$tmp/openspec/changes/issue-31-test/.buddy/triage.json"
 : > "$CALL_LOG"
+rm -f "$tmp/released-lock"
 "$scripts/claim-issue.sh" 31 > "$tmp/out"
-[[ "$(grep -c '^active-verify' "$CALL_LOG")" -eq 2 ]]
+[[ "$(grep -c '^active-verify' "$CALL_LOG")" -eq 3 ]]
 grep -q '^active-verify-bound$' "$CALL_LOG"
 grep -q '^status-mutation status:needs-human$' "$CALL_LOG"
 grep -q 'gh issue view 31 --json state,labels' "$CALL_LOG"
+grep -q '^release-lock$' "$CALL_LOG"
+[[ -f "$tmp/released-lock" ]]
+
+# A terminal disposition is not a successful HANDOFF unless its claim release
+# comment is written successfully.
+printf claimed > "$tmp/mode"; rm -f "$tmp/post-status" "$tmp/released-lock"; : > "$CALL_LOG"
+if FAIL_RELEASE=1 "$scripts/claim-issue.sh" 31 > "$tmp/out" 2> "$tmp/err"; then exit 1; fi
+! grep -q '^HANDOFF$' "$tmp/out"
+grep -q 'Failed to release claim after triage disposition: needs-human' "$tmp/err"
 
 # A series-parent disposition without linked executable children remains
 # claimed and returns a decomposition handoff without mutating parent labels.
@@ -213,10 +227,13 @@ grep -q 'Create and link independently executable child issues' "$tmp/out"
 # Once linked children are open executable changes at status:ready, the parent
 # transition writes and verifies both its semantic type and tracking status.
 printf claimed > "$tmp/mode"; rm -f "$tmp/post-status" "$tmp/series-parent-type"; : > "$CALL_LOG"
+rm -f "$tmp/released-lock"
 SERIES_CHILDREN=ready "$scripts/claim-issue.sh" 31 > "$tmp/out"
 grep -q 'gh issue edit 31 --add-label type:series-parent' "$CALL_LOG"
 grep -q '^status-mutation status:tracking$' "$CALL_LOG"
 grep -q '^triage_disposition: series-parent$' "$tmp/out"
+grep -q '^release-lock$' "$CALL_LOG"
+[[ -f "$tmp/released-lock" ]]
 
 # If status synchronization fails after changing the label to tracking, the
 # disposition transaction restores claimed and removes only the type it added
@@ -294,10 +311,27 @@ fs.writeFileSync(file, `${JSON.stringify(value)}\n`);
   fi
 done
 
-# A failed claimed re-entry verifier performs no disposition or Development mutation.
+# A claimed issue that is not an active claim for this process falls through to
+# claim-change's ordinary stale-claim recovery path instead of making recovery
+# unreachable inside the triage gate.
 printf claimed > "$tmp/mode"; rm -f "$tmp/post-status"; : > "$CALL_LOG"
-if FAIL_ACTIVE_VERIFY=1 "$scripts/claim-issue.sh" 31 >/dev/null 2>&1; then exit 1; fi
-! grep -Eq 'status-mutation|issue develop 31 --name|claim-change' "$CALL_LOG"
+if ! FAIL_ACTIVE_VERIFY=1 "$scripts/claim-issue.sh" 31 >"$tmp/out" 2>"$tmp/err"; then
+  cat "$tmp/out" "$tmp/err" >&2
+  cat "$CALL_LOG" >&2
+  exit 1
+fi
+grep -q '^claim-change 31$' "$CALL_LOG"
+! grep -Eq 'status-mutation|issue develop 31 --name' "$CALL_LOG"
+
+# A prepared status:ready issue must acquire the minimal lock and pass the same
+# evidence-bound triage gate before claim-change can mutate Development state.
+rm -f "$tmp/openspec/changes/issue-31-test/.buddy/triage.json"
+printf ready > "$tmp/mode"; rm -f "$tmp/post-status"; : > "$CALL_LOG"
+"$scripts/claim-issue.sh" 31 > "$tmp/out"
+grep -q '^HANDOFF$' "$tmp/out"
+grep -q '^minimal-lock$' "$CALL_LOG"
+grep -q '^verify-lock$' "$CALL_LOG"
+! grep -Eq 'issue develop 31 --name|claim-change' "$CALL_LOG"
 
 # The real claim-change resume entry rejects before relationship or Development
 # mutation when the shared active verifier fails.

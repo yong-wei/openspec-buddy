@@ -28,6 +28,9 @@ claim_id=""
 lease_until=""
 claim_lock_written=0
 claim_completed=0
+prepared_issue=0
+triage_terminal_disposition=""
+triage_terminal_reason=""
 viewer="$(gh api user --jq .login)"
 repo_nwo="$(buddy_repo_nwo)"
 
@@ -206,8 +209,9 @@ if (String(issue.state).toUpperCase() !== expectedState || (expectedStatus && (s
     fi
     return 1
   fi
-  printf 'HANDOFF\nmode: claim\ntriage_disposition: %s\nrequired_action: %s\n' "$disposition" "$reason"
-  return 10
+  triage_terminal_disposition="$disposition"
+  triage_terminal_reason="$reason"
+  return 11
 }
 
 run_claim_triage_gate() {
@@ -218,6 +222,15 @@ run_claim_triage_gate() {
   set -e
   if [[ "$gate_status" == "10" ]]; then
     claim_completed=1
+    exit 0
+  fi
+  if [[ "$gate_status" == "11" ]]; then
+    if ! buddy_release_claim_lock "$issue_number" "$change_id" "$claim_branch" "$viewer" "$claim_id" "$lease_until" "triage disposition: $triage_terminal_disposition"; then
+      echo "Failed to release claim after triage disposition: $triage_terminal_disposition" >&2
+      return 1
+    fi
+    claim_completed=1
+    printf 'HANDOFF\nmode: claim\ntriage_disposition: %s\nrequired_action: %s\n' "$triage_terminal_disposition" "$triage_terminal_reason"
     exit 0
   fi
   return "$gate_status"
@@ -273,18 +286,29 @@ if node "$script_dir/parse-issue-metadata.mjs" "$body_file" > "$metadata_file" 2
   change_id="$(node -e 'const fs=require("fs"); const data=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(data.change_id);' "$metadata_file")"
   claim_branch="$(node -e 'const fs=require("fs"); const data=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(data.claim_branch);' "$metadata_file")"
   base_branch="$(node -e 'const fs=require("fs"); const data=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(data.base_branch);' "$metadata_file")"
-  issue_status="$(node -e 'const fs=require("fs"); const issue=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write((issue.labels || []).map((label) => label.name).find((name) => name.replace(/^status:\\s+/, "status:") === "status:claimed") ? "claimed" : "other");' "$issue_file")"
+  issue_status="$(node -e '
+const fs=require("fs"); const issue=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));
+const statuses=(issue.labels || []).map((label) => label.name.replace(/^status:\s+/, "status:")).filter((name) => name.startsWith("status:"));
+if (statuses.length !== 1) process.exit(1);
+process.stdout.write(statuses[0].slice("status:".length));
+' "$issue_file")"
   if [[ "$issue_status" == "claimed" ]]; then
+    if ! buddy_verify_active_claim_resume "$issue_number" "$change_id" "$claim_branch" "$base_branch" "$viewer" "$repo_nwo" "$tmp_dir/claimed-entry-owner" >/dev/null; then
+      exec "$script_dir/claim-change.sh" "$issue_number"
+    fi
     if ! run_claim_triage_gate "$issue_number" "$change_id" "$base_branch" "$claim_branch"; then
       exit 1
     fi
     exec "$script_dir/claim-change.sh" "$issue_number" --resume-active
   fi
-  exec "$script_dir/claim-change.sh" "$issue_number"
-  exit 0
+  if [[ "$issue_status" == "ready" ]]; then
+    prepared_issue=1
+  else
+    exec "$script_dir/claim-change.sh" "$issue_number"
+  fi
 fi
 
-if node -e '
+if [[ "$prepared_issue" != "1" ]] && node -e '
 const fs = require("fs");
 const body = fs.readFileSync(process.argv[1], "utf8");
 process.exit(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/.test(body) || /<!--\s*openspec-buddy\s*\r?\n/.test(body) ? 0 : 1);
@@ -294,6 +318,7 @@ process.exit(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/.test(body) || /<!--\s*opensp
   exit 1
 fi
 
+if [[ "$prepared_issue" != "1" ]]; then
 node -e '
 const fs = require("fs");
 const issue = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
@@ -321,6 +346,9 @@ const data = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
 process.stdout.write(data.updatedBody);
 ' "$tmp_dir/adoption.json" > "$tmp_dir/adopted-body.md"
 node "$script_dir/parse-issue-metadata.mjs" "$tmp_dir/adopted-body.md" > "$metadata_file"
+else
+  cp "$body_file" "$tmp_dir/adopted-body.md"
+fi
 
 change_id="$(node -e 'const fs=require("fs"); const data=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(data.change_id);' "$metadata_file")"
 claim_branch="$(node -e 'const fs=require("fs"); const data=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(data.claim_branch);' "$metadata_file")"
