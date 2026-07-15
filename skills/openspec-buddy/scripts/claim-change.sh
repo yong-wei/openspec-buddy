@@ -44,7 +44,9 @@ cleanup() {
     buddy_delete_claim_branch_if_owned "$issue_number" "$change_id" "$claim_branch" "$viewer" "$claim_id" "$lease_until" "$repo_nwo" "$tmp_dir/cleanup" || true
   fi
   if [[ "$claim_lock_written" == "1" && "$claim_completed" != "1" && -n "$issue_number" && -n "$change_id" && -n "$claim_branch" && -n "$viewer" && -n "$claim_id" && -n "$lease_until" ]]; then
-    buddy_release_claim_lock "$issue_number" "$change_id" "$claim_branch" "$viewer" "$claim_id" "$lease_until" "claim did not complete" >/dev/null 2>&1 || true
+    if buddy_release_claim_lock "$issue_number" "$change_id" "$claim_branch" "$viewer" "$claim_id" "$lease_until" "claim did not complete" >/dev/null 2>&1; then
+      "$script_dir/set-status-label.sh" "$issue_number" "status:ready" >/dev/null 2>&1 || echo "BLOCKED: claim was released but issue #$issue_number could not be restored to status:ready." >&2
+    fi
   fi
   rm -rf "$tmp_dir"
 }

@@ -245,7 +245,7 @@ grep -q '^status-mutation status:tracking$' "$CALL_LOG"
 grep -q '^status-mutation status:claimed$' "$CALL_LOG"
 grep -q 'gh issue edit 31 --remove-label type:series-parent' "$CALL_LOG"
 [[ -f "$tmp/released-lock" ]]
-[[ "$(cat "$tmp/post-status")" == status:claimed ]]
+[[ "$(cat "$tmp/post-status")" == status:ready ]]
 [[ ! -f "$tmp/series-parent-type" ]]
 
 # A pre-existing semantic type is preserved when the status write fails.
@@ -253,7 +253,7 @@ printf claimed > "$tmp/mode"; printf status:claimed > "$tmp/post-status"; touch 
 if SERIES_CHILDREN=ready FAIL_TRACKING_PROJECT=1 "$scripts/claim-issue.sh" 31 > "$tmp/out" 2> "$tmp/err"; then exit 1; fi
 ! grep -q -- '--remove-label type:series-parent' "$CALL_LOG"
 [[ -f "$tmp/series-parent-type" ]]
-[[ "$(cat "$tmp/post-status")" == status:claimed ]]
+[[ "$(cat "$tmp/post-status")" == status:ready ]]
 
 # Failed compensation is a hard diagnostic, never a completed disposition.
 printf claimed > "$tmp/mode"; rm -f "$tmp/post-status" "$tmp/series-parent-type"; : > "$CALL_LOG"
@@ -337,19 +337,20 @@ grep -q '^verify-lock$' "$CALL_LOG"
 # mutation when the shared active verifier fails.
 cp "$skill_dir/scripts/claim-change.sh" "$scripts/claim-change.sh"
 chmod +x "$scripts/claim-change.sh"
-printf claimed > "$tmp/mode"; : > "$CALL_LOG"
+printf claimed > "$tmp/mode"; rm -f "$tmp/post-status"; : > "$CALL_LOG"
 if FAIL_ACTIVE_VERIFY=1 "$scripts/claim-change.sh" 31 --resume-active >/dev/null 2>&1; then exit 1; fi
 ! grep -Eq 'issue develop 31 --name|status-mutation' "$CALL_LOG"
 ! grep -q '^release-lock$' "$CALL_LOG"
 
 # Once resume ownership has been verified, failures in downstream blocker
 # checks release the active lock inherited from claim-issue.
-printf claimed > "$tmp/mode"; : > "$CALL_LOG"
+printf claimed > "$tmp/mode"; rm -f "$tmp/post-status"; : > "$CALL_LOG"
 if OPEN_BLOCKER=1 "$scripts/claim-change.sh" 31 --resume-active >/dev/null 2>&1; then exit 1; fi
 [[ "$(grep -c '^release-lock$' "$CALL_LOG")" -eq 1 ]]
+grep -q '^status-mutation status:ready$' "$CALL_LOG"
 
 # A successful resume keeps the claim active for implementation.
-printf claimed > "$tmp/mode"; : > "$CALL_LOG"
+printf claimed > "$tmp/mode"; rm -f "$tmp/post-status"; : > "$CALL_LOG"
 "$scripts/claim-change.sh" 31 --resume-active >/dev/null
 ! grep -q '^release-lock$' "$CALL_LOG"
 
