@@ -118,6 +118,14 @@ viewer="$(gh api user --jq .login)"
 "$script_dir/verify-claim-worktree.sh" --branch "$claim_branch" --allow-coordination-branch >/dev/null
 if [[ "$stale_recovery" == "2" ]]; then
   buddy_verify_active_claim_resume "$issue_number" "$change_id" "$claim_branch" "$base_branch" "$viewer" "$repo_nwo" "$tmp_dir/resume-before-relationships" > "$tmp_dir/resume-active.json"
+  claim_id="$(node -e 'const fs=require("node:fs"); const claim=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(claim?.claim_id || "");' "$tmp_dir/resume-active.json")"
+  lease_until="$(node -e 'const fs=require("node:fs"); const claim=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(claim?.lease_until || "");' "$tmp_dir/resume-active.json")"
+  base_sha="$(node -e 'const fs=require("node:fs"); const claim=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(claim?.base_sha || "");' "$tmp_dir/resume-active.json")"
+  [[ -n "$claim_id" && -n "$lease_until" && -n "$base_sha" ]] || { echo "Active claim is missing claim_id, lease_until, or base_sha." >&2; exit 1; }
+  # claim-issue transfers its verified active lock to this process via exec.
+  # Take cleanup ownership only after the shared verifier has proved that the
+  # lock belongs to this viewer and worktree and supplied its release identity.
+  claim_lock_written=1
 elif [[ "$stale_recovery" == "1" ]]; then
   buddy_stale_claim_recoverable "$issue_number" "$change_id" "$claim_branch" "$repo_nwo" "$tmp_dir/stale-recovery-before-relationships"
 else

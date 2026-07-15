@@ -24,7 +24,13 @@ buddy_signal_publish() { :; }
 buddy_invalidate_issue_cache() { :; }
 buddy_invalidate_ready_scan_cache() { :; }
 buddy_open_issues_rest() { printf '[]\n'; }
-buddy_issue_relationships_graphql() { printf '[]\n'; }
+buddy_issue_relationships_graphql() {
+  if [[ "${OPEN_BLOCKER:-0}" == 1 ]]; then
+    printf '[{"blockedBy":{"nodes":[{"number":30,"title":"Open blocker","state":"OPEN","labels":{"nodes":[]}}]}}]\n'
+  else
+    printf '[]\n'
+  fi
+}
 EOF
 cat > "$scripts/worktree-identity.sh" <<'EOF'
 buddy_worktree_record_claim() { printf 'record-claim\n' >> "$CALL_LOG"; }
@@ -41,13 +47,24 @@ buddy_verify_claim_lock_rest() { printf 'verify-lock\n' >> "$CALL_LOG"; }
 buddy_verify_active_claim_resume() {
   printf 'active-verify%s\n' "${8:+-bound}" >> "$CALL_LOG"
   [[ "${FAIL_ACTIVE_VERIFY:-0}" != 1 ]]
+  printf '{"claim_id":"claim-31","lease_until":"2026-07-15T12:00:00Z","base_sha":"%s"}\n' "$(git rev-parse origin/integration)"
 }
 buddy_release_claim_lock() { printf 'release-lock\n' >> "$CALL_LOG"; }
-buddy_claim_branch_exists() { return 1; }
+buddy_claim_branch_exists() { return 0; }
 EOF
 
 for helper in verify-bound-worktree.sh sync-base-branch.sh verify-claim-worktree.sh; do
   printf '#!/usr/bin/env bash\nexit 0\n' > "$scripts/$helper"
+  chmod +x "$scripts/$helper"
+done
+cat > "$scripts/find-coupling-conflicts.mjs" <<'EOF'
+process.stdout.write("[]\n");
+EOF
+for helper in set-project-status.sh set-project-date.sh; do
+  cat > "$scripts/$helper" <<'EOF'
+#!/usr/bin/env bash
+printf 'project-mutation %s\n' "$*" >> "$CALL_LOG"
+EOF
   chmod +x "$scripts/$helper"
 done
 cat > "$scripts/claim-change.sh" <<'EOF'
@@ -93,6 +110,7 @@ area: workflow
   exit 0
 fi
 if [[ "$1 $2 $3" == "issue develop --help" ]]; then exit 0; fi
+if [[ "$1 $2 $3" == "issue develop --list" ]]; then printf 'issue-31-test\n'; exit 0; fi
 printf 'unexpected gh call: %s\n' "$*" >&2
 exit 1
 EOF
@@ -108,6 +126,7 @@ git branch integration
 git init --bare -q "$tmp/origin.git"
 git remote add origin "$tmp/origin.git"
 git push -q origin integration
+git push -q origin HEAD:issue-31-test
 
 # Fresh ordinary issue: lock and verify precede triage; missing triage preserves lock.
 : > "$CALL_LOG"
@@ -164,5 +183,17 @@ chmod +x "$scripts/claim-change.sh"
 printf claimed > "$tmp/mode"; : > "$CALL_LOG"
 if FAIL_ACTIVE_VERIFY=1 "$scripts/claim-change.sh" 31 --resume-active >/dev/null 2>&1; then exit 1; fi
 ! grep -Eq 'issue develop 31 --name|status-mutation' "$CALL_LOG"
+! grep -q '^release-lock$' "$CALL_LOG"
+
+# Once resume ownership has been verified, failures in downstream blocker
+# checks release the active lock inherited from claim-issue.
+printf claimed > "$tmp/mode"; : > "$CALL_LOG"
+if OPEN_BLOCKER=1 "$scripts/claim-change.sh" 31 --resume-active >/dev/null 2>&1; then exit 1; fi
+[[ "$(grep -c '^release-lock$' "$CALL_LOG")" -eq 1 ]]
+
+# A successful resume keeps the claim active for implementation.
+printf claimed > "$tmp/mode"; : > "$CALL_LOG"
+"$scripts/claim-change.sh" 31 --resume-active >/dev/null
+! grep -q '^release-lock$' "$CALL_LOG"
 
 printf 'triage claim orchestration tests passed\n'
