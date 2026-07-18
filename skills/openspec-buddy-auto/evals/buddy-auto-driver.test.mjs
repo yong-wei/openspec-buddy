@@ -1400,13 +1400,14 @@ fi
 
 {
   const skill = fs.readFileSync(path.resolve(__dirname, '../SKILL.md'), 'utf8');
-  assert.match(skill, /<EXTREMELY_IMPORTANT>/);
-  assert.match(skill, /buddy-auto\.mjs/);
+  assert.match(skill, /buddy-auto\.mjs[^\n]*default|default[^\n]*buddy-auto\.mjs/i);
+  assert.match(skill, /buddy-auto\.mjs full(?:\s|`)/);
   assert.doesNotMatch(skill, /buddy-auto-driver\.mjs/);
   assert.doesNotMatch(skill, /buddy-auto-lane-driver\.mjs/);
-  assert.match(skill, /DO NOT OUTPUT/);
-  assert.match(skill, /WAIT SILENTLY/);
-  assert.ok(skill.split('\n').length < 150, 'openspec-buddy-auto SKILL.md should stay focused on the controller entrypoint');
+  assert.match(skill, /Full controller[^\n]*(?:静默|silent)/i);
+  assert.match(skill, /DONE[^\n]*HANDOFF[^\n]*BLOCKED/);
+  assert.match(skill, /外部状态变化后[^\n]*重新运行同一公开 `full` 命令/);
+  assert.ok(skill.split('\n').length < 150, 'openspec-buddy-auto SKILL.md should stay focused on the lite entrypoint and explicit full mode');
 }
 
 console.log('buddy-auto-driver tests passed');
