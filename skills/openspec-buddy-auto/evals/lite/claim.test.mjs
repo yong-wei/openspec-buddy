@@ -149,6 +149,33 @@ const foreignResult = run(foreign);
 assert.notEqual(foreignResult.status, 0);
 assert.match(foreignResult.stderr, /foreign Claim truth/);
 
+const releasedHistory = fixture('released-history');
+fs.writeFileSync(releasedHistory.state, JSON.stringify({
+  ...JSON.parse(fs.readFileSync(releasedHistory.state, 'utf8')),
+  comments: [
+    { body: 'OpenSpec Buddy Claim\nissue: 17\nclaim_id: claim-old\nstate: active\nchange_id: demo-change\nbranch: demo-change\nagent: codex/bob\nworktree_alias: dev2' },
+    { body: 'OpenSpec Buddy Claim Release\nclaim_id: claim-old\nstate: released\nchange_id: demo-change\nbranch: demo-change\nagent: @bob' },
+  ],
+}));
+const reclaimed = run(releasedHistory);
+assert.equal(reclaimed.status, 0, reclaimed.stderr);
+assert.equal(JSON.parse(reclaimed.stdout).result, 'claimed');
+
+const unrelatedRelease = fixture('unrelated-release');
+fs.writeFileSync(unrelatedRelease.state, JSON.stringify({
+  ...JSON.parse(fs.readFileSync(unrelatedRelease.state, 'utf8')),
+  labels: ['status:claimed'],
+  assignees: ['bob'],
+  comments: [
+    { body: 'OpenSpec Buddy Claim\nissue: 17\nstate: active\nchange_id: demo-change\nbranch: demo-change\nagent: codex/bob\nworktree_alias: dev2' },
+    { body: 'OpenSpec Buddy Claim Release\nclaim_id: claim-other\nstate: released' },
+  ],
+  branch: true,
+}));
+const unrelatedReleaseResult = run(unrelatedRelease);
+assert.notEqual(unrelatedReleaseResult.status, 0);
+assert.match(unrelatedReleaseResult.stderr, /foreign Claim truth/);
+
 const hashedWorktree = fixture('hashed-worktree', { alias: '' });
 const hashedResult = run(hashedWorktree);
 assert.equal(hashedResult.status, 0, hashedResult.stderr);

@@ -78,6 +78,63 @@ assert.equal(
   'current',
 );
 
+const historicalClaim = `OpenSpec Buddy Claim
+
+issue: 1
+claim_id: claim-1
+state: active
+agent: @codex
+change_id: demo
+branch: demo
+worktree_alias: dev1`;
+const releaseForHistoricalClaim = `OpenSpec Buddy Claim Release
+
+claim_id: claim-1
+state: released
+agent: @codex
+change_id: demo
+branch: demo`;
+for (const terminalState of ['released', 'abandoned', 'lost']) {
+  const terminal = terminalState === 'released'
+    ? releaseForHistoricalClaim
+    : `OpenSpec Buddy Claim
+
+claim_id: claim-1
+state: ${terminalState}`;
+  assert.equal(
+    classifyIssueClaim(
+      { state: 'open', labels: [{ name: 'status:ready' }], assignees: [] },
+      [{ body: historicalClaim }, { body: terminal }],
+      buildIdentity('codex', 'dev1'),
+      { branchExists: false, issue: 1, changeId: 'demo', branch: 'demo' },
+    ),
+    'unclaimed',
+    `${terminalState} must retire only its matching historical Claim`,
+  );
+}
+assert.equal(
+  classifyIssueClaim(
+    { state: 'open', labels: [{ name: 'status:claimed' }], assignees: [{ login: 'other' }] },
+    [
+      { body: historicalClaim },
+      { body: `OpenSpec Buddy Claim
+
+issue: 1
+claim_id: claim-2
+state: active
+agent: @other
+change_id: demo
+branch: demo
+worktree_alias: dev2` },
+      { body: releaseForHistoricalClaim },
+    ],
+    buildIdentity('codex', 'dev1'),
+    { branchExists: true, issue: 1, changeId: 'demo', branch: 'demo' },
+  ),
+  'foreign',
+  'releasing one Claim must not hide another active foreign Claim',
+);
+
 function writeExecutable(file, contents) {
   fs.writeFileSync(file, contents, { mode: 0o755 });
 }
@@ -169,6 +226,22 @@ function runSelector(fixture, args = []) {
   assert.deepEqual(JSON.parse(result.stdout), {
     mode: 'lite', result: 'issue', issue: 11, change_id: 'earlier', url: 'https://example.test/issues/11',
   });
+}
+
+{
+  const fixture = makeFixture('released-claim-is-ready-again', {
+    issues: [issue(11, 'released-ready')],
+    comments: {
+      11: [
+        { body: historicalClaim.replaceAll('issue: 1', 'issue: 11').replaceAll('demo', 'released-ready') },
+        { body: releaseForHistoricalClaim.replaceAll('demo', 'released-ready') },
+      ],
+    },
+  });
+  addChange(fixture.root, 'released-ready');
+  const result = runSelector(fixture, ['--issue', '11']);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).issue, 11);
 }
 
 {

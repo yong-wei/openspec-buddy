@@ -78,11 +78,29 @@ export function classifyClaim(claim, identity) {
   return 'foreign';
 }
 
+function activeClaimsFrom(comments) {
+  const active = new Map();
+  for (const [index, comment] of (comments || []).entries()) {
+    const body = comment?.body ?? comment;
+    const claim = parseLiteClaimComment(body);
+    if (!claim) continue;
+    const state = String(claim.state || 'active').toLowerCase();
+    const terminal = /^OpenSpec Buddy Claim Release(?:\s|$)/m.test(String(body || ''))
+      || ['released', 'abandoned', 'lost'].includes(state);
+    if (terminal) {
+      if (claim.claimId) active.delete(claim.claimId);
+      continue;
+    }
+    active.set(claim.claimId || `comment-${index}`, claim);
+  }
+  return [...active.values()];
+}
+
 export function classifyIssueClaim(issue, comments, identity, expected = {}) {
   const labels = (issue?.labels || []).map((label) => typeof label === 'string' ? label : label?.name).filter(Boolean);
   const statuses = labels.filter((label) => label.startsWith('status:'));
   const assignees = (issue?.assignees || []).map((assignee) => typeof assignee === 'string' ? assignee : assignee?.login).filter(Boolean);
-  const claims = (comments || []).map((comment) => parseLiteClaimComment(comment?.body ?? comment)).filter(Boolean);
+  const claims = activeClaimsFrom(comments);
   const claim = claims.at(-1) || null;
   const branchExists = expected.branchExists === true;
   const cleanReady = String(issue?.state || '').toUpperCase() === 'OPEN'
@@ -97,7 +115,8 @@ export function classifyIssueClaim(issue, comments, identity, expected = {}) {
     && (!expected.issue || claim.issue === Number(expected.issue))
     && (!expected.changeId || claim.changeId === expected.changeId)
     && (!expected.branch || claim.branch === expected.branch);
-  const complete = branchExists
+  const complete = claims.length === 1
+    && branchExists
     && String(issue?.state || '').toUpperCase() === 'OPEN'
     && statuses.length === 1
     && ACTIVE_CLAIM_STATUSES.includes(statuses[0])
