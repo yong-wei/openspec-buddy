@@ -9,11 +9,41 @@ import { fileURLToPath } from 'node:url';
 
 import {
   buildIdentity,
+  branchExistsFromRefResult,
   classifyClaim,
   classifyIssueClaim,
   parseChangeMapping,
   parseLiteClaimComment,
 } from '../../scripts/lite/contracts.mjs';
+
+const exactRef = 'refs/heads/demo-change';
+assert.equal(branchExistsFromRefResult({
+  status: 0,
+  stdout: JSON.stringify({ ref: exactRef, object: { sha: '1'.repeat(40) } }),
+  stderr: '',
+}, 'demo-change'), true);
+assert.equal(branchExistsFromRefResult({
+  status: 0,
+  stdout: JSON.stringify([
+    { ref: 'refs/heads/demo-change-more', object: { sha: '2'.repeat(40) } },
+  ]),
+  stderr: '',
+}, 'demo-change'), false, 'a prefix-match array is not the requested exact branch');
+assert.equal(branchExistsFromRefResult({
+  status: 0,
+  stdout: JSON.stringify({ ref: 'refs/heads/other-change', object: { sha: '3'.repeat(40) } }),
+  stderr: '',
+}, 'demo-change'), false, 'a mismatching ref object is not the requested exact branch');
+assert.equal(branchExistsFromRefResult({
+  status: 1,
+  stdout: '',
+  stderr: 'gh: Not Found (HTTP 404)',
+}, 'demo-change'), false);
+assert.throws(() => branchExistsFromRefResult({
+  status: 1,
+  stdout: '',
+  stderr: 'gh: Internal Server Error (HTTP 500)',
+}, 'demo-change'), /Could not read claim branch demo-change.*500/i);
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const selector = path.resolve(here, '../../scripts/lite/select-available-issue.mjs');
@@ -152,7 +182,9 @@ function issue(number, changeId, { state = 'open', status = 'status:ready', body
   };
 }
 
-function makeFixture(name, { issues, comments = {}, blockedBy = {}, branches = [], alias = 'dev1' }) {
+function makeFixture(name, {
+  issues, comments = {}, blockedBy = {}, branches = [], refResponses = {}, alias = 'dev1',
+}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `buddy-lite-${name}-`));
   const bin = path.join(root, 'bin');
   fs.mkdirSync(bin);
@@ -160,6 +192,7 @@ function makeFixture(name, { issues, comments = {}, blockedBy = {}, branches = [
   fs.writeFileSync(path.join(root, 'comments.json'), JSON.stringify(comments));
   fs.writeFileSync(path.join(root, 'blocked.json'), JSON.stringify(blockedBy));
   fs.writeFileSync(path.join(root, 'branches.json'), JSON.stringify(branches));
+  fs.writeFileSync(path.join(root, 'ref-responses.json'), JSON.stringify(refResponses));
   writeExecutable(path.join(bin, 'gh'), `#!/usr/bin/env node
 const fs = require('node:fs');
 const path = require('node:path');
@@ -176,10 +209,17 @@ if (args[0] === 'api' && String(args[1]).endsWith('/comments?per_page=100')) {
 }
 if (args[0] === 'api' && String(args[1]).includes('/git/ref/heads/')) {
   const branch = decodeURIComponent(args[1].split('/heads/').at(-1));
+  const refResponses = JSON.parse(fs.readFileSync(path.join(root, 'ref-responses.json')));
+  if (Object.hasOwn(refResponses, branch)) {
+    const response = refResponses[branch];
+    if (response.status) { console.error(response.stderr || ('HTTP ' + response.status)); process.exit(1); }
+    return console.log(JSON.stringify(response.body));
+  }
   const branches = JSON.parse(fs.readFileSync(path.join(root, 'branches.json')));
   if (!branches.includes(branch)) { console.error('HTTP 404: Not Found'); process.exit(1); }
   return console.log(JSON.stringify({ ref: 'refs/heads/' + branch, object: { sha: '1111111111111111111111111111111111111111' } }));
 }
+
 if (args[0] === 'api' && args[1] === 'graphql') {
   const numberArg = args.find((value) => value.startsWith('number='));
   const number = numberArg ? numberArg.slice('number='.length) : '';
@@ -213,6 +253,33 @@ function runSelector(fixture, args = []) {
     env: { ...process.env, PATH: `${fixture.bin}:${process.env.PATH}` },
     encoding: 'utf8',
   });
+}
+
+for (const [name, body] of [
+  ['prefix-array', [{ ref: 'refs/heads/claimed-more', object: { sha: '1'.repeat(40) } }]],
+  ['mismatching-object', { ref: 'refs/heads/other', object: { sha: '2'.repeat(40) } }],
+]) {
+  const current = 'OpenSpec Buddy Claim\nissue: 5\nstate: active\nagent: @codex\nchange_id: claimed\nbranch: claimed\nworktree_alias: dev1';
+  const fixture = makeFixture(`ref-${name}`, {
+    issues: [issue(5, 'claimed', { status: 'status:claimed', assignees: ['codex'] })],
+    comments: { 5: [{ body: current }] },
+    refResponses: { claimed: { body } },
+  });
+  addChange(fixture.root, 'claimed');
+  const result = runSelector(fixture, ['--issue', '5']);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /partial claim state/i);
+}
+
+{
+  const fixture = makeFixture('ref-api-error', {
+    issues: [issue(5, 'claimed')],
+    refResponses: { claimed: { status: 500, stderr: 'HTTP 500: Internal Server Error' } },
+  });
+  addChange(fixture.root, 'claimed');
+  const result = runSelector(fixture, ['--issue', '5']);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Could not read claim branch claimed.*500/i);
 }
 
 {

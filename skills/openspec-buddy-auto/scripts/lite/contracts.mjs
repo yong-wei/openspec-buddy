@@ -71,6 +71,22 @@ export function buildIdentity(viewer, worktreeAlias = '', realWorktree = '') {
   };
 }
 
+export function branchExistsFromRefResult(result, branch) {
+  const detail = `${result?.stderr || ''}\n${result?.stdout || ''}`.trim();
+  if (result?.status !== 0) {
+    if (/\b(?:HTTP\s+)?404\b/i.test(detail)) return false;
+    throw new Error(`Could not read claim branch ${branch}: ${detail || `exit ${result?.status}`}`);
+  }
+
+  let response;
+  try {
+    response = JSON.parse(String(result.stdout || ''));
+  } catch (error) {
+    throw new Error(`Could not read claim branch ${branch}: invalid GitHub ref response (${error.message})`);
+  }
+  return !Array.isArray(response) && response?.ref === `refs/heads/${branch}`;
+}
+
 export function classifyClaim(claim, identity) {
   if (!claim || String(claim.state || 'active').toLowerCase() !== 'active') return 'unclaimed';
   if (!claim.viewer || !claim.changeId || (!claim.claimId && !claim.branch) || !claim.worktree) return 'partial';

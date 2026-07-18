@@ -9,7 +9,10 @@ import { fileURLToPath } from 'node:url';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const helper = path.resolve(here, '../../scripts/lite/claim-issue.mjs');
 
-function fixture(name, { failWrite = '', alias = 'dev1', issueBody = '<!-- openspec-buddy change_id: demo-change -->', issueState = 'open', localChange = true } = {}) {
+function fixture(name, {
+  failWrite = '', alias = 'dev1', issueBody = '<!-- openspec-buddy change_id: demo-change -->',
+  issueState = 'open', localChange = true, branchResponse = '',
+} = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `buddy-lite-claim-${name}-`));
   const bin = path.join(root, 'bin');
   fs.mkdirSync(bin);
@@ -24,7 +27,7 @@ function fixture(name, { failWrite = '', alias = 'dev1', issueBody = '<!-- opens
   if (alias) execFileSync('git', ['config', '--worktree', 'buddy.worktreeAlias', alias], { cwd: root });
   const state = path.join(root, 'state.json');
   const log = path.join(root, 'calls.log');
-  fs.writeFileSync(state, JSON.stringify({ labels: ['status:ready'], assignees: [], comments: [], branch: false, failWrite, issueBody, issueState }));
+  fs.writeFileSync(state, JSON.stringify({ labels: ['status:ready'], assignees: [], comments: [], branch: false, branchResponse, failWrite, issueBody, issueState }));
   fs.writeFileSync(path.join(bin, 'git'), `#!/usr/bin/env node
 const cp = require('node:child_process');
 const fs = require('node:fs');
@@ -48,6 +51,9 @@ if (args[0] === 'api' && args[1] === 'user') return console.log(JSON.stringify({
 if (args[0] === 'api' && args[1] === 'repos/acme/repo/issues/17') return console.log(JSON.stringify({ id: 1700, node_id: 'I_17', number: 17, title: 'Demo', body: state.issueBody, state: state.issueState, html_url: 'https://example.test/issues/17', user: { login: 'author' }, labels: state.labels.map((name) => ({ id: name.length, name, color: 'ededed' })), assignees: state.assignees.map((login) => ({ id: login.length, login })) }));
 if (args[0] === 'api' && args[1].includes('/issues/17/comments')) return console.log(JSON.stringify(state.comments.map((comment, index) => ({ id: index + 1, node_id: 'IC_' + (index + 1), html_url: 'https://example.test/comments/' + (index + 1), user: { login: 'commenter' }, ...comment }))));
 if (args[0] === 'api' && args[1] === 'repos/acme/repo/git/ref/heads/demo-change') {
+  if (state.branchResponse === 'prefix-array') return console.log(JSON.stringify([{ ref: 'refs/heads/demo-change-more', object: { sha: '2222222222222222222222222222222222222222' } }]));
+  if (state.branchResponse === 'mismatching-object') return console.log(JSON.stringify({ ref: 'refs/heads/other-change', object: { sha: '3333333333333333333333333333333333333333' } }));
+  if (state.branchResponse === 'error-500') { console.error('HTTP 500: Internal Server Error'); process.exit(1); }
   if (!state.branch) { console.error('HTTP 404: Not Found'); process.exit(1); }
   return console.log(JSON.stringify({ ref: 'refs/heads/demo-change', node_id: 'REF_demo', url: 'https://api.example.test/ref/demo-change', object: { type: 'commit', sha: '1111111111111111111111111111111111111111', url: 'https://api.example.test/commits/1111' } }));
 }
@@ -56,7 +62,7 @@ if (args[0] === 'api' && args[1] === 'repos/acme/repo/git/ref/heads/integration'
 }
 if (args[0] === 'api' && args[1] === '--method' && args[2] === 'POST' && args[3] === 'repos/acme/repo/git/refs') {
   if (state.failWrite === 'branch-race') { state.branch = true; save(); console.error('HTTP 422: Reference already exists'); process.exit(1); }
-  state.branch = true; save();
+  state.branch = true; state.branchResponse = ''; save();
   return console.log(JSON.stringify({ ref: 'refs/heads/demo-change', node_id: 'REF_demo', url: 'https://api.example.test/ref/demo-change', object: { type: 'commit', sha: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', url: 'https://api.example.test/commits/aaaa' } }));
 }
 if (args[0] === 'issue' && args[1] === 'edit') {
@@ -169,6 +175,20 @@ const rerun = run(item);
 assert.equal(rerun.status, 0, rerun.stderr);
 assert.equal(JSON.parse(rerun.stdout).result, 'current_claim');
 assert.equal(fs.readFileSync(item.log, 'utf8').split('\n').filter((line) => /api --method POST|issue edit|issue comment|^status /.test(line)).length, 4);
+
+for (const branchResponse of ['prefix-array', 'mismatching-object']) {
+  const refShape = fixture(branchResponse, { branchResponse });
+  const result = run(refShape);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).result, 'claimed');
+}
+
+const refApiError = fixture('ref-api-error', { branchResponse: 'error-500' });
+const refApiErrorResult = run(refApiError);
+assert.notEqual(refApiErrorResult.status, 0);
+assert.match(refApiErrorResult.stderr, /Could not read claim branch demo-change.*500/i);
+assert.doesNotMatch(fs.readFileSync(refApiError.log, 'utf8'), /api --method POST/,
+  'a branch read API error must stop before Claim writes');
 
 fs.writeFileSync(path.join(item.root, 'tracked'), 'changed');
 execFileSync('/usr/bin/git', ['add', 'tracked'], { cwd: item.root });

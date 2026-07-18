@@ -4,7 +4,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { buildIdentity, classifyIssueClaim, parseChangeMapping } from './contracts.mjs';
+import {
+  buildIdentity,
+  branchExistsFromRefResult,
+  classifyIssueClaim,
+  parseChangeMapping,
+} from './contracts.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const statusHelper = process.env.OPENSPEC_BUDDY_LITE_STATUS_HELPER || path.join(here, 'set-issue-status.sh');
@@ -58,10 +63,7 @@ function readProjectBaseBranch(worktreeRoot) {
 
 function readBranch(repo, branch) {
   const result = attempt('gh', ['api', `repos/${repo}/git/ref/heads/${branch}`]);
-  if (result.status === 0) return true;
-  const detail = `${result.stderr || ''}\n${result.stdout || ''}`;
-  if (/404|not found/i.test(detail)) return false;
-  throw new Error(`Could not read claim branch ${branch}: ${detail.trim() || `exit ${result.status}`}`);
+  return branchExistsFromRefResult(result, branch);
 }
 
 function emit(result, expected) {

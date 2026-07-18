@@ -6,6 +6,7 @@ import path from 'node:path';
 import {
   ACTIVE_CLAIM_STATUSES,
   buildIdentity,
+  branchExistsFromRefResult,
   classifyIssueClaim,
   parseChangeMapping,
 } from './contracts.mjs';
@@ -61,10 +62,7 @@ function branchExists(repo, branch) {
   const result = spawnSync('gh', ['api', `repos/${repo}/git/ref/heads/${branch}`], {
     encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
   });
-  if (result.status === 0) return true;
-  const detail = `${result.stderr || ''}\n${result.stdout || ''}`;
-  if (/404|not found/i.test(detail)) return false;
-  fail(`Could not read claim branch ${branch}: ${detail.trim() || `exit ${result.status}`}`);
+  return branchExistsFromRefResult(result, branch);
 }
 
 function blockersFor(repo, number) {
