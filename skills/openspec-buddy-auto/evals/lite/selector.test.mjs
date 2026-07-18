@@ -24,6 +24,14 @@ assert.equal(
   parseChangeMapping('---\nchange_id: one\n---\n<!-- openspec-buddy change_id: two -->').conflict,
   true,
 );
+assert.equal(
+  parseChangeMapping('<!-- openspec-buddy change_id: one -->\n<!-- openspec-buddy change_id: two -->').conflict,
+  true,
+);
+assert.equal(
+  parseChangeMapping('<!-- openspec-buddy\nchange_id: one\n-->\n<!-- openspec-buddy\nchange_id: two\n-->').conflict,
+  true,
+);
 
 const claim = parseLiteClaimComment(`OpenSpec Buddy Claim
 
@@ -102,7 +110,15 @@ if (args[0] === 'api' && args[1] === 'graphql') {
   const numberArg = args.find((value) => value.startsWith('number='));
   const number = numberArg ? numberArg.slice('number='.length) : '';
   const blocked = JSON.parse(fs.readFileSync(path.join(root, 'blocked.json')));
-  return console.log(JSON.stringify({ data: { repository: { issue: { blockedBy: { nodes: blocked[number] || [] } } } } }));
+  const configured = blocked[number] || [];
+  const pages = Array.isArray(configured) ? [configured] : configured.pages;
+  const afterArg = args.find((value) => value.startsWith('after='));
+  const index = afterArg && afterArg !== 'after=' ? Number(afterArg.slice('after=page-'.length)) : 0;
+  const hasNextPage = index < pages.length - 1;
+  return console.log(JSON.stringify({ data: { repository: { issue: { blockedBy: {
+    nodes: pages[index] || [],
+    ...(configured.omitPageInfo ? {} : { pageInfo: { hasNextPage, endCursor: hasNextPage ? 'page-' + (index + 1) : null } }),
+  } } } } }));
 }
 console.error('unexpected gh call: ' + args.join(' '));
 process.exit(90);
@@ -229,6 +245,69 @@ function runSelector(fixture, args = []) {
   const result = runSelector(fixture, ['--issue', '11']);
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /foreign claim state/i);
+}
+
+{
+  const fixture = makeFixture('paginated-blocker', {
+    issues: [issue(11, 'paged-blocked')],
+    blockedBy: { 11: { pages: [[{ number: 6, state: 'CLOSED' }], [{ number: 7, state: 'OPEN' }]] } },
+  });
+  addChange(fixture.root, 'paged-blocked');
+  const result = runSelector(fixture, ['--issue', '11']);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /blocked by open issue #7/i);
+}
+
+{
+  const fixture = makeFixture('missing-page-info', {
+    issues: [issue(11, 'unsafe-page')],
+    blockedBy: { 11: { pages: [[{ number: 6, state: 'CLOSED' }]], omitPageInfo: true } },
+  });
+  addChange(fixture.root, 'unsafe-page');
+  const result = runSelector(fixture, ['--issue', '11']);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /safely paginate blockedBy/i);
+}
+
+{
+  const fixture = makeFixture('open-closed-duplicate', {
+    issues: [issue(11, 'duplicate'), issue(12, 'duplicate', { state: 'closed' })],
+  });
+  addChange(fixture.root, 'duplicate');
+  const result = runSelector(fixture, ['--change', 'duplicate']);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /duplicate.*mapping/i);
+}
+
+{
+  const current = 'OpenSpec Buddy Claim\nclaim_id: current-1\nstate: active\nagent: @codex\nchange_id: current\nworktree_alias: dev1';
+  const foreign = 'OpenSpec Buddy Claim\nclaim_id: foreign-1\nstate: active\nagent: @other\nchange_id: foreign\nworktree_alias: dev2';
+  const fixture = makeFixture('skip-foreign-default', {
+    issues: [issue(4, 'current', { status: 'status:claimed', assignees: ['codex'] }), issue(5, 'foreign'), issue(10, 'available')],
+    comments: { 4: [{ body: current }], 5: [{ body: foreign }] },
+  });
+  addChange(fixture.root, 'current');
+  addChange(fixture.root, 'foreign');
+  addChange(fixture.root, 'available');
+  const result = runSelector(fixture);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).issue, 10);
+  const explicit = runSelector(fixture, ['--issue', '5']);
+  assert.notEqual(explicit.status, 0);
+  assert.match(explicit.stderr, /foreign claim state/i);
+  const explicitCurrent = runSelector(fixture, ['--issue', '4']);
+  assert.notEqual(explicitCurrent.status, 0);
+}
+
+{
+  const fixture = makeFixture('partial-still-blocks-default', {
+    issues: [issue(5, 'partial', { status: 'status:claimed' }), issue(10, 'available')],
+  });
+  addChange(fixture.root, 'partial');
+  addChange(fixture.root, 'available');
+  const result = runSelector(fixture);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /partial claim state/i);
 }
 
 console.log('lite selector tests passed');

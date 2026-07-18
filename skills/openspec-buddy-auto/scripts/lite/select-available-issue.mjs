@@ -54,15 +54,33 @@ function commentsFor(repo, number) {
 
 function blockersFor(repo, number) {
   const [owner, name] = repo.split('/');
-  const query = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){blockedBy(first:100){nodes{number state}}}}}`;
-  const response = ghJson([
-    'api', 'graphql',
-    '-F', `owner=${owner}`,
-    '-F', `name=${name}`,
-    '-F', `number=${number}`,
-    '-f', `query=${query}`,
-  ]);
-  return response?.data?.repository?.issue?.blockedBy?.nodes || [];
+  const query = `query($owner:String!,$name:String!,$number:Int!,$after:String){repository(owner:$owner,name:$name){issue(number:$number){blockedBy(first:100,after:$after){nodes{number state}pageInfo{hasNextPage endCursor}}}}}`;
+  const blockers = [];
+  const seenCursors = new Set();
+  let after = '';
+  do {
+    const args = [
+      'api', 'graphql',
+      '-F', `owner=${owner}`,
+      '-F', `name=${name}`,
+      '-F', `number=${number}`,
+      '-f', `query=${query}`,
+    ];
+    if (after) args.splice(-2, 0, '-F', `after=${after}`);
+    const response = ghJson(args);
+    const connection = response?.data?.repository?.issue?.blockedBy;
+    if (!connection) fail(`Could not read blockedBy for issue #${number}.`);
+    if (!connection.pageInfo || typeof connection.pageInfo.hasNextPage !== 'boolean') {
+      fail(`Could not safely paginate blockedBy for issue #${number}.`);
+    }
+    blockers.push(...(connection.nodes || []));
+    if (!connection.pageInfo.hasNextPage) break;
+    const next = String(connection.pageInfo.endCursor || '');
+    if (!next || seenCursors.has(next)) fail(`Could not safely paginate blockedBy for issue #${number}.`);
+    seenCursors.add(next);
+    after = next;
+  } while (true);
+  return blockers;
 }
 
 function resultFor(issue, changeId) {
@@ -82,16 +100,24 @@ function mappingFor(issue) {
   return mapping.changeId;
 }
 
-function validateIssue(issue, context) {
+function validateIssue(issue, context, { excludeOwnedClaims = false } = {}) {
   if (!issue) fail('Target issue was not found.');
-  if (!isReady(issue)) fail(`Issue #${issue.number} is not an open status:ready issue.`);
+  if (!isReady(issue)) {
+    if (excludeOwnedClaims && String(issue.state || '').toUpperCase() === 'OPEN' && labels(issue).includes('status:claimed')) {
+      const claimClass = classifyIssueClaim(issue, commentsFor(context.repo, issue.number), context.identity);
+      if (claimClass === 'current' || claimClass === 'foreign') return { excluded: true };
+      fail(`Claimed issue #${issue.number} has ${claimClass} claim state.`);
+    }
+    fail(`Issue #${issue.number} is not an open status:ready issue.`);
+  }
   const changeId = mappingFor(issue);
   if (!localChangeExists(changeId)) fail(`Ready issue #${issue.number} maps to missing local change ${changeId}.`);
 
-  const duplicates = context.openMappings.get(changeId) || [];
-  if (duplicates.length > 1) fail(`Change ${changeId} has duplicate open issue mappings: ${duplicates.map((item) => `#${item.number}`).join(', ')}.`);
+  const duplicates = context.allMappings.get(changeId) || [];
+  if (duplicates.length > 1) fail(`Change ${changeId} has duplicate issue mappings: ${duplicates.map((item) => `#${item.number}`).join(', ')}.`);
 
   const claimClass = classifyIssueClaim(issue, commentsFor(context.repo, issue.number), context.identity);
+  if (excludeOwnedClaims && (claimClass === 'current' || claimClass === 'foreign')) return { excluded: true };
   if (claimClass !== 'unclaimed') fail(`Ready issue #${issue.number} has ${claimClass} claim state.`);
 
   const openBlockers = blockersFor(context.repo, Number(issue.number))
@@ -118,21 +144,24 @@ try {
     .filter((issue) => !issue.pull_request);
   const openMappings = new Map();
   const closedMappings = new Map();
+  const allMappings = new Map();
   const conflictingMappings = [];
   for (const issue of issues) {
     const mapping = parseChangeMapping(issue.body);
     if (mapping.conflict) conflictingMappings.push({ issue, mapping });
     if (!mapping.changeId || mapping.conflict) continue;
+    allMappings.set(mapping.changeId, [...(allMappings.get(mapping.changeId) || []), issue]);
     const target = String(issue.state || '').toUpperCase() === 'OPEN' ? openMappings : closedMappings;
     target.set(mapping.changeId, [...(target.get(mapping.changeId) || []), issue]);
   }
-  const context = { repo, identity, openMappings };
+  const context = { repo, identity, allMappings };
 
   if (options.change) {
     const conflict = conflictingMappings.find(({ mapping }) => mapping.sources.some((source) => source.changeId === options.change));
     if (conflict) fail(`Issue #${conflict.issue.number} has conflicting change mapping for ${options.change}.`);
+    const allMapped = allMappings.get(options.change) || [];
+    if (allMapped.length > 1) fail(`Change ${options.change} has duplicate issue mappings.`);
     const mapped = openMappings.get(options.change) || [];
-    if (mapped.length > 1) fail(`Change ${options.change} has duplicate open issue mappings.`);
     if (mapped.length === 1) {
       const checked = validateIssue(mapped[0], context);
       if (checked.blocked) fail(checked.blocked);
@@ -148,11 +177,14 @@ try {
     if (checked.blocked) fail(checked.blocked);
     process.stdout.write(`${JSON.stringify(checked.result)}\n`);
   } else {
-    const ready = issues.filter(isReady).sort((left, right) => Number(left.number) - Number(right.number));
+    const ready = issues
+      .filter((issue) => isReady(issue) || (String(issue.state || '').toUpperCase() === 'OPEN' && labels(issue).includes('status:claimed')))
+      .sort((left, right) => Number(left.number) - Number(right.number));
     let firstBlocked = '';
     let selected = null;
     for (const issue of ready) {
-      const checked = validateIssue(issue, context);
+      const checked = validateIssue(issue, context, { excludeOwnedClaims: true });
+      if (checked.excluded) continue;
       if (checked.blocked) {
         firstBlocked ||= checked.blocked;
         continue;

@@ -14,12 +14,14 @@ function field(block, name) {
 export function parseChangeMapping(markdown) {
   const body = String(markdown || '');
   const found = [];
-  const marker = body.match(/<!--\s*openspec-buddy\s+change_id\s*:\s*([a-z0-9]+(?:-[a-z0-9]+)*)\s*-->/i);
-  if (marker) found.push({ source: 'marker', changeId: marker[1] });
+  for (const marker of body.matchAll(/<!--\s*openspec-buddy\s+change_id\s*:\s*([a-z0-9]+(?:-[a-z0-9]+)*)\s*-->/gi)) {
+    found.push({ source: 'marker', changeId: marker[1] });
+  }
 
-  const hidden = body.match(/<!--\s*openspec-buddy\s*\r?\n([\s\S]*?)\r?\n\s*-->/i);
-  const hiddenChange = hidden ? field(hidden[1], 'change_id') : '';
-  if (hiddenChange) found.push({ source: 'hidden', changeId: hiddenChange });
+  for (const hidden of body.matchAll(/<!--\s*openspec-buddy\s*\r?\n([\s\S]*?)\r?\n\s*-->/gi)) {
+    const hiddenChange = field(hidden[1], 'change_id');
+    if (hiddenChange) found.push({ source: 'hidden', changeId: hiddenChange });
+  }
 
   const frontMatter = body.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
   const frontChange = frontMatter ? field(frontMatter[1], 'change_id') : '';
