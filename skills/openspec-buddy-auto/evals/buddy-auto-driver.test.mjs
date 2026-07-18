@@ -4,11 +4,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { signReceipt, validSignedReceipt } from '../scripts/receipt-truth.mjs';
+import { signReceipt, validSignedReceipt } from '../scripts/full/receipt-truth.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '../../..');
-const helper = path.resolve(__dirname, '../scripts/buddy-auto-driver.mjs');
+const helper = path.resolve(__dirname, '../scripts/full/buddy-auto-driver.mjs');
 
 function makeExecutable(file, body) {
   fs.writeFileSync(file, body, { mode: 0o755 });

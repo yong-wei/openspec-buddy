@@ -6,7 +6,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../../..');
-const moduleUrl = pathToFileURL(path.join(repoRoot, 'skills/openspec-buddy-auto/scripts/lane-state.mjs')).href;
+const moduleUrl = pathToFileURL(path.join(repoRoot, 'skills/openspec-buddy-auto/scripts/full/lane-state.mjs')).href;
 const laneState = await import(moduleUrl);
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'buddy-lane-state-'));

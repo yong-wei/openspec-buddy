@@ -8,7 +8,7 @@ import { readControllerState } from './controller-state.mjs';
 import { signReceipt, validSignedReceipt } from './receipt-truth.mjs';
 
 const autoScriptDir = path.dirname(fileURLToPath(import.meta.url));
-const defaultCoreScriptDir = path.resolve(autoScriptDir, '../../openspec-buddy/scripts');
+const defaultCoreScriptDir = path.resolve(autoScriptDir, '../../../openspec-buddy/scripts');
 const coreScriptDir = process.env.OPENSPEC_BUDDY_CORE_SCRIPT_DIR || defaultCoreScriptDir;
 
 const stages = new Set([

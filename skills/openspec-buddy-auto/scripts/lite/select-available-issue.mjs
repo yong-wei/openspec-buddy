@@ -102,13 +102,15 @@ function mappingFor(issue) {
 
 function validateIssue(issue, context, { excludeOwnedClaims = false } = {}) {
   if (!issue) fail('Target issue was not found.');
+  let explicitCurrentClaim = false;
   if (!isReady(issue)) {
-    if (excludeOwnedClaims && String(issue.state || '').toUpperCase() === 'OPEN' && labels(issue).includes('status:claimed')) {
+    if (String(issue.state || '').toUpperCase() === 'OPEN' && labels(issue).includes('status:claimed')) {
       const claimClass = classifyIssueClaim(issue, commentsFor(context.repo, issue.number), context.identity);
-      if (claimClass === 'current' || claimClass === 'foreign') return { excluded: true };
-      fail(`Claimed issue #${issue.number} has ${claimClass} claim state.`);
+      if (excludeOwnedClaims && (claimClass === 'current' || claimClass === 'foreign')) return { excluded: true };
+      if (!excludeOwnedClaims && claimClass === 'current') explicitCurrentClaim = true;
+      else fail(`Claimed issue #${issue.number} has ${claimClass} claim state.`);
     }
-    fail(`Issue #${issue.number} is not an open status:ready issue.`);
+    if (!explicitCurrentClaim) fail(`Issue #${issue.number} is not an open status:ready issue.`);
   }
   const changeId = mappingFor(issue);
   if (!localChangeExists(changeId)) fail(`Ready issue #${issue.number} maps to missing local change ${changeId}.`);
@@ -118,7 +120,9 @@ function validateIssue(issue, context, { excludeOwnedClaims = false } = {}) {
 
   const claimClass = classifyIssueClaim(issue, commentsFor(context.repo, issue.number), context.identity);
   if (excludeOwnedClaims && (claimClass === 'current' || claimClass === 'foreign')) return { excluded: true };
-  if (claimClass !== 'unclaimed') fail(`Ready issue #${issue.number} has ${claimClass} claim state.`);
+  if (claimClass !== 'unclaimed' && !(explicitCurrentClaim && claimClass === 'current')) {
+    fail(`Ready issue #${issue.number} has ${claimClass} claim state.`);
+  }
 
   const openBlockers = blockersFor(context.repo, Number(issue.number))
     .filter((blocker) => String(blocker.state || '').toUpperCase() === 'OPEN');

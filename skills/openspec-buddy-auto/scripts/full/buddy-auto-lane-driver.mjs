@@ -23,7 +23,7 @@ import { applyReviewTruthToLane, classifyProbe, laneReviewTruth, mergeReviewTrut
 import { runLaneAction } from './lane-action-runner.mjs';
 
 const autoScriptDir = path.dirname(fileURLToPath(import.meta.url));
-const defaultCoreScriptDir = path.resolve(autoScriptDir, '../../openspec-buddy/scripts');
+const defaultCoreScriptDir = path.resolve(autoScriptDir, '../../../openspec-buddy/scripts');
 const coreScriptDir = process.env.OPENSPEC_BUDDY_CORE_SCRIPT_DIR || defaultCoreScriptDir;
 const singleDriver = process.env.OPENSPEC_BUDDY_AUTO_SINGLE_DRIVER || path.join(autoScriptDir, 'buddy-auto-driver.mjs');
 const laneSwitchGate = path.join(autoScriptDir, 'lane-switch-gate.mjs');

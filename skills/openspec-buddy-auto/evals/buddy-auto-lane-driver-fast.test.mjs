@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../../..');
-const laneDriver = path.join(repoRoot, 'skills/openspec-buddy-auto/scripts/buddy-auto-lane-driver.mjs');
+const laneDriver = path.join(repoRoot, 'skills/openspec-buddy-auto/scripts/full/buddy-auto-lane-driver.mjs');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'buddy-auto-lane-fast-'));
 
 function makeExecutable(file, body) {

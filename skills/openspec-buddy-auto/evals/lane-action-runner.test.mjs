@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { runLaneAction } from '../scripts/lane-action-runner.mjs';
+import { runLaneAction } from '../scripts/full/lane-action-runner.mjs';
 
 function makeState() {
   return {

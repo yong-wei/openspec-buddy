@@ -297,7 +297,8 @@ function runSelector(fixture, args = []) {
   assert.notEqual(explicit.status, 0);
   assert.match(explicit.stderr, /foreign claim state/i);
   const explicitCurrent = runSelector(fixture, ['--issue', '4']);
-  assert.notEqual(explicitCurrent.status, 0);
+  assert.equal(explicitCurrent.status, 0, explicitCurrent.stderr);
+  assert.equal(JSON.parse(explicitCurrent.stdout).issue, 4);
 }
 
 {

@@ -6,7 +6,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../../..');
-const controller = await import(pathToFileURL(path.join(repoRoot, 'skills/openspec-buddy-auto/scripts/controller-state.mjs')).href);
+const controller = await import(pathToFileURL(path.join(repoRoot, 'skills/openspec-buddy-auto/scripts/full/controller-state.mjs')).href);
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'buddy-auto-controller-fast-'));
 
 function makeExecutable(file, body) {

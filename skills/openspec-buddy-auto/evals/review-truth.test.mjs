@@ -6,8 +6,8 @@ import {
   mergeReviewTruth,
   normalizeReviewTruth,
   threadCacheFreshForHead,
-} from '../scripts/review-truth.mjs';
-import { decideLaneAction } from '../scripts/auto-decision.mjs';
+} from '../scripts/full/review-truth.mjs';
+import { decideLaneAction } from '../scripts/full/auto-decision.mjs';
 
 const clock = () => new Date('2026-06-30T00:00:00.000Z');
 
