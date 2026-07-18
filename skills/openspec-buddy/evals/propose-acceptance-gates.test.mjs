@@ -23,7 +23,7 @@ const projectCoordination = read('skills/openspec-buddy/references/project-coord
 const readme = read('README.md');
 const exploreRoutingPath = 'skills/openspec-buddy/references/explore-routing.md';
 const buddyDriver = read('skills/openspec-buddy/scripts/buddy-driver.mjs');
-const autoDriver = read('skills/openspec-buddy-auto/scripts/buddy-auto-driver.mjs');
+const autoDriver = read('skills/openspec-buddy-auto/scripts/full/buddy-auto-driver.mjs');
 const autoEvals = JSON.parse(read('skills/openspec-buddy-auto/evals/evals.json'));
 
 const testingStrategyTemplate = `## Testing Strategy
