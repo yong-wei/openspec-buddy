@@ -1,4 +1,6 @@
-# Selecting A Claim Target
+# Selecting A Claim Target（Full Mode Only）
+
+本参考只描述显式 Full Mode 的 selection 规则，不适用于默认 lite。Full workflow 只能通过公开 `buddy-auto.mjs full` 入口运行。
 
 Recalculate candidates at the start of every iteration.
 

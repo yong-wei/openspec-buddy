@@ -1,9 +1,11 @@
-# Execution Loop
+# Execution Loop（Full Mode Only）
+
+本参考只描述显式 Full Mode，不适用于默认 lite。代理只能通过公开 `buddy-auto.mjs full` 入口使用 controller。
 
 All automatic phase progression starts with the controller:
 
 ```bash
-<openspec-buddy-auto-skill-dir>/scripts/buddy-auto.mjs
+<openspec-buddy-auto-skill-dir>/scripts/buddy-auto.mjs full
 ```
 
 The controller owns deterministic Buddy helpers. The agent receives only

@@ -1,9 +1,11 @@
-# Buddy Auto Controller States
+# Buddy Auto Controller States（Full Mode Only）
+
+本参考只描述显式 Full Mode，不适用于默认 lite。代理只能通过公开 `buddy-auto.mjs full` 入口使用这些状态。
 
 The auto controller is the only normal entry point:
 
 ```bash
-<openspec-buddy-auto-skill-dir>/scripts/buddy-auto.mjs
+<openspec-buddy-auto-skill-dir>/scripts/buddy-auto.mjs full
 ```
 
 The single-lane and lane drivers are controller-owned internal engines. Do not

@@ -1,0 +1,3 @@
+# Select ready issues without full coordination metadata
+
+The default lightweight selector considers only open `status:ready` Issues with an explicit `change_id` mapping to an active local OpenSpec change and no open GitHub-native `blockedBy` relationship. Native `blockedBy` is the only lightweight dependency authority. The selector does not apply body-level `depends_on`, series preference, Project fields, risk, mode, coupling, caches, or multi-lane scheduling; those remain full-mode concerns. Lightweight execution still records `claimed`, `in-progress`, and `in-review` Progress Status labels for human inspection, but the labels do not recreate the full controller state machine.

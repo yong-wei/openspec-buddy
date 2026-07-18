@@ -4,25 +4,31 @@
     {
       "id": 1,
       "prompt": "使用 openspec-buddy-auto 处理下一个可以执行的 change。",
-      "expected_output": "先检查 OPENSPEC_BUDDY_* 环境变量并调用核心 verify-bound-worktree.sh --phase pre-claim 与 sync-base-branch.sh 校验当前 worktree，auto 不维护独立同步逻辑；若配置 buddy.boundBranch，必须在该绑定协调分支上执行，detached HEAD 或其他分支在 GitHub 查询前失败，该绑定分支可快进到 buddy.boundBase，未配置时默认 origin/$OPENSPEC_BUDDY_BASE_BRANCH；未配置绑定分支时保留旧的 base 对齐行为。调用 openspec-buddy claim；没有指定 issue 时选择最小编号的可 claim open issue，直接在原 issue 上加入 Buddy metadata，不创建镜像 issue；claim 前绕过缓存读取 GitHub 真源，先只写入 assignee、status:claimed、Buddy metadata 和 claim comment，REST 复查确认最新 active claim 属于本次 claim_id 后，才建立 gh issue develop Development 分支锁并同步 Project Status/Start；普通开放 issue被收编后立即判断 simple/complex，简单 issue 创建或确认 OpenSpec change 后继续 apply，复杂 issue 拆分为 child issues 后把原 issue 转为 tracking parent。",
-      "files": []
-    },
-    {
-      "id": 4,
-      "prompt": "使用 openspec-buddy-auto 处理一个通过 openspec-buddy propose --no-issue 创建的本地 change，并启用 --no-pr。",
-      "expected_output": "先读取 openspec list --json 等本地 active change 信息，识别显式 no-issue/noIssue/issue:false/coordination:local 的变更；该路径不调用 openspec-buddy claim，不创建 GitHub Issue、Project 状态、Development 分支锁或远端 claim branch，而是直接在本地执行实现、验证与 OpenSpec 归档。若启用 --no-pr，则不开 PR、不等待 GitHub review、不调用 mark-review.sh 或 mark-achieved.sh，而是在本地完成高质量审核、修复、复核与合并，并报告最终本地 merge 结果。",
+      "expected_output": "调用公开 scripts/buddy-auto.mjs 的默认 lite 入口。无目标时选择编号最小的 Available Issue；候选必须开放、带 status:ready、显式映射到存在的本地 OpenSpec change，并且没有开放的 GitHub 原生 blockedBy。取得并复核 Claim 后，由 GPT-5.6 主模型完成实现、相关测试、完整 diff Local Review、openspec validate <change_id> --strict 和 openspec archive <change_id> --yes，把实现、测试、同步后的主 specs 与 archive 放进同一个 PR。",
       "files": []
     },
     {
       "id": 2,
-      "prompt": "在 goal 模式下自动处理所有剩余 OpenSpec change。",
-      "expected_output": "每轮只 claim 一个 change；每轮重算候选后，在所有可执行 issue-backed change 中选择 issue 编号最小的一个，current series 与 downstream blocking 只作为诊断信息，不作为优先级；实现阶段消费设计中已批准的 approved testing seam，never restarts product-level seam selection；可选 TDD provider availability 只影响实现方法，不得改变 Buddy state、receipts、artifacts 或 gates；实现线程不能自主勾选 Acceptance Checklist，只能提交 Proposed satisfied: AC-... 与 evidence；提交、开 PR 或 --no-pr 本地合并前必须由独立审查返回 approved_to_commit、approved_ac、rejected_ac、scope_status、regression_risk、required_fixes，只有 approved_ac 可以勾选；实现和验证完成后先在 claim branch 上运行 openspec validate <change_id> --strict 校验 active change/delta spec，再归档 OpenSpec change，把代码、测试、主 spec 与 archive 目录放入同一个 PR；PR 合并后只同步 issue 为 status:archived、Project Status 为 Done 且设置 End；若配置 buddy.boundBranch，必须切回绑定协调分支、快进到 buddy.boundBase（未配置时默认 origin/$OPENSPEC_BUDDY_BASE_BRANCH）并通过 verify-bound-worktree.sh --phase goal-loop-start 后再重算候选；无可执行项或预算耗尽时停止。",
+      "prompt": "使用 openspec-buddy-auto 自动处理所有剩余可用 change。",
+      "expected_output": "使用无参数 lite 入口逐项取得目标。每个 Issue-backed change 只有在 PR 成功合并且 status:archived、完成评论和 Issue 关闭均已完成后，才再次调用公开入口选择编号最小的 Available Issue；没有 Available Issue 或发生阻断时停止。默认 lite 不使用 Project、lane、cache、receipt 或 controller。",
       "files": []
     },
     {
       "id": 3,
-      "prompt": "PR 已打开，等待 code review 后继续。",
-      "expected_output": "先由 Buddy Auto controller 确认或补齐 PR 协调状态，auto 不单独实现 PR 元数据或 review-request 规则：PR 必须带 pr:openspec-buddy、pr:base-<base-branch> 以及 issue 的非 status 协作标签 type/level/area/series/risk/mode/coupling，PR assignee 必须镜像 issue assignee，加入与 issue 相同的 Project 且 Project Status 为 In Progress，记录来源 issue，并按 OPENSPEC_BUDDY_PR_DEVELOPMENT_LINK_MODE 处理 Development link；keyword 模式必须通过 closingIssuesReferences 验证 PR Development 链接，非默认 base 下则报告需要手动在 GitHub Development sidebar 链接；PR 中必须存在 OPENSPEC_BUDDY_PR_REVIEW_REQUEST 评论，并通过 PR coordination verifier；该 review request 必须保留完整代码审查能力，并额外要求检查 Acceptance Checklist 覆盖、scope drift 与未登记需求；然后进入 controller-owned review wait，不直接调用确定性 review wait helper，不使用 Codex 自动化、heartbeat 或后台监控，主代理等待期间不检查时间、不轮询 shell、不查询 GitHub、不读文件、不汇报进度、不处理其他工作；controller 首轮静默等待 300s，之后默认每 60s 只用轻量 PR REST 状态检查，最多 900s，并且只在轻量状态变化时补充拉取 PR reviews、commits、issue comments、review comments 并通过内部 review verifier 触发 GraphQL reviewThreads 检查；首轮 900s 没有当前 head clean review 时，controller 在固定 review request 后追加 retry 上下文并再等待一轮 900s；第二轮仍无 clean review 则停止并标记人工介入；等待结束后检查 PR base 是否为配置的 Buddy base branch、review、unresolved threads、requested changes、CI、mergeability 和 PR 元数据，并在合并前确认 controller 返回当前 head 的清场记录；不能用 gh pr view --comments 为空来判断无反馈，COMMENTED 不是通过；顶层清场评论只有在 controller 内部 verifier 返回当前 head 后 review request 与之后的清场评论摘要、时间和 URL 时才能作为判断记录；review body、review comments 或 reviewThreads 中只要有 P0/P1/P2 都不能直接合并，P2 也必须核实、修复或给出证据后再等待干净 review；若 PR 指向 release branch 则改为 Buddy base branch 或停止；有反馈则先独立审查 review-fix diff，approved_to_commit: yes 后才能提交，再 reply，并由 controller 持久化 reviewFix.pending、执行 response gate、确认 isResolved=true、请求 current-head review 后继续；无反馈且检查通过才合并。",
+      "prompt": "Lite 模式的 PR 已打开，请等待 Codex review 并继续。",
+      "expected_output": "为最新 head 发布固定评论 @codex review 中文回复，即使没有重大问题也必须给出显式回复。先等待 300 秒，随后每 60 秒读取最新 head、Codex 回复和 review threads，每轮最多 900 秒；纯超时只允许一次明确标识的同 head Timeout Retry，第二次超时停止。quota exhausted 或 service failure 立即停止且不触发或消耗 Timeout Retry。feedback 必须回复、resolve 并复审；只有最新 head 的明确 Clearance Comment、无 unresolved thread、CI 成功或确认无 CI 时才可合并。",
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "使用 openspec-buddy-auto --change local-change --no-pr 处理一个没有映射 Issue 的本地 change。",
+      "expected_output": "调用 lite 入口确认该 change 完全没有映射 Issue，并提醒用户它尚未登记 Issue。完成相关测试、完整 diff Local Review、strict validate、标准 archive、提交和实现分支推送；实现、测试、主 specs 与 archive 同一交付单元。只在远端 base 仍是实现分支祖先时 fast-forward，基线前进则同步后重新测试与审核；禁止 force push，并核验远端集成结果。",
+      "files": []
+    },
+    {
+      "id": 5,
+      "prompt": "显式使用 openspec-buddy-auto full 继续现有 controller 状态。",
+      "expected_output": "只调用公开 scripts/buddy-auto.mjs full，并把既有 OPENSPEC_BUDDY_AUTO_* 输入或恢复参数置于 full 之后；不得直接调用 scripts/full 内部模块。等待 controller 返回 DONE、HANDOFF 或 BLOCKED，按 interrupt 完成被授权工作后再次运行同一公开 full 命令。",
       "files": []
     }
   ]

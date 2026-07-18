@@ -1,0 +1,3 @@
+# Limit Lightweight Mode automation to shared coordination
+
+Lightweight Mode uses a thin Auto Entry plus exactly three deterministic Coordination Scripts for selection, Claim, and Progress Status updates. GPT-5.6 owns implementation, review, merge judgment, and completion work from live facts; keeping those decisions outside scripts avoids rebuilding a stateless controller while retaining deterministic protection for shared ownership writes. Lightweight modules live under `scripts/lite/`, existing Auto controller modules move under `scripts/full/`, and the core scripts shared with manual Buddy remain in place.

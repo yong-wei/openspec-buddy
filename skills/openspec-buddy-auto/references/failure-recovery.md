@@ -1,4 +1,6 @@
-# Failure Recovery
+# Failure Recovery（Full Mode Only）
+
+本参考只描述显式 Full Mode 的复杂恢复，不适用于默认 lite。所有恢复均从公开 `buddy-auto.mjs full` 入口进入。
 
 ## Stop And Escalate
 
@@ -127,7 +129,7 @@ receipt. Recovery requires a user-approved controller action with an audit
 reason:
 
 ```bash
-<openspec-buddy-auto-skill-dir>/scripts/buddy-auto.mjs \
+<openspec-buddy-auto-skill-dir>/scripts/buddy-auto.mjs full \
   --recover-unauthorized-merge \
   --reason "<user-approved recovery reason>"
 ```

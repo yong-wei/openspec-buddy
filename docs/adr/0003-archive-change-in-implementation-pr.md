@@ -1,0 +1,3 @@
+# Archive a completed change in its implementation PR
+
+Lightweight Buddy includes the validated OpenSpec archive and synchronized specifications in the same PR as the implementation and tests. This gives a Completed Change one reviewable delivery unit and avoids leaving an active local change that would require a second post-merge write or a recovery state machine. The explicit no-PR Direct Integration Delivery keeps the same atomicity by placing implementation, tests, synchronized specifications, and archive in the directly integrated commit. Archiving remains completion bookkeeping rather than a separate Buddy lifecycle state.
