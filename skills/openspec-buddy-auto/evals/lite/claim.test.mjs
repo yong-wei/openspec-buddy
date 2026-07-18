@@ -81,13 +81,74 @@ if (state.failWrite === 'status-after') process.exit(1);
   return { root, bin, state, log };
 }
 
-function run(item) {
+function run(item, env = {}) {
   return spawnSync(process.execPath, [helper, '17', 'demo-change'], {
     cwd: item.root,
-    env: { ...process.env, PATH: `${item.bin}:${path.dirname(process.execPath)}:/usr/bin:/bin`, OPENSPEC_BUDDY_BASE_BRANCH: 'integration', OPENSPEC_BUDDY_LITE_STATUS_HELPER: path.join(item.bin, 'status-stub') },
+    env: {
+      ...process.env,
+      PATH: `${item.bin}:${path.dirname(process.execPath)}:/usr/bin:/bin`,
+      OPENSPEC_BUDDY_BASE_BRANCH: 'integration',
+      OPENSPEC_BUDDY_ENV_FILE: '',
+      OPENSPEC_BUDDY_LITE_STATUS_HELPER: path.join(item.bin, 'status-stub'),
+      ...env,
+    },
     encoding: 'utf8',
   });
 }
+
+for (const [name, assignment] of [
+  ['plain-project-env', 'OPENSPEC_BUDDY_BASE_BRANCH=integration'],
+  ['double-quoted-project-env', 'OPENSPEC_BUDDY_BASE_BRANCH="integration"'],
+  ['exported-single-quoted-project-env', "export OPENSPEC_BUDDY_BASE_BRANCH='integration'"],
+]) {
+  const projectEnv = fixture(name);
+  fs.writeFileSync(path.join(projectEnv.root, '.env.openspec-buddy'), [
+    '# generated project configuration',
+    'UNRELATED_VALUE=ignored',
+    assignment,
+    '',
+  ].join('\n'));
+  const projectEnvResult = run(projectEnv, { OPENSPEC_BUDDY_BASE_BRANCH: '' });
+  assert.equal(projectEnvResult.status, 0, projectEnvResult.stderr);
+  assert.equal(JSON.parse(projectEnvResult.stdout).result, 'claimed');
+}
+
+const envPrecedence = fixture('env-precedence');
+fs.writeFileSync(path.join(envPrecedence.root, '.env.openspec-buddy'), 'OPENSPEC_BUDDY_BASE_BRANCH=missing-branch\n');
+const envPrecedenceResult = run(envPrecedence);
+assert.equal(envPrecedenceResult.status, 0, envPrecedenceResult.stderr);
+
+const projectEnvPrecedence = fixture('project-env-precedence');
+execFileSync('/usr/bin/git', ['config', '--worktree', 'buddy.boundBase', 'missing-branch'], { cwd: projectEnvPrecedence.root });
+fs.writeFileSync(path.join(projectEnvPrecedence.root, '.env.openspec-buddy'), 'OPENSPEC_BUDDY_BASE_BRANCH=integration\n');
+const projectEnvPrecedenceResult = run(projectEnvPrecedence, { OPENSPEC_BUDDY_BASE_BRANCH: '' });
+assert.equal(projectEnvPrecedenceResult.status, 0, projectEnvPrecedenceResult.stderr);
+
+const gitConfigFallback = fixture('git-config-fallback');
+execFileSync('/usr/bin/git', ['config', '--worktree', 'buddy.boundBase', 'origin/integration'], { cwd: gitConfigFallback.root });
+const gitConfigFallbackResult = run(gitConfigFallback, { OPENSPEC_BUDDY_BASE_BRANCH: '' });
+assert.equal(gitConfigFallbackResult.status, 0, gitConfigFallbackResult.stderr);
+
+const inertEnv = fixture('inert-project-env');
+const executionMarker = path.join(inertEnv.root, 'must-not-exist');
+fs.writeFileSync(
+  path.join(inertEnv.root, '.env.openspec-buddy'),
+  `OPENSPEC_BUDDY_BASE_BRANCH=$(touch ${executionMarker})\n`,
+);
+const inertEnvResult = run(inertEnv, { OPENSPEC_BUDDY_BASE_BRANCH: '' });
+assert.notEqual(inertEnvResult.status, 0);
+assert.equal(fs.existsSync(executionMarker), false, 'project env values must never execute shell code');
+
+const invalidTrailingLine = fixture('invalid-trailing-line');
+fs.writeFileSync(
+  path.join(invalidTrailingLine.root, '.env.openspec-buddy'),
+  'OPENSPEC_BUDDY_BASE_BRANCH=integration\nthis is not an assignment\n',
+);
+const invalidTrailingLineResult = run(invalidTrailingLine, { OPENSPEC_BUDDY_BASE_BRANCH: '' });
+assert.notEqual(invalidTrailingLineResult.status, 0);
+assert.match(invalidTrailingLineResult.stderr, /Invalid OpenSpec Buddy env file line/);
+assert.doesNotMatch(fs.readFileSync(invalidTrailingLine.log, 'utf8'), /api --method POST/,
+  'invalid project configuration must stop before Claim writes');
 
 const item = fixture('success');
 const claimed = run(item);

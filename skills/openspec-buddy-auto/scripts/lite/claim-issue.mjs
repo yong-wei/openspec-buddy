@@ -22,6 +22,40 @@ function attempt(file, args) {
   return spawnSync(file, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
 }
 
+function decodeEnvValue(raw) {
+  const value = raw.trim();
+  if (value.length >= 2 && (
+    (value.startsWith('"') && value.endsWith('"'))
+    || (value.startsWith("'") && value.endsWith("'"))
+  )) {
+    return value.slice(1, -1);
+  }
+  return value;
+}
+
+function readProjectBaseBranch(worktreeRoot) {
+  const configuredPath = String(process.env.OPENSPEC_BUDDY_ENV_FILE || '').trim();
+  const envFile = configuredPath
+    ? path.resolve(configuredPath)
+    : path.join(worktreeRoot, '.env.openspec-buddy');
+  if (!fs.statSync(envFile, { throwIfNoEntry: false })?.isFile()) return '';
+
+  const lines = fs.readFileSync(envFile, 'utf8').split(/\n/);
+  let baseBranch = '';
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index].replace(/\r$/, '').trim();
+    if (!line || line.startsWith('#')) continue;
+    const assignment = line.match(/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
+    if (!assignment) {
+      throw new Error(`Invalid OpenSpec Buddy env file line: ${envFile}:${index + 1}`);
+    }
+    if (assignment[1] === 'OPENSPEC_BUDDY_BASE_BRANCH' && !baseBranch) {
+      baseBranch = decodeEnvValue(assignment[2]).trim();
+    }
+  }
+  return baseBranch;
+}
+
 function readBranch(repo, branch) {
   const result = attempt('gh', ['api', `repos/${repo}/git/ref/heads/${branch}`]);
   if (result.status === 0) return true;
@@ -59,6 +93,9 @@ try {
   const worktreeRoot = fs.realpathSync(command('git', ['rev-parse', '--show-toplevel']));
   const identity = buildIdentity(viewer, worktree, worktreeRoot);
   let baseBranch = String(process.env.OPENSPEC_BUDDY_BASE_BRANCH || '').trim();
+  if (!baseBranch) {
+    baseBranch = readProjectBaseBranch(worktreeRoot);
+  }
   if (!baseBranch) {
     try {
       baseBranch = command('git', ['config', '--worktree', 'buddy.boundBase'])
