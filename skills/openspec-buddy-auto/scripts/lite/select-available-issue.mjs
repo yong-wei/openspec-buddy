@@ -65,8 +65,8 @@ function isReady(issue) {
   return String(issue.state || '').toUpperCase() === 'OPEN' && labels(issue).includes('status:ready');
 }
 
-function localChangeExists(changeId) {
-  return fs.statSync(path.join(process.cwd(), 'openspec', 'changes', changeId), { throwIfNoEntry: false })?.isDirectory() === true;
+function localChangeExists(worktreeRoot, changeId) {
+  return fs.statSync(path.join(worktreeRoot, 'openspec', 'changes', changeId), { throwIfNoEntry: false })?.isDirectory() === true;
 }
 
 function commentsFor(repo, number) {
@@ -154,7 +154,7 @@ function validateIssue(issue, context, { excludeOwnedClaims = false, classifyOnl
   );
   if (claimClass === 'foreign' && excludeOwnedClaims) return { excluded: true };
   if (claimClass === 'current') {
-    if (!localDeliveryExists(process.cwd(), changeId)) fail(`Local change ${changeId} does not exist in active or dated archive paths.`);
+    if (!localDeliveryExists(context.worktreeRoot, changeId)) fail(`Local change ${changeId} does not exist in active or dated archive paths.`);
     return { current: true, result: resultFor(issue, changeId) };
   }
   if (claimClass !== 'unclaimed') {
@@ -162,7 +162,7 @@ function validateIssue(issue, context, { excludeOwnedClaims = false, classifyOnl
   }
   if (classifyOnly) return { unclaimed: true };
   if (!isReady(issue)) fail(`Issue #${issue.number} is not an open status:ready issue.`);
-  if (!localChangeExists(changeId)) fail(`Ready issue #${issue.number} maps to missing local change ${changeId}.`);
+  if (!localChangeExists(context.worktreeRoot, changeId)) fail(`Ready issue #${issue.number} maps to missing local change ${changeId}.`);
 
   return { result: resultFor(issue, changeId) };
 }
@@ -202,7 +202,7 @@ try {
     const target = String(issue.state || '').toUpperCase() === 'OPEN' ? openMappings : closedMappings;
     target.set(mapping.changeId, [...(target.get(mapping.changeId) || []), issue]);
   }
-  const context = { repo, identity, allMappings };
+  const context = { repo, identity, allMappings, worktreeRoot: realWorktree };
 
   if (options.change) {
     const conflict = conflictingMappings.find(({ mapping }) => mapping.sources.some((source) => source.changeId === options.change));
@@ -220,7 +220,7 @@ try {
       process.stdout.write(`${JSON.stringify(checked.result)}\n`);
     } else {
       if ((closedMappings.get(options.change) || []).length > 0) fail(`Change ${options.change} has only closed issue mapping.`);
-      if (!localChangeExists(options.change)) fail(`Local change ${options.change} does not exist.`);
+      if (!localChangeExists(realWorktree, options.change)) fail(`Local change ${options.change} does not exist.`);
       process.stdout.write(`${JSON.stringify({ mode: 'lite', result: 'local_only', change_id: options.change })}\n`);
     }
   } else if (options.issue !== null) {

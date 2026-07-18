@@ -199,9 +199,9 @@ function addChange(root, changeId) {
   fs.mkdirSync(path.join(root, 'openspec', 'changes', changeId), { recursive: true });
 }
 
-function runSelector(fixture, args = []) {
+function runSelector(fixture, args = [], cwd = fixture.root) {
   return spawnSync(process.execPath, [selector, ...args], {
-    cwd: fixture.root,
+    cwd,
     env: { ...process.env, PATH: `${fixture.bin}:${process.env.PATH}` },
     encoding: 'utf8',
   });
@@ -247,7 +247,9 @@ for (const [name, body] of [
   });
   addChange(fixture.root, 'later');
   addChange(fixture.root, 'earlier');
-  const result = runSelector(fixture);
+  const subdirectory = path.join(fixture.root, 'nested');
+  fs.mkdirSync(subdirectory);
+  const result = runSelector(fixture, [], subdirectory);
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(JSON.parse(result.stdout), {
     mode: 'lite', result: 'issue', issue: 11, change_id: 'earlier', url: 'https://example.test/issues/11',
@@ -276,7 +278,9 @@ for (const [name, body] of [
 {
   const fixture = makeFixture('local-only', { issues: [] });
   addChange(fixture.root, 'local-change');
-  const result = runSelector(fixture, ['--change', 'local-change']);
+  const subdirectory = path.join(fixture.root, 'nested');
+  fs.mkdirSync(subdirectory);
+  const result = runSelector(fixture, ['--change', 'local-change'], subdirectory);
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(JSON.parse(result.stdout), {
     mode: 'lite', result: 'local_only', change_id: 'local-change',
