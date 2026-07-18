@@ -6,6 +6,8 @@
 
 合并前最终审核列出的 7 项缺陷均已按测试先行修复。实现与测试提交：`1ae94ea fix: close buddy lite final review gaps`。
 
+最终复审补充提交：`ded036a fix: recognize active lite claims`。
+
 未运行 `npm test`、full controller/cache/lane 全套或其他完整 full 回归。Full 证据仅限公开入口冒烟及相关语法检查。
 
 ## RED / GREEN 记录
@@ -27,7 +29,7 @@
 ### 3. Selector 使用完整实时 Claim tuple
 
 - RED：缺失 branch、额外 assignee、重复 status 未被完整判定；无目标 current Claim 编号高于 ready Issue 时错误选择 ready（`10 !== 20`）。
-- GREEN：共享 `classifyIssueClaim` 同时校验 open Issue、远端 branch、唯一 `status:claimed`、唯一且与评论一致的 assignee、最新结构化评论的 issue/change/branch/agent/worktree tuple。
+- GREEN：共享 `classifyIssueClaim` 同时校验 open Issue、远端 branch、唯一活动 status、唯一且与评论一致的 assignee、最新结构化评论的 issue/change/branch/agent/worktree tuple。
 - 行为：partial/矛盾立即停止；完整 foreign 在无目标模式跳过、显式目标停止；完整 current 在显式与无目标模式均继续，并优先于取得任何新 ready Issue。
 - GitHub branch/comments/issues 均实时读取，不使用 cache。
 - 文件：`contracts.mjs`、`select-available-issue.mjs`、`selector.test.mjs`。
@@ -58,6 +60,20 @@
 - GREEN：Entry 与 selector 均计数并拒绝重复参数，同时保留 `--issue`/`--change` 互斥与缺值校验。
 - 文件：`scripts/buddy-auto.mjs`、`select-available-issue.mjs`、entry/selector tests。
 
+## 最终复审补充 RED / GREEN
+
+### 活动 Claim 状态
+
+- RED：`status:in-progress` 的 current Claim 未进入无目标候选，selector 错误选择编号更小的 ready Issue（`10 !== 20`）。
+- GREEN：共享 `ACTIVE_CLAIM_STATUSES` 与 `classifyIssueClaim` 接受唯一 `status:claimed`、`status:in-progress`、`status:in-review`；selector 候选过滤复用同一常量。
+- 覆盖：current 与 foreign 身份分别遍历三种状态。current 的显式与无目标选择均恢复同一 Claim，且优先于 ready；foreign 无目标跳过并选择 ready，显式目标阻断；仅有 foreign 时返回 exhausted。既有 branch 缺失、重复 status 等 partial 测试继续通过。
+
+### Full child driver 公开入口提示
+
+- RED：扩展静态扫描至全部 `scripts/full/*.mjs` 后，捕获 `buddy-auto-driver.mjs` 的 `Run buddy-auto.mjs instead.`。
+- GREEN：single/lane driver 的 direct-run 与 unauthorized-merge recovery 提示均改为 `buddy-auto.mjs full`；full smoke 逐个扫描全部 full `.mjs` 的 user-facing 字符串。
+- 文件：`buddy-auto-driver.mjs`、`buddy-auto-lane-driver.mjs`、`full-entry-smoke.test.mjs`。
+
 ## 最终验证
 
 以下命令全部通过：
@@ -77,6 +93,8 @@ rtk git diff --check
 ```
 
 `npm pack --dry-run` 产物名：`openspec-buddy-0.26.0.tgz`。
+
+最终复审补充后再次运行上述 5 个 lite 测试、full-entry-smoke、cli-lite-init、相关 syntax、pack dry-run 与 diff-check，全部通过。
 
 计划审计：`docs/superpowers/plans/2026-07-18-buddy-lite-redesign.md` 与 `.superpowers/sdd/execution-plan.md` 未出现普通 `git push` 指令，GitHub REST ref 创建方案未回退。
 
