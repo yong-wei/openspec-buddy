@@ -61,6 +61,8 @@ requires(/status:archived[\s\S]{0,300}(?:completion comment|完成评论)[\s\S]{
   'an issue-backed merge must archive, comment, and close the issue');
 requires(/branch[^\n]*(?:best[- ]effort|尽力)|(?:best[- ]effort|尽力)[^\n]*branch/i,
   'claim branch deletion must be best-effort cleanup');
+requires(/(?:fetch|获取远端)[\s\S]{0,240}(?:tracking|跟踪|switch|切换|checkout|建立)[\s\S]{0,260}change_id[\s\S]{0,260}(?:current branch|当前分支)[^\n]*(?:equals|等于|一致)[^\n]*(?:Claim branch|认领分支)/i,
+  'implementation must fetch and switch/create a local tracking change_id branch, then verify it matches the Claim branch');
 requires(/(?:no Available Issue|没有可用 Issue|无可用 Issue)[^\n]*(?:stop|停止|结束)|(?:continue|继续)[^\n]*(?:select|选择)/i,
   'untargeted execution must continue selecting until exhausted');
 

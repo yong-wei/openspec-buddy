@@ -89,6 +89,15 @@ const conflicting = run(['--issue', '17', '--change', 'demo-change']);
 assert.notEqual(conflicting.status, 0);
 assert.match(conflicting.stderr, /mutually exclusive/i);
 
+for (const args of [
+  ['--issue', '17', '--issue', '17'],
+  ['--change', 'demo-change', '--change', 'demo-change'],
+]) {
+  const duplicate = run(args);
+  assert.notEqual(duplicate.status, 0);
+  assert.match(duplicate.stderr, /only once|duplicate/i);
+}
+
 const missingIssueValue = run(['--issue', '--no-pr']);
 assert.notEqual(missingIssueValue.status, 0);
 assert.match(missingIssueValue.stderr, /--issue requires a value/i);

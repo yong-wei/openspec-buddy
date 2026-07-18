@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 function scalar(value) {
   const text = String(value ?? '').trim();
   if ((text.startsWith('"') && text.endsWith('"')) || (text.startsWith("'") && text.endsWith("'"))) {
@@ -38,11 +40,13 @@ export function parseChangeMapping(markdown) {
 export function parseLiteClaimComment(body) {
   const text = String(body || '');
   if (!/^OpenSpec Buddy Claim(?:\s|$)/m.test(text)) return null;
+  const agent = field(text, 'agent').replace(/^@/, '');
   const claim = {
     issue: Number(field(text, 'issue')) || null,
     claimId: field(text, 'claim_id'),
     state: field(text, 'state') || 'active',
-    viewer: field(text, 'agent').replace(/^@/, '').replace(/^codex\//, ''),
+    agent: agent.startsWith('codex/') ? agent : `codex/${agent}`,
+    viewer: agent.replace(/^codex\//, ''),
     changeId: field(text, 'change_id'),
     branch: field(text, 'branch'),
     worktree: field(text, 'worktree_alias'),
@@ -50,32 +54,56 @@ export function parseLiteClaimComment(body) {
   return claim;
 }
 
-export function buildIdentity(viewer, worktree) {
+export function buildIdentity(viewer, worktreeAlias = '', realWorktree = '') {
+  const normalizedViewer = String(viewer || '').trim().replace(/^@/, '').replace(/^codex\//, '');
+  const alias = String(worktreeAlias || '').trim();
+  const real = String(realWorktree || '').trim();
   return {
-    viewer: String(viewer || '').trim().replace(/^@/, ''),
-    worktree: String(worktree || '').trim(),
+    agent: `codex/${normalizedViewer}`,
+    viewer: normalizedViewer,
+    worktree: alias || (real ? `worktree-${createHash('sha256').update(real).digest('hex').slice(0, 12)}` : ''),
   };
 }
 
 export function classifyClaim(claim, identity) {
   if (!claim || String(claim.state || 'active').toLowerCase() !== 'active') return 'unclaimed';
   if (!claim.viewer || !claim.changeId || (!claim.claimId && !claim.branch) || !claim.worktree) return 'partial';
-  if (claim.viewer === identity?.viewer && claim.worktree === identity?.worktree) return 'current';
+  if (claim.agent === identity?.agent && claim.worktree === identity?.worktree) return 'current';
   return 'foreign';
 }
 
-export function classifyIssueClaim(issue, comments, identity) {
+export function classifyIssueClaim(issue, comments, identity, expected = {}) {
   const labels = (issue?.labels || []).map((label) => typeof label === 'string' ? label : label?.name).filter(Boolean);
+  const statuses = labels.filter((label) => label.startsWith('status:'));
   const assignees = (issue?.assignees || []).map((assignee) => typeof assignee === 'string' ? assignee : assignee?.login).filter(Boolean);
-  const claim = (comments || []).map((comment) => parseLiteClaimComment(comment?.body ?? comment)).filter(Boolean).at(-1) || null;
-  const claimClass = classifyClaim(claim, identity);
+  const claims = (comments || []).map((comment) => parseLiteClaimComment(comment?.body ?? comment)).filter(Boolean);
+  const claim = claims.at(-1) || null;
+  const branchExists = expected.branchExists === true;
+  const cleanReady = String(issue?.state || '').toUpperCase() === 'OPEN'
+    && statuses.length === 1
+    && statuses[0] === 'status:ready'
+    && assignees.length === 0
+    && claims.length === 0
+    && !branchExists;
+  if (cleanReady) return 'unclaimed';
 
-  if (claimClass === 'foreign' || claimClass === 'partial') return claimClass;
-  if (claimClass === 'current') {
-    return labels.includes('status:claimed') && assignees.includes(identity?.viewer) ? 'current' : 'partial';
+  const targetMatches = claim
+    && (!expected.issue || claim.issue === Number(expected.issue))
+    && (!expected.changeId || claim.changeId === expected.changeId)
+    && (!expected.branch || claim.branch === expected.branch);
+  const complete = branchExists
+    && String(issue?.state || '').toUpperCase() === 'OPEN'
+    && statuses.length === 1
+    && statuses[0] === 'status:claimed'
+    && assignees.length === 1
+    && targetMatches
+    && claim.state === 'active'
+    && claim.viewer === assignees[0]
+    && Boolean(claim.agent && claim.worktree);
+  if (complete) {
+    return claim.agent === identity?.agent && claim.worktree === identity?.worktree ? 'current' : 'foreign';
   }
-  if (labels.includes('status:claimed') || assignees.length > 0) return 'partial';
-  return 'unclaimed';
+  return 'partial';
 }
 
 export const parseIssueMapping = parseChangeMapping;

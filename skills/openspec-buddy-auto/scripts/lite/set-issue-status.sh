@@ -22,15 +22,25 @@ process.stdout.write(labels.filter((name) => String(name || "").startsWith("stat
 }
 
 existing="$(read_statuses)"
+write_errors=""
 if [[ "$existing" != "$target_status" ]]; then
   if [[ -n "$existing" ]]; then
-    gh issue edit "$issue_number" --remove-label "$existing"
+    if ! remove_error="$(gh issue edit "$issue_number" --remove-label "$existing" 2>&1)"; then
+      write_errors+="remove status labels failed: ${remove_error:-unknown error}"$'\n'
+    fi
   fi
-  gh issue edit "$issue_number" --add-label "$target_status"
+  if ! add_error="$(gh issue edit "$issue_number" --add-label "$target_status" 2>&1)"; then
+    write_errors+="add target status failed: ${add_error:-unknown error}"$'\n'
+  fi
 fi
 
-observed="$(read_statuses)"
+if ! observed="$(read_statuses 2>&1)"; then
+  echo -n "$write_errors" >&2
+  echo "Final status truth read failed for issue #$issue_number: ${observed:-unknown error}." >&2
+  exit 1
+fi
 if [[ "$observed" != "$target_status" ]]; then
+  echo -n "$write_errors" >&2
   echo "Status verification failed for issue #$issue_number: expected $target_status, observed ${observed:-<none>}." >&2
   exit 1
 fi

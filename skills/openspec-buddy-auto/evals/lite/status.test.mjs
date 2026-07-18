@@ -72,4 +72,59 @@ for (const invalid of ['status:ready', 'blocked', 'merged']) {
   assert.match(result.stderr, /ready, claimed, in-progress, in-review, archived/);
 }
 
+function failureFixture(name, behavior) {
+  const failureRoot = fs.mkdtempSync(path.join(os.tmpdir(), `buddy-lite-status-${name}-`));
+  const failureBin = path.join(failureRoot, 'bin');
+  const failureState = path.join(failureRoot, 'state.json');
+  const failureLog = path.join(failureRoot, 'calls.log');
+  fs.mkdirSync(failureBin);
+  fs.writeFileSync(failureState, JSON.stringify({ labels: ['status:ready'], behavior }));
+  fs.writeFileSync(path.join(failureBin, 'gh'), `#!/usr/bin/env node
+const fs = require('node:fs');
+const file = ${JSON.stringify(failureState)}; const log = ${JSON.stringify(failureLog)};
+const args = process.argv.slice(2); const state = JSON.parse(fs.readFileSync(file));
+fs.appendFileSync(log, args.join(' ') + '\\n');
+if (args[0] === 'issue' && args[1] === 'view') { console.log(JSON.stringify({ labels: state.labels.map((name) => ({ name })) })); process.exit(0); }
+if (args[0] === 'issue' && args[1] === 'edit') {
+  const removeAt = args.indexOf('--remove-label'); const addAt = args.indexOf('--add-label');
+  if (removeAt >= 0 && state.behavior !== 'remove-fail') state.labels = state.labels.filter((name) => !args[removeAt + 1].split(',').includes(name));
+  if (addAt >= 0 && state.behavior !== 'add-fail' && !state.labels.includes(args[addAt + 1])) state.labels.push(args[addAt + 1]);
+  if (state.behavior === 'remove-applied-fail' && removeAt >= 0) state.labels = state.labels.filter((name) => !args[removeAt + 1].split(',').includes(name));
+  if (state.behavior === 'add-applied-fail' && addAt >= 0 && !state.labels.includes(args[addAt + 1])) state.labels.push(args[addAt + 1]);
+  fs.writeFileSync(file, JSON.stringify(state));
+  if ((state.behavior === 'remove-fail' || state.behavior === 'remove-applied-fail') && removeAt >= 0) { console.error('remove response failed'); process.exit(1); }
+  if ((state.behavior === 'add-fail' || state.behavior === 'add-applied-fail') && addAt >= 0) { console.error('add response failed'); process.exit(1); }
+  process.exit(0);
+}
+process.exit(90);
+`, { mode: 0o755 });
+  return {
+    state: failureState,
+    log: failureLog,
+    run: () => spawnSync(helper, ['17', 'claimed'], {
+      cwd: failureRoot,
+      env: { ...process.env, PATH: `${failureBin}:${process.env.PATH}` },
+      encoding: 'utf8',
+    }),
+  };
+}
+
+for (const behavior of ['remove-fail', 'add-fail']) {
+  const item = failureFixture(behavior, behavior);
+  const result = item.run();
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, new RegExp(`${behavior.split('-')[0]} response failed`, 'i'));
+  assert.match(result.stderr, /expected status:claimed, observed/i);
+  assert.equal(fs.readFileSync(item.log, 'utf8').split('\n').filter((line) => line.startsWith('issue view')).length, 2,
+    'a failed write must still perform exactly one final truth read');
+}
+
+for (const behavior of ['remove-applied-fail', 'add-applied-fail']) {
+  const item = failureFixture(behavior, behavior);
+  const result = item.run();
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(fs.readFileSync(item.state)).labels, ['status:claimed']);
+  assert.equal(fs.readFileSync(item.log, 'utf8').split('\n').filter((line) => line.startsWith('issue view')).length, 2);
+}
+
 console.log('lite status tests passed');

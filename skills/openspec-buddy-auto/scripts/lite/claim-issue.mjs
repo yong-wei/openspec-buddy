@@ -1,11 +1,10 @@
 #!/usr/bin/env node
 import { execFileSync, spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { parseLiteClaimComment } from './contracts.mjs';
+import { buildIdentity, classifyIssueClaim, parseChangeMapping } from './contracts.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const statusHelper = process.env.OPENSPEC_BUDDY_LITE_STATUS_HELPER || path.join(here, 'set-issue-status.sh');
@@ -23,50 +22,12 @@ function attempt(file, args) {
   return spawnSync(file, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
 }
 
-function labels(issue) {
-  return (issue.labels || []).map((label) => typeof label === 'string' ? label : label?.name).filter(Boolean);
-}
-
-function assignees(issue) {
-  return (issue.assignees || []).map((assignee) => typeof assignee === 'string' ? assignee : assignee?.login).filter(Boolean);
-}
-
 function readBranch(repo, branch) {
   const result = attempt('gh', ['api', `repos/${repo}/git/ref/heads/${branch}`]);
   if (result.status === 0) return true;
   const detail = `${result.stderr || ''}\n${result.stdout || ''}`;
   if (/404|not found/i.test(detail)) return false;
   throw new Error(`Could not read claim branch ${branch}: ${detail.trim() || `exit ${result.status}`}`);
-}
-
-function classifyTruth(truth, expected) {
-  const statuses = labels(truth.issue).filter((label) => label.startsWith('status:'));
-  const owners = assignees(truth.issue);
-  const claims = truth.comments.map((comment) => parseLiteClaimComment(comment?.body ?? comment)).filter(Boolean);
-  const claim = claims.at(-1) || null;
-  const commentMatchesTarget = claim
-    && claim.issue === expected.issue
-    && claim.changeId === expected.changeId
-    && claim.branch === expected.changeId;
-  const commentIsCurrent = commentMatchesTarget
-    && claim.viewer === expected.viewer
-    && claim.worktree === expected.worktree;
-  const current = truth.branch
-    && String(truth.issue?.state || '').toUpperCase() === 'OPEN'
-    && statuses.length === 1
-    && statuses[0] === 'status:claimed'
-    && owners.length === 1
-    && owners[0] === expected.viewer
-    && commentIsCurrent;
-  if (current) return 'current';
-  if (commentMatchesTarget && (claim.viewer !== expected.viewer || claim.worktree !== expected.worktree)) return 'foreign';
-  const cleanReady = statuses.length === 1
-    && String(truth.issue?.state || '').toUpperCase() === 'OPEN'
-    && statuses[0] === 'status:ready'
-    && owners.length === 0
-    && claims.length === 0
-    && !truth.branch;
-  return cleanReady ? 'unclaimed' : 'partial';
 }
 
 function emit(result, expected) {
@@ -93,9 +54,10 @@ try {
   try {
     worktree = command('git', ['config', '--worktree', 'buddy.worktreeAlias']);
   } catch {
-    const root = fs.realpathSync(command('git', ['rev-parse', '--show-toplevel']));
-    worktree = `worktree-${createHash('sha256').update(root).digest('hex').slice(0, 12)}`;
+    // The shared identity contract supplies the canonical-path fallback.
   }
+  const worktreeRoot = fs.realpathSync(command('git', ['rev-parse', '--show-toplevel']));
+  const identity = buildIdentity(viewer, worktree, worktreeRoot);
   let baseBranch = String(process.env.OPENSPEC_BUDDY_BASE_BRANCH || '').trim();
   if (!baseBranch) {
     try {
@@ -109,7 +71,7 @@ try {
   if (!baseBranch || !/^[A-Za-z0-9](?:[A-Za-z0-9._/-]*[A-Za-z0-9])?$/.test(baseBranch) || baseBranch.includes('..')) {
     throw new Error('A valid configured base branch is required for Lite Claim.');
   }
-  const expected = { issue: issueNumber, changeId, viewer, worktree };
+  const expected = { issue: issueNumber, changeId, ...identity };
 
   function readTruth() {
     const issue = json('gh', ['api', `repos/${repo}/issues/${issueNumber}`]);
@@ -118,7 +80,26 @@ try {
     return { issue, comments, branch: readBranch(repo, changeId) };
   }
 
-  const initial = classifyTruth(readTruth(), expected);
+  function classifyTruth(truth) {
+    if (String(truth.issue?.state || '').toUpperCase() !== 'OPEN') {
+      throw new Error(`Issue #${issueNumber} must remain open throughout Claim.`);
+    }
+    const mapping = parseChangeMapping(truth.issue?.body || '');
+    if (mapping.conflict || mapping.changeId !== changeId || mapping.sources.length !== 1) {
+      throw new Error(`Issue #${issueNumber} mapping must uniquely remain ${changeId}; observed ${mapping.changeId || 'none'}.`);
+    }
+    if (!fs.statSync(path.join(worktreeRoot, 'openspec', 'changes', changeId), { throwIfNoEntry: false })?.isDirectory()) {
+      throw new Error(`Local change ${changeId} does not exist.`);
+    }
+    return classifyIssueClaim(truth.issue, truth.comments, identity, {
+      branchExists: truth.branch,
+      issue: issueNumber,
+      changeId,
+      branch: changeId,
+    });
+  }
+
+  const initial = classifyTruth(readTruth());
   if (initial === 'current') {
     emit('current_claim', expected);
   } else if (initial !== 'unclaimed') {
@@ -126,7 +107,7 @@ try {
   } else {
     const recoverFailedWrite = (result, action) => {
       if (result.status === 0) return;
-      const recovered = classifyTruth(readTruth(), expected);
+      const recovered = classifyTruth(readTruth());
       if (recovered === 'current') {
         emit('current_claim', expected);
         process.exit(0);
@@ -150,13 +131,13 @@ try {
       `issue: ${issueNumber}`,
       `change_id: ${changeId}`,
       `branch: ${changeId}`,
-      `agent: codex/${viewer}`,
-      `worktree_alias: ${worktree}`,
+      `agent: ${identity.agent}`,
+      `worktree_alias: ${identity.worktree}`,
     ].join('\n');
     recoverFailedWrite(attempt('gh', ['issue', 'comment', String(issueNumber), '--body', comment]), 'Claim comment write');
     recoverFailedWrite(attempt(statusHelper, [String(issueNumber), 'claimed']), 'Claim status write');
 
-    const final = classifyTruth(readTruth(), expected);
+    const final = classifyTruth(readTruth());
     if (final !== 'current') throw new Error(`Claim verification failed: complete Claim truth is ${final}.`);
     emit('claimed', expected);
   }

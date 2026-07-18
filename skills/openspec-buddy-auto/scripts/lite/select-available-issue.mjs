@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -24,11 +24,15 @@ function fail(message) {
 
 function parseOptions(argv) {
   const options = { issue: null, change: '' };
+  let issueCount = 0;
+  let changeCount = 0;
   for (let index = 0; index < argv.length; index += 1) {
-    if (argv[index] === '--issue') options.issue = Number(argv[++index]);
-    else if (argv[index] === '--change') options.change = String(argv[++index] || '');
+    if (argv[index] === '--issue') { issueCount += 1; options.issue = Number(argv[++index]); }
+    else if (argv[index] === '--change') { changeCount += 1; options.change = String(argv[++index] || ''); }
     else fail(`Unknown argument: ${argv[index]}`);
   }
+  if (issueCount > 1) fail('--issue may be specified only once.');
+  if (changeCount > 1) fail('--change may be specified only once.');
   if (options.issue !== null && (!Number.isInteger(options.issue) || options.issue < 1)) fail('--issue requires a positive integer.');
   if (options.issue !== null && options.change) fail('--issue and --change are mutually exclusive.');
   if (argv.includes('--change') && !options.change) fail('--change requires a change id.');
@@ -50,6 +54,16 @@ function localChangeExists(changeId) {
 function commentsFor(repo, number) {
   const response = ghJson(['api', `repos/${repo}/issues/${number}/comments?per_page=100`, '--paginate', '--slurp']) || [];
   return Array.isArray(response[0]) ? response.flat() : response;
+}
+
+function branchExists(repo, branch) {
+  const result = spawnSync('gh', ['api', `repos/${repo}/git/ref/heads/${branch}`], {
+    encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  if (result.status === 0) return true;
+  const detail = `${result.stderr || ''}\n${result.stdout || ''}`;
+  if (/404|not found/i.test(detail)) return false;
+  fail(`Could not read claim branch ${branch}: ${detail.trim() || `exit ${result.status}`}`);
 }
 
 function blockersFor(repo, number) {
@@ -102,27 +116,24 @@ function mappingFor(issue) {
 
 function validateIssue(issue, context, { excludeOwnedClaims = false } = {}) {
   if (!issue) fail('Target issue was not found.');
-  let explicitCurrentClaim = false;
-  if (!isReady(issue)) {
-    if (String(issue.state || '').toUpperCase() === 'OPEN' && labels(issue).includes('status:claimed')) {
-      const claimClass = classifyIssueClaim(issue, commentsFor(context.repo, issue.number), context.identity);
-      if (excludeOwnedClaims && (claimClass === 'current' || claimClass === 'foreign')) return { excluded: true };
-      if (!excludeOwnedClaims && claimClass === 'current') explicitCurrentClaim = true;
-      else fail(`Claimed issue #${issue.number} has ${claimClass} claim state.`);
-    }
-    if (!explicitCurrentClaim) fail(`Issue #${issue.number} is not an open status:ready issue.`);
-  }
   const changeId = mappingFor(issue);
   if (!localChangeExists(changeId)) fail(`Ready issue #${issue.number} maps to missing local change ${changeId}.`);
 
   const duplicates = context.allMappings.get(changeId) || [];
   if (duplicates.length > 1) fail(`Change ${changeId} has duplicate issue mappings: ${duplicates.map((item) => `#${item.number}`).join(', ')}.`);
 
-  const claimClass = classifyIssueClaim(issue, commentsFor(context.repo, issue.number), context.identity);
-  if (excludeOwnedClaims && (claimClass === 'current' || claimClass === 'foreign')) return { excluded: true };
-  if (claimClass !== 'unclaimed' && !(explicitCurrentClaim && claimClass === 'current')) {
-    fail(`Ready issue #${issue.number} has ${claimClass} claim state.`);
+  const claimClass = classifyIssueClaim(
+    issue,
+    commentsFor(context.repo, issue.number),
+    context.identity,
+    { branchExists: branchExists(context.repo, changeId), issue: issue.number, changeId, branch: changeId },
+  );
+  if (claimClass === 'foreign' && excludeOwnedClaims) return { excluded: true };
+  if (claimClass === 'current') return { current: true, result: resultFor(issue, changeId) };
+  if (claimClass !== 'unclaimed') {
+    fail(`Issue #${issue.number} has ${claimClass} claim state.`);
   }
+  if (!isReady(issue)) fail(`Issue #${issue.number} is not an open status:ready issue.`);
 
   const openBlockers = blockersFor(context.repo, Number(issue.number))
     .filter((blocker) => String(blocker.state || '').toUpperCase() === 'OPEN');
@@ -140,9 +151,10 @@ try {
   try {
     worktree = run('git', ['config', '--worktree', 'buddy.worktreeAlias']);
   } catch {
-    worktree = path.basename(run('git', ['rev-parse', '--show-toplevel']));
+    // The shared pure identity rule hashes the canonical worktree path when no alias exists.
   }
-  const identity = buildIdentity(viewer, worktree);
+  const realWorktree = fs.realpathSync(run('git', ['rev-parse', '--show-toplevel']));
+  const identity = buildIdentity(viewer, worktree, realWorktree);
   const issueResponse = ghJson(['api', `repos/${repo}/issues?state=all&per_page=100`, '--paginate', '--slurp']) || [];
   const issues = (Array.isArray(issueResponse[0]) ? issueResponse.flat() : issueResponse)
     .filter((issue) => !issue.pull_request);
@@ -189,12 +201,15 @@ try {
     for (const issue of ready) {
       const checked = validateIssue(issue, context, { excludeOwnedClaims: true });
       if (checked.excluded) continue;
+      if (checked.current) {
+        selected = checked.result;
+        break;
+      }
       if (checked.blocked) {
         firstBlocked ||= checked.blocked;
         continue;
       }
-      selected = checked.result;
-      break;
+      selected ||= checked.result;
     }
     if (!selected && firstBlocked) fail(firstBlocked);
     process.stdout.write(`${JSON.stringify(selected || { mode: 'lite', result: 'exhausted' })}\n`);

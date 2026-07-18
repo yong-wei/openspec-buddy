@@ -38,9 +38,13 @@ function runFull(args) {
 function parseLiteArgs(argv) {
   const selectorArgs = [];
   let noPr = false;
+  let issueCount = 0;
+  let changeCount = 0;
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === '--issue' || arg === '--change') {
+      if (arg === '--issue') issueCount += 1;
+      else changeCount += 1;
       const value = argv[index + 1];
       if (!value || value.startsWith('--')) throw new Error(`${arg} requires a value.`);
       selectorArgs.push(arg, value);
@@ -51,6 +55,8 @@ function parseLiteArgs(argv) {
       throw new Error(`Unknown argument: ${arg}`);
     }
   }
+  if (issueCount > 1) throw new Error('--issue may be specified only once.');
+  if (changeCount > 1) throw new Error('--change may be specified only once.');
   if (selectorArgs.includes('--issue') && selectorArgs.includes('--change')) {
     throw new Error('--issue and --change are mutually exclusive.');
   }

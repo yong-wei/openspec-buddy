@@ -342,14 +342,14 @@ function handleChildResult(state, result) {
       type: 'blocked',
       stage: 'child-process',
       blockedCode: `exit-${result.status ?? 1}`,
-      allowedWork: 'Fix only this blocker, then rerun buddy-auto.mjs.',
+      allowedWork: 'Fix only this blocker, then rerun buddy-auto.mjs full.',
       child: state.mode,
     });
     emit('BLOCKED', [
       ['stage', 'child-process'],
       ['state_file', controllerStatePath()],
       ['allowed_work', next.interrupt.allowedWork],
-      ['resume_action', 'rerun buddy-auto.mjs'],
+      ['resume_action', 'rerun buddy-auto.mjs full'],
     ], text);
     return;
   }
@@ -358,14 +358,14 @@ function handleChildResult(state, result) {
       type: 'blocked',
       stage: 'child-process',
       blockedCode: `exit-${result.status ?? 1}`,
-      allowedWork: 'Fix only this blocker, then rerun buddy-auto.mjs.',
+      allowedWork: 'Fix only this blocker, then rerun buddy-auto.mjs full.',
       child: state.mode,
     });
     emit('BLOCKED', [
       ['stage', 'child-process'],
       ['state_file', controllerStatePath()],
       ['allowed_work', next.interrupt.allowedWork],
-      ['resume_action', 'rerun buddy-auto.mjs'],
+      ['resume_action', 'rerun buddy-auto.mjs full'],
       ['reason', `Child driver exited ${result.status ?? 1} after ${parsed.status}.`],
     ], text);
     return;
@@ -375,14 +375,14 @@ function handleChildResult(state, result) {
       type: 'blocked',
       stage: 'child-protocol',
       blockedCode: 'missing-status',
-      allowedWork: 'Fix the child driver output protocol, then rerun buddy-auto.mjs.',
+      allowedWork: 'Fix the child driver output protocol, then rerun buddy-auto.mjs full.',
       child: state.mode,
     });
     emit('BLOCKED', [
       ['stage', 'child-protocol'],
       ['state_file', controllerStatePath()],
       ['allowed_work', next.interrupt.allowedWork],
-      ['resume_action', 'rerun buddy-auto.mjs'],
+      ['resume_action', 'rerun buddy-auto.mjs full'],
       ['reason', 'Child driver exited successfully without DONE, HANDOFF, or BLOCKED.'],
     ], text);
     return;
@@ -406,14 +406,14 @@ function handleChildResult(state, result) {
       stage,
       issue: parsed.fields.issue || state.target.issue,
       pr: parsed.fields.pr || state.target.pr,
-      allowedWork: parsed.fields.agent_action || parsed.fields.required_action || 'Perform only the requested external work, then rerun buddy-auto.mjs.',
+      allowedWork: parsed.fields.agent_action || parsed.fields.required_action || 'Perform only the requested external work, then rerun buddy-auto.mjs full.',
       child: state.mode,
     });
     emit('HANDOFF', [
       ['stage', stage],
       ['state_file', controllerStatePath()],
       ['allowed_work', next.interrupt.allowedWork],
-      ['resume_action', 'rerun buddy-auto.mjs'],
+      ['resume_action', 'rerun buddy-auto.mjs full'],
     ]);
     return;
   }
@@ -429,7 +429,7 @@ function handleChildResult(state, result) {
       head: parsed.fields.head || state.reviewFix.head || '',
       blockedCode: stage || parsed.fields.reason || 'blocked',
       reason: parsed.fields.reason || '',
-      allowedWork: 'Fix only this blocker, then rerun buddy-auto.mjs.',
+      allowedWork: 'Fix only this blocker, then rerun buddy-auto.mjs full.',
       child: state.mode,
     });
     emit('BLOCKED', [
@@ -441,7 +441,7 @@ function handleChildResult(state, result) {
       ['head', next.interrupt.head],
       ['state_file', controllerStatePath()],
       ['allowed_work', next.interrupt.allowedWork],
-      ['resume_action', 'rerun buddy-auto.mjs'],
+      ['resume_action', 'rerun buddy-auto.mjs full'],
       ['reason', parsed.fields.reason || ''],
     ], text);
     return;
@@ -457,7 +457,7 @@ function handleChildResult(state, result) {
   emit('DONE', [
     ['stage', stage || 'controller'],
     ['state_file', controllerStatePath()],
-    ['resume_action', parsed.status === 'DONE' ? '' : 'rerun buddy-auto.mjs'],
+    ['resume_action', parsed.status === 'DONE' ? '' : 'rerun buddy-auto.mjs full'],
   ], text);
 }
 
@@ -465,7 +465,7 @@ function main() {
   const opts = parseArgs(process.argv.slice(2));
   const seed = seedFromEnv();
   if (opts.help) {
-    console.log('Usage: buddy-auto.mjs [--reset-controller-state] [--reset-lane-state --reason <why>] [--recover-unauthorized-merge --reason <why>]');
+    console.log('Usage: buddy-auto.mjs full [--reset-controller-state] [--reset-lane-state --reason <why>] [--recover-unauthorized-merge --reason <why>]');
     return;
   }
   if (opts.resetController || opts.resetLane) {
@@ -491,8 +491,8 @@ function main() {
       emit('BLOCKED', [
         ['stage', 'legacy-lane-state'],
         ['state_file', controllerStatePath()],
-        ['allowed_work', 'Repair the local lane cache or run buddy-auto.mjs --reset-lane-state --reason "<why>" if it is abandoned.'],
-        ['resume_action', 'rerun buddy-auto.mjs'],
+        ['allowed_work', 'Repair the local lane cache or run buddy-auto.mjs full --reset-lane-state --reason "<why>" if it is abandoned.'],
+        ['resume_action', 'rerun buddy-auto.mjs full'],
         ['reason', error.message],
       ]);
       return;

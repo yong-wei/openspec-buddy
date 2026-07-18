@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const entry = path.resolve(here, '../scripts/buddy-auto.mjs');
+const fullController = path.resolve(here, '../scripts/full/buddy-auto.mjs');
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'buddy-full-entry-'));
 const bin = path.join(root, 'bin');
 const repo = path.join(root, 'repo');
@@ -34,9 +35,11 @@ fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({
   reason: process.env.OPENSPEC_BUDDY_AUTO_RECOVERY_REASON || '',
 }) + '\\n');
 const status = process.env.SMOKE_STATUS || 'DONE';
-console.log(status); console.log('stage: smoke-' + status.toLowerCase());
+if (process.env.SMOKE_PROTOCOL !== 'missing') console.log(status);
+console.log('stage: smoke-' + status.toLowerCase());
 if (status === 'HANDOFF') console.log('required_action: preserve this output');
 if (status === 'BLOCKED') console.log('reason: preserve this blocker');
+if (process.env.SMOKE_EXIT) process.exit(Number(process.env.SMOKE_EXIT));
 `, { mode: 0o755 });
 
 const state = {
@@ -48,7 +51,7 @@ const state = {
 };
 fs.writeFileSync(path.join(controllerDir, 'dev1.json'), `${JSON.stringify(state, null, 2)}\n`);
 
-function run(status, args = []) {
+function run(status, args = [], extraEnv = {}) {
   return spawnSync(process.execPath, [entry, 'full', ...args], {
     cwd: repo,
     env: {
@@ -59,9 +62,15 @@ function run(status, args = []) {
       OPENSPEC_BUDDY_AUTO_TARGET_ISSUE: '999',
       OPENSPEC_BUDDY_AUTO_CHANGE: 'new-change',
       SMOKE_STATUS: status,
+      ...extraEnv,
     },
     encoding: 'utf8',
   });
+}
+
+function assertPublicFullCommand(result, context) {
+  assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, /buddy-auto\.mjs(?! full)(?:\s|$)/,
+    `${context} must always direct users through the public full command`);
 }
 
 for (const status of ['DONE', 'HANDOFF', 'BLOCKED']) {
@@ -69,6 +78,7 @@ for (const status of ['DONE', 'HANDOFF', 'BLOCKED']) {
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, new RegExp(`^${status}\\n`));
   assert.doesNotMatch(result.stdout, /"mode"|"result"/);
+  assertPublicFullCommand(result, status);
 }
 const calls = fs.readFileSync(log, 'utf8').trim().split('\n').map((line) => JSON.parse(line));
 for (const call of calls) {
@@ -82,5 +92,43 @@ const badArg = run('DONE', ['--not-a-controller-option']);
 assert.equal(badArg.status, 1);
 assert.match(badArg.stderr, /^Unknown argument: --not-a-controller-option\n$/);
 assert.equal(badArg.stdout, '');
+
+const help = run('DONE', ['--help']);
+assert.equal(help.status, 0, help.stderr);
+assert.match(help.stdout, /buddy-auto\.mjs full \[--reset-controller-state\]/);
+assert.doesNotMatch(help.stdout, /Usage: buddy-auto\.mjs \[/);
+assertPublicFullCommand(help, 'help');
+
+for (const scenario of [
+  { name: 'child failure', status: 'NONE', env: { SMOKE_PROTOCOL: 'missing', SMOKE_EXIT: '17' } },
+  { name: 'child protocol failure', status: 'NONE', env: { SMOKE_PROTOCOL: 'missing' } },
+  { name: 'structured child failure', status: 'HANDOFF', env: { SMOKE_EXIT: '17' } },
+]) {
+  fs.writeFileSync(path.join(controllerDir, 'dev1.json'), `${JSON.stringify(state, null, 2)}\n`);
+  const result = run(scenario.status, [], scenario.env);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^BLOCKED\n/);
+  assertPublicFullCommand(result, scenario.name);
+}
+
+fs.rmSync(path.join(controllerDir, 'dev1.json'));
+fs.writeFileSync(path.join(laneDir, 'dev1.json'), '{ malformed');
+const legacy = run('DONE');
+assert.equal(legacy.status, 0, legacy.stderr);
+assert.match(legacy.stdout, /^BLOCKED\nstage: legacy-lane-state/m);
+assertPublicFullCommand(legacy, 'legacy lane state');
+fs.rmSync(path.join(laneDir, 'dev1.json'));
+fs.writeFileSync(path.join(controllerDir, 'dev1.json'), `${JSON.stringify(state, null, 2)}\n`);
+
+const reset = run('DONE', ['--reset-controller-state']);
+assert.equal(reset.status, 0, reset.stderr);
+assert.match(reset.stdout, /^DONE\nstage: reset-controller-state/m);
+assertPublicFullCommand(reset, 'reset');
+
+const fullSource = fs.readFileSync(fullController, 'utf8');
+for (const literal of fullSource.matchAll(/(['"`])([^'"`]*buddy-auto\.mjs[^'"`]*)\1/g)) {
+  assert.doesNotMatch(literal[2], /buddy-auto\.mjs(?! full)(?:\s|$)/,
+    `full user-facing command must include full: ${literal[2]}`);
+}
 
 console.log('full public entry smoke tests passed');

@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const helper = path.resolve(here, '../../scripts/lite/claim-issue.mjs');
 
-function fixture(name, { failWrite = '', alias = 'dev1' } = {}) {
+function fixture(name, { failWrite = '', alias = 'dev1', issueBody = '<!-- openspec-buddy change_id: demo-change -->', issueState = 'open', localChange = true } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `buddy-lite-claim-${name}-`));
   const bin = path.join(root, 'bin');
   fs.mkdirSync(bin);
@@ -19,11 +19,12 @@ function fixture(name, { failWrite = '', alias = 'dev1' } = {}) {
   fs.writeFileSync(path.join(root, 'tracked'), 'x');
   execFileSync('git', ['add', 'tracked'], { cwd: root });
   execFileSync('git', ['commit', '-qm', 'fixture'], { cwd: root });
+  if (localChange) fs.mkdirSync(path.join(root, 'openspec/changes/demo-change'), { recursive: true });
   execFileSync('git', ['config', '--local', 'extensions.worktreeConfig', 'true'], { cwd: root });
   if (alias) execFileSync('git', ['config', '--worktree', 'buddy.worktreeAlias', alias], { cwd: root });
   const state = path.join(root, 'state.json');
   const log = path.join(root, 'calls.log');
-  fs.writeFileSync(state, JSON.stringify({ labels: ['status:ready'], assignees: [], comments: [], branch: false, failWrite }));
+  fs.writeFileSync(state, JSON.stringify({ labels: ['status:ready'], assignees: [], comments: [], branch: false, failWrite, issueBody, issueState }));
   fs.writeFileSync(path.join(bin, 'git'), `#!/usr/bin/env node
 const cp = require('node:child_process');
 const fs = require('node:fs');
@@ -44,7 +45,7 @@ const save = () => fs.writeFileSync(statePath, JSON.stringify(state));
 fs.appendFileSync(log, 'gh ' + args.join(' ') + '\\n');
 if (args[0] === 'repo' && args[1] === 'view') return console.log(JSON.stringify({ nameWithOwner: 'acme/repo' }));
 if (args[0] === 'api' && args[1] === 'user') return console.log(JSON.stringify({ login: 'alice' }));
-if (args[0] === 'api' && args[1] === 'repos/acme/repo/issues/17') return console.log(JSON.stringify({ id: 1700, node_id: 'I_17', number: 17, title: 'Demo', body: '<!-- openspec-buddy change_id: demo-change -->', state: 'open', html_url: 'https://example.test/issues/17', user: { login: 'author' }, labels: state.labels.map((name) => ({ id: name.length, name, color: 'ededed' })), assignees: state.assignees.map((login) => ({ id: login.length, login })) }));
+if (args[0] === 'api' && args[1] === 'repos/acme/repo/issues/17') return console.log(JSON.stringify({ id: 1700, node_id: 'I_17', number: 17, title: 'Demo', body: state.issueBody, state: state.issueState, html_url: 'https://example.test/issues/17', user: { login: 'author' }, labels: state.labels.map((name) => ({ id: name.length, name, color: 'ededed' })), assignees: state.assignees.map((login) => ({ id: login.length, login })) }));
 if (args[0] === 'api' && args[1].includes('/issues/17/comments')) return console.log(JSON.stringify(state.comments.map((comment, index) => ({ id: index + 1, node_id: 'IC_' + (index + 1), html_url: 'https://example.test/comments/' + (index + 1), user: { login: 'commenter' }, ...comment }))));
 if (args[0] === 'api' && args[1] === 'repos/acme/repo/git/ref/heads/demo-change') {
   if (!state.branch) { console.error('HTTP 404: Not Found'); process.exit(1); }
@@ -74,6 +75,7 @@ const fs = require('node:fs'); const statePath = ${JSON.stringify(state)}; const
 const state = JSON.parse(fs.readFileSync(statePath)); fs.appendFileSync(log, 'status ' + process.argv.slice(2).join(' ') + '\\n');
 if (state.failWrite === 'status') process.exit(1);
 state.labels = ['status:' + process.argv[3]]; fs.writeFileSync(statePath, JSON.stringify(state));
+if (state.failWrite === 'final-mapping-change') { state.issueBody = '<!-- openspec-buddy change_id: other-change -->'; fs.writeFileSync(statePath, JSON.stringify(state)); }
 if (state.failWrite === 'status-after') process.exit(1);
 `, { mode: 0o755 });
   return { root, bin, state, log };
@@ -136,8 +138,9 @@ assert.equal(JSON.parse(recoveredResult.stdout).result, 'current_claim');
 
 const foreign = fixture('foreign');
 fs.writeFileSync(foreign.state, JSON.stringify({
+  ...JSON.parse(fs.readFileSync(foreign.state, 'utf8')),
   labels: ['status:claimed'],
-  assignees: ['alice'],
+  assignees: ['bob'],
   comments: [{ body: 'OpenSpec Buddy Claim\nissue: 17\nchange_id: demo-change\nbranch: demo-change\nagent: codex/bob\nworktree_alias: dev2' }],
   branch: true,
   failWrite: '',
@@ -152,5 +155,25 @@ assert.equal(hashedResult.status, 0, hashedResult.stderr);
 const hashedComment = JSON.parse(fs.readFileSync(hashedWorktree.state)).comments[0].body;
 assert.match(hashedComment, /worktree_alias: worktree-[0-9a-f]{12}/);
 assert.doesNotMatch(hashedComment, new RegExp(hashedWorktree.root.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+const hashedRecovery = run(hashedWorktree);
+assert.equal(hashedRecovery.status, 0, hashedRecovery.stderr);
+assert.equal(JSON.parse(hashedRecovery.stdout).result, 'current_claim');
+
+for (const invalid of [
+  { name: 'changed-mapping-before-write', issueBody: '<!-- openspec-buddy change_id: other-change -->', pattern: /mapping.*demo-change|maps to.*other-change/i },
+  { name: 'closed-before-write', issueState: 'closed', pattern: /open issue|issue.*open/i },
+  { name: 'missing-local-before-write', localChange: false, pattern: /local change.*does not exist|missing local change/i },
+]) {
+  const invalidFixture = fixture(invalid.name, invalid);
+  const invalidResult = run(invalidFixture);
+  assert.notEqual(invalidResult.status, 0, invalid.name);
+  assert.match(invalidResult.stderr, invalid.pattern);
+  assert.doesNotMatch(fs.readFileSync(invalidFixture.log, 'utf8'), /api --method POST/, 'validation must stop before ref creation');
+}
+
+const changedAtFinalRead = fixture('changed-at-final-read', { failWrite: 'final-mapping-change' });
+const changedAtFinalResult = run(changedAtFinalRead);
+assert.notEqual(changedAtFinalResult.status, 0);
+assert.match(changedAtFinalResult.stderr, /mapping.*demo-change|maps to.*other-change/i);
 
 console.log('lite claim tests passed');

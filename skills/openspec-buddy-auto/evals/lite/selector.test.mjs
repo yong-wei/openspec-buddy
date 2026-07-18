@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -16,6 +17,13 @@ import {
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const selector = path.resolve(here, '../../scripts/lite/select-available-issue.mjs');
+
+const hashedIdentity = buildIdentity('codex', '', '/tmp/real-worktree');
+assert.deepEqual(hashedIdentity, {
+  agent: 'codex/codex',
+  viewer: 'codex',
+  worktree: `worktree-${createHash('sha256').update('/tmp/real-worktree').digest('hex').slice(0, 12)}`,
+});
 
 assert.equal(parseChangeMapping('<!-- openspec-buddy change_id: marker-change -->').changeId, 'marker-change');
 assert.equal(parseChangeMapping('<!-- openspec-buddy\nchange_id: hidden-change\n-->').changeId, 'hidden-change');
@@ -62,9 +70,10 @@ assert.equal(
 );
 assert.equal(
   classifyIssueClaim(
-    { labels: [{ name: 'status:claimed' }], assignees: [{ login: 'codex' }] },
-    [{ body: `OpenSpec Buddy Claim\nclaim_id: c1\nstate: active\nagent: @codex\nchange_id: demo\nworktree_alias: dev1` }],
+    { state: 'open', labels: [{ name: 'status:claimed' }], assignees: [{ login: 'codex' }] },
+    [{ body: `OpenSpec Buddy Claim\nissue: 1\nstate: active\nagent: @codex\nchange_id: demo\nbranch: demo\nworktree_alias: dev1` }],
     buildIdentity('codex', 'dev1'),
+    { branchExists: true, issue: 1, changeId: 'demo', branch: 'demo' },
   ),
   'current',
 );
@@ -86,13 +95,14 @@ function issue(number, changeId, { state = 'open', status = 'status:ready', body
   };
 }
 
-function makeFixture(name, { issues, comments = {}, blockedBy = {} }) {
+function makeFixture(name, { issues, comments = {}, blockedBy = {}, branches = [], alias = 'dev1' }) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `buddy-lite-${name}-`));
   const bin = path.join(root, 'bin');
   fs.mkdirSync(bin);
   fs.writeFileSync(path.join(root, 'issues.json'), JSON.stringify(issues));
   fs.writeFileSync(path.join(root, 'comments.json'), JSON.stringify(comments));
   fs.writeFileSync(path.join(root, 'blocked.json'), JSON.stringify(blockedBy));
+  fs.writeFileSync(path.join(root, 'branches.json'), JSON.stringify(branches));
   writeExecutable(path.join(bin, 'gh'), `#!/usr/bin/env node
 const fs = require('node:fs');
 const path = require('node:path');
@@ -106,6 +116,12 @@ if (args[0] === 'api' && String(args[1]).endsWith('/comments?per_page=100')) {
   const number = args[1].split('/').at(-2);
   const comments = JSON.parse(fs.readFileSync(path.join(root, 'comments.json')));
   return console.log(JSON.stringify(comments[number] || []));
+}
+if (args[0] === 'api' && String(args[1]).includes('/git/ref/heads/')) {
+  const branch = decodeURIComponent(args[1].split('/heads/').at(-1));
+  const branches = JSON.parse(fs.readFileSync(path.join(root, 'branches.json')));
+  if (!branches.includes(branch)) { console.error('HTTP 404: Not Found'); process.exit(1); }
+  return console.log(JSON.stringify({ ref: 'refs/heads/' + branch, object: { sha: '1111111111111111111111111111111111111111' } }));
 }
 if (args[0] === 'api' && args[1] === 'graphql') {
   const numberArg = args.find((value) => value.startsWith('number='));
@@ -126,7 +142,7 @@ process.exit(90);
 `);
   execFileSync('git', ['init', '-q'], { cwd: root });
   execFileSync('git', ['config', '--local', 'extensions.worktreeConfig', 'true'], { cwd: root });
-  execFileSync('git', ['config', '--worktree', 'buddy.worktreeAlias', 'dev1'], { cwd: root });
+  if (alias) execFileSync('git', ['config', '--worktree', 'buddy.worktreeAlias', alias], { cwd: root });
   return { root, bin };
 }
 
@@ -153,6 +169,17 @@ function runSelector(fixture, args = []) {
   assert.deepEqual(JSON.parse(result.stdout), {
     mode: 'lite', result: 'issue', issue: 11, change_id: 'earlier', url: 'https://example.test/issues/11',
   });
+}
+
+{
+  const fixture = makeFixture('duplicate-target-args', { issues: [issue(11, 'earlier')] });
+  addChange(fixture.root, 'earlier');
+  const duplicateIssue = runSelector(fixture, ['--issue', '11', '--issue', '11']);
+  assert.notEqual(duplicateIssue.status, 0);
+  assert.match(duplicateIssue.stderr, /--issue.*only once|duplicate --issue/i);
+  const duplicateChange = runSelector(fixture, ['--change', 'earlier', '--change', 'earlier']);
+  assert.notEqual(duplicateChange.status, 0);
+  assert.match(duplicateChange.stderr, /--change.*only once|duplicate --change/i);
 }
 
 {
@@ -237,10 +264,11 @@ function runSelector(fixture, args = []) {
 
 {
   const fixture = makeFixture('paginated-foreign-claim', {
-    issues: [issue(11, 'claimed')],
+    issues: [issue(11, 'claimed', { status: 'status:claimed', assignees: ['other'] })],
     comments: {
-      11: [[{ body: 'OpenSpec Buddy Claim\nclaim_id: c1\nstate: active\nagent: @other\nchange_id: claimed\nworktree_alias: dev2' }]],
+      11: [[{ body: 'OpenSpec Buddy Claim\nissue: 11\nstate: active\nagent: @other\nchange_id: claimed\nbranch: claimed\nworktree_alias: dev2' }]],
     },
+    branches: ['claimed'],
   });
   addChange(fixture.root, 'claimed');
   const result = runSelector(fixture, ['--issue', '11']);
@@ -281,24 +309,83 @@ function runSelector(fixture, args = []) {
 }
 
 {
-  const current = 'OpenSpec Buddy Claim\nclaim_id: current-1\nstate: active\nagent: @codex\nchange_id: current\nworktree_alias: dev1';
-  const foreign = 'OpenSpec Buddy Claim\nclaim_id: foreign-1\nstate: active\nagent: @other\nchange_id: foreign\nworktree_alias: dev2';
+  const current = 'OpenSpec Buddy Claim\nissue: 4\nstate: active\nagent: @codex\nchange_id: current\nbranch: current\nworktree_alias: dev1';
+  const foreign = 'OpenSpec Buddy Claim\nissue: 5\nstate: active\nagent: @other\nchange_id: foreign\nbranch: foreign\nworktree_alias: dev2';
   const fixture = makeFixture('skip-foreign-default', {
-    issues: [issue(4, 'current', { status: 'status:claimed', assignees: ['codex'] }), issue(5, 'foreign'), issue(10, 'available')],
+    issues: [issue(4, 'current', { status: 'status:claimed', assignees: ['codex'] }), issue(5, 'foreign', { status: 'status:claimed', assignees: ['other'] }), issue(10, 'available')],
     comments: { 4: [{ body: current }], 5: [{ body: foreign }] },
+    branches: ['current', 'foreign'],
   });
   addChange(fixture.root, 'current');
   addChange(fixture.root, 'foreign');
   addChange(fixture.root, 'available');
   const result = runSelector(fixture);
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(JSON.parse(result.stdout).issue, 10);
+  assert.equal(JSON.parse(result.stdout).issue, 4, 'untargeted auto must resume its complete current Claim');
   const explicit = runSelector(fixture, ['--issue', '5']);
   assert.notEqual(explicit.status, 0);
   assert.match(explicit.stderr, /foreign claim state/i);
   const explicitCurrent = runSelector(fixture, ['--issue', '4']);
   assert.equal(explicitCurrent.status, 0, explicitCurrent.stderr);
   assert.equal(JSON.parse(explicitCurrent.stdout).issue, 4);
+}
+
+{
+  const current = 'OpenSpec Buddy Claim\nissue: 20\nstate: active\nagent: @codex\nchange_id: current-later\nbranch: current-later\nworktree_alias: dev1';
+  const fixture = makeFixture('resume-current-before-smaller-ready', {
+    issues: [issue(10, 'available-first'), issue(20, 'current-later', { status: 'status:claimed', assignees: ['codex'] })],
+    comments: { 20: [{ body: current }] },
+    branches: ['current-later'],
+  });
+  addChange(fixture.root, 'available-first');
+  addChange(fixture.root, 'current-later');
+  const result = runSelector(fixture);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).issue, 20, 'an existing current Claim must win over taking any ready Issue');
+}
+
+
+{
+  const currentRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'identity-seed-'));
+  const realRoot = fs.realpathSync(currentRoot);
+  const worktree = `worktree-${createHash('sha256').update(realRoot).digest('hex').slice(0, 12)}`;
+  const current = `OpenSpec Buddy Claim\nissue: 4\nchange_id: current\nbranch: current\nagent: codex/codex\nworktree_alias: ${worktree}`;
+  const fixture = makeFixture('no-alias-current', {
+    issues: [issue(4, 'current', { status: 'status:claimed', assignees: ['codex'] }), issue(10, 'available')],
+    comments: { 4: [{ body: current }] },
+    branches: ['current'],
+    alias: '',
+  });
+  const fixtureRealRoot = fs.realpathSync(fixture.root);
+  const fixtureWorktree = `worktree-${createHash('sha256').update(fixtureRealRoot).digest('hex').slice(0, 12)}`;
+  const comments = JSON.parse(fs.readFileSync(path.join(fixture.root, 'comments.json')));
+  comments['4'][0].body = comments['4'][0].body.replace(worktree, fixtureWorktree);
+  fs.writeFileSync(path.join(fixture.root, 'comments.json'), JSON.stringify(comments));
+  addChange(fixture.root, 'current');
+  addChange(fixture.root, 'available');
+  const result = runSelector(fixture);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).issue, 4);
+}
+
+for (const scenario of [
+  { name: 'missing-branch', branches: [], assignees: ['codex'], statuses: ['status:claimed'] },
+  { name: 'extra-assignee', branches: ['claimed'], assignees: ['codex', 'other'], statuses: ['status:claimed'] },
+  { name: 'duplicate-status', branches: ['claimed'], assignees: ['codex'], statuses: ['status:claimed', 'status:ready'] },
+]) {
+  const current = 'OpenSpec Buddy Claim\nissue: 5\nchange_id: claimed\nbranch: claimed\nagent: codex/codex\nworktree_alias: dev1';
+  const claimedIssue = issue(5, 'claimed', { status: scenario.statuses[0], assignees: scenario.assignees });
+  claimedIssue.labels = scenario.statuses.map((name) => ({ name }));
+  const fixture = makeFixture(scenario.name, {
+    issues: [claimedIssue, issue(10, 'available')],
+    comments: { 5: [{ body: current }] },
+    branches: scenario.branches,
+  });
+  addChange(fixture.root, 'claimed');
+  addChange(fixture.root, 'available');
+  const result = runSelector(fixture);
+  assert.notEqual(result.status, 0, scenario.name);
+  assert.match(result.stderr, /partial claim state/i);
 }
 
 {
