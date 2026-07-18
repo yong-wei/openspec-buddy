@@ -39,12 +39,14 @@ export function parseLiteClaimComment(body) {
   const text = String(body || '');
   if (!/^OpenSpec Buddy Claim(?:\s|$)/m.test(text)) return null;
   const claim = {
+    issue: Number(field(text, 'issue')) || null,
     claimId: field(text, 'claim_id'),
     state: field(text, 'state') || 'active',
-    viewer: field(text, 'agent').replace(/^@/, ''),
+    viewer: field(text, 'agent').replace(/^@/, '').replace(/^codex\//, ''),
     changeId: field(text, 'change_id'),
     branch: field(text, 'branch'),
     worktree: field(text, 'worktree_alias'),
+    head: field(text, 'head'),
   };
   return claim;
 }
@@ -58,7 +60,7 @@ export function buildIdentity(viewer, worktree) {
 
 export function classifyClaim(claim, identity) {
   if (!claim || String(claim.state || 'active').toLowerCase() !== 'active') return 'unclaimed';
-  if (!claim.claimId || !claim.viewer || !claim.changeId || !claim.worktree) return 'partial';
+  if (!claim.viewer || !claim.changeId || (!claim.claimId && !claim.branch) || !claim.worktree) return 'partial';
   if (claim.viewer === identity?.viewer && claim.worktree === identity?.worktree) return 'current';
   return 'foreign';
 }
