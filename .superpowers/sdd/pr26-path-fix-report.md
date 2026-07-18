@@ -27,4 +27,14 @@
 
 ## Commit
 
-Pending at report creation; see final task response for the resulting commit.
+`ce0b92f6618ba11c770651e7f4dda214bfe0e3dc`
+
+## Incremental review fix
+
+### RED
+
+Added an assertion that the active stale-path scan contains both formal eval manifests. The smoke test failed with `skills/openspec-buddy/evals/evals.json must be included in the stale-path scan`, demonstrating that the extension filter excluded JSON manifests.
+
+### GREEN
+
+Added `.json` to the active file extension whitelist. Both `skills/openspec-buddy/evals/evals.json` and `skills/openspec-buddy-auto/evals/evals.json` are now asserted members of the scanned collection. Historical plans, release notes, and memory remain excluded by the existing tracked-path roots.

@@ -142,8 +142,15 @@ const trackedFiles = spawnSync('git', ['ls-files', 'README.md', 'bin', 'src', 't
   encoding: 'utf8',
 });
 assert.equal(trackedFiles.status, 0, trackedFiles.stderr);
-for (const relativePath of trackedFiles.stdout.trim().split('\n').filter(Boolean)) {
-  if (!/\.(?:md|mjs|js|sh)$/.test(relativePath)) continue;
+const activeFiles = trackedFiles.stdout.trim().split('\n').filter((relativePath) =>
+  /\.(?:md|mjs|js|sh|json)$/.test(relativePath));
+for (const evalsPath of [
+  'skills/openspec-buddy/evals/evals.json',
+  'skills/openspec-buddy-auto/evals/evals.json',
+]) {
+  assert.ok(activeFiles.includes(evalsPath), `${evalsPath} must be included in the stale-path scan`);
+}
+for (const relativePath of activeFiles) {
   const source = fs.readFileSync(path.join(repoRoot, relativePath), 'utf8');
   for (const filename of migratedInternalModules) {
     assert.doesNotMatch(
