@@ -46,7 +46,6 @@ export function parseLiteClaimComment(body) {
     changeId: field(text, 'change_id'),
     branch: field(text, 'branch'),
     worktree: field(text, 'worktree_alias'),
-    head: field(text, 'head'),
   };
   return claim;
 }

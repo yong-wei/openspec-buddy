@@ -43,6 +43,7 @@ worktree_alias: dev1`);
 assert.equal(claim.claimId, 'claim-1');
 assert.equal(claim.viewer, 'codex');
 assert.equal(claim.worktree, 'dev1');
+assert.equal(claim.head, undefined);
 assert.equal(classifyClaim(null, buildIdentity('codex', 'dev1')), 'unclaimed');
 assert.equal(classifyClaim(claim, buildIdentity('codex', 'dev1')), 'current');
 assert.equal(classifyClaim(claim, buildIdentity('other', 'dev1')), 'foreign');

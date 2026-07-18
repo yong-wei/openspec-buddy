@@ -48,11 +48,17 @@ function run(status) {
 const changed = run('claimed');
 assert.equal(changed.status, 0, changed.stderr || changed.error?.message || 'status helper failed');
 assert.deepEqual(JSON.parse(fs.readFileSync(state)), ['type:change', 'status:claimed']);
-assert.match(fs.readFileSync(log, 'utf8'), /--remove-label status:ready,status:blocked --add-label status:claimed/);
+assert.match(fs.readFileSync(log, 'utf8'), /issue edit 17 --remove-label status:ready,status:blocked\nissue edit 17 --add-label status:claimed/);
 
 const idempotent = run('claimed');
 assert.equal(idempotent.status, 0, idempotent.stderr);
-assert.equal(fs.readFileSync(log, 'utf8').split('\n').filter((line) => line.includes('issue edit')).length, 1);
+assert.equal(fs.readFileSync(log, 'utf8').split('\n').filter((line) => line.includes('issue edit')).length, 2);
+
+fs.writeFileSync(state, JSON.stringify(['status:claimed', 'status:blocked', 'type:change']));
+const targetAmongOldStatuses = run('claimed');
+assert.equal(targetAmongOldStatuses.status, 0, targetAmongOldStatuses.stderr);
+assert.deepEqual(JSON.parse(fs.readFileSync(state)), ['type:change', 'status:claimed']);
+assert.match(fs.readFileSync(log, 'utf8'), /issue edit 17 --remove-label status:claimed,status:blocked\nissue edit 17 --add-label status:claimed/);
 
 for (const allowed of ['ready', 'in-progress', 'in-review', 'archived', 'claimed']) {
   const result = run(allowed);

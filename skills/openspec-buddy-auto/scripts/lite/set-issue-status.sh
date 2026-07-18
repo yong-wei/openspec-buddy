@@ -23,14 +23,10 @@ process.stdout.write(labels.filter((name) => String(name || "").startsWith("stat
 
 existing="$(read_statuses)"
 if [[ "$existing" != "$target_status" ]]; then
-  args=(issue edit "$issue_number")
   if [[ -n "$existing" ]]; then
-    args+=(--remove-label "$existing")
+    gh issue edit "$issue_number" --remove-label "$existing"
   fi
-  if [[ ",${existing}," != *",${target_status},"* ]]; then
-    args+=(--add-label "$target_status")
-  fi
-  gh "${args[@]}"
+  gh issue edit "$issue_number" --add-label "$target_status"
 fi
 
 observed="$(read_statuses)"

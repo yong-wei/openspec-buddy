@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import { execFileSync, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -48,8 +50,7 @@ function classifyTruth(truth, expected) {
     && claim.branch === expected.changeId;
   const commentIsCurrent = commentMatchesTarget
     && claim.viewer === expected.viewer
-    && claim.worktree === expected.worktree
-    && Boolean(claim.head);
+    && claim.worktree === expected.worktree;
   const current = truth.branch
     && String(truth.issue?.state || '').toUpperCase() === 'OPEN'
     && statuses.length === 1
@@ -92,10 +93,23 @@ try {
   try {
     worktree = command('git', ['config', '--worktree', 'buddy.worktreeAlias']);
   } catch {
-    worktree = path.basename(command('git', ['rev-parse', '--show-toplevel']));
+    const root = fs.realpathSync(command('git', ['rev-parse', '--show-toplevel']));
+    worktree = `worktree-${createHash('sha256').update(root).digest('hex').slice(0, 12)}`;
   }
-  const head = command('git', ['rev-parse', '--short=12', 'HEAD']);
-  const expected = { issue: issueNumber, changeId, viewer, worktree, head };
+  let baseBranch = String(process.env.OPENSPEC_BUDDY_BASE_BRANCH || '').trim();
+  if (!baseBranch) {
+    try {
+      baseBranch = command('git', ['config', '--worktree', 'buddy.boundBase'])
+        .replace(/^refs\/remotes\/origin\//, '')
+        .replace(/^origin\//, '');
+    } catch {
+      // Report the missing configured base below.
+    }
+  }
+  if (!baseBranch || !/^[A-Za-z0-9](?:[A-Za-z0-9._/-]*[A-Za-z0-9])?$/.test(baseBranch) || baseBranch.includes('..')) {
+    throw new Error('A valid configured base branch is required for Lite Claim.');
+  }
+  const expected = { issue: issueNumber, changeId, viewer, worktree };
 
   function readTruth() {
     const issue = json('gh', ['api', `repos/${repo}/issues/${issueNumber}`]);
@@ -121,7 +135,14 @@ try {
       throw new Error(`${action} failed; complete Claim reread is ${recovered}.${detail ? ` ${detail}` : ''}`);
     };
 
-    recoverFailedWrite(attempt('git', ['push', 'origin', `HEAD:refs/heads/${changeId}`]), 'Claim branch creation');
+    const baseRef = json('gh', ['api', `repos/${repo}/git/ref/heads/${baseBranch}`]);
+    const baseSha = String(baseRef?.object?.sha || '');
+    if (!/^[0-9a-f]{40}$/i.test(baseSha)) throw new Error(`Could not resolve remote base branch ${baseBranch} SHA.`);
+    recoverFailedWrite(attempt('gh', [
+      'api', '--method', 'POST', `repos/${repo}/git/refs`,
+      '-f', `ref=refs/heads/${changeId}`,
+      '-f', `sha=${baseSha}`,
+    ]), 'Claim branch creation');
     recoverFailedWrite(attempt('gh', ['issue', 'edit', String(issueNumber), '--add-assignee', viewer]), 'Claim assignee write');
     const comment = [
       'OpenSpec Buddy Claim',
@@ -131,7 +152,6 @@ try {
       `branch: ${changeId}`,
       `agent: codex/${viewer}`,
       `worktree_alias: ${worktree}`,
-      `head: ${head}`,
     ].join('\n');
     recoverFailedWrite(attempt('gh', ['issue', 'comment', String(issueNumber), '--body', comment]), 'Claim comment write');
     recoverFailedWrite(attempt(statusHelper, [String(issueNumber), 'claimed']), 'Claim status write');
