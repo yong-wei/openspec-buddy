@@ -137,7 +137,11 @@ function mappingFor(issue) {
   return mapping.changeId;
 }
 
-function validateIssue(issue, context, { excludeOwnedClaims = false, classifyOnly = false } = {}) {
+function validateIssue(issue, context, {
+  excludeOwnedClaims = false,
+  classifyOnly = false,
+  deferCurrentLocalError = false,
+} = {}) {
   if (!issue) fail('Target issue was not found.');
   const changeId = mappingFor(issue);
 
@@ -154,8 +158,9 @@ function validateIssue(issue, context, { excludeOwnedClaims = false, classifyOnl
   );
   if (claimClass === 'foreign' && excludeOwnedClaims) return { excluded: true };
   if (claimClass === 'current') {
-    if (!localDeliveryExists(context.worktreeRoot, changeId)) fail(`Local change ${changeId} does not exist in active or dated archive paths.`);
-    return { current: true, result: resultFor(issue, changeId) };
+    const localMissing = !localDeliveryExists(context.worktreeRoot, changeId);
+    if (localMissing && !deferCurrentLocalError) fail(`Local change ${changeId} does not exist in active or dated archive paths.`);
+    return { current: true, localMissing, result: resultFor(issue, changeId) };
   }
   if (claimClass !== 'unclaimed') {
     fail(`Issue #${issue.number} has ${claimClass} claim state: ${summarizeIssueClaim(issue, comments, hasBranch)}`);
@@ -240,12 +245,23 @@ try {
       ))
       .sort((left, right) => Number(left.number) - Number(right.number));
     let selected = null;
+    let selectedLocalMissing = false;
     for (const issue of candidates) {
-      const checked = validateIssue(issue, context, { excludeOwnedClaims: true, classifyOnly: true });
+      const checked = validateIssue(issue, context, {
+        excludeOwnedClaims: true,
+        classifyOnly: true,
+        deferCurrentLocalError: true,
+      });
       if (checked.excluded) continue;
       if (checked.current) {
-        selected ||= checked.result;
+        if (!selected) {
+          selected = checked.result;
+          selectedLocalMissing = checked.localMissing;
+        }
       }
+    }
+    if (selectedLocalMissing) {
+      fail(`Local change ${selected.change_id} does not exist in active or dated archive paths.`);
     }
 
     let firstBlocked = '';
