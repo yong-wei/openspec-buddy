@@ -80,6 +80,14 @@ const conflicting = run(['--issue', '17', '--change', 'demo-change']);
 assert.notEqual(conflicting.status, 0);
 assert.match(conflicting.stderr, /mutually exclusive/i);
 
+const missingIssueValue = run(['--issue', '--no-pr']);
+assert.notEqual(missingIssueValue.status, 0);
+assert.match(missingIssueValue.stderr, /--issue requires a value/i);
+
+const missingChangeValue = run(['--change', '--no-pr']);
+assert.notEqual(missingChangeValue.status, 0);
+assert.match(missingChangeValue.stderr, /--change requires a value/i);
+
 const issueNoPr = run(['--issue', '17', '--no-pr']);
 assert.notEqual(issueNoPr.status, 0);
 assert.match(issueNoPr.stderr, /--no-pr.*local-only/i);

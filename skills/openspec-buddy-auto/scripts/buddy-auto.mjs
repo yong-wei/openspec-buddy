@@ -27,7 +27,10 @@ function parseLiteArgs(argv) {
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === '--issue' || arg === '--change') {
-      selectorArgs.push(arg, argv[++index] || '');
+      const value = argv[index + 1];
+      if (!value || value.startsWith('--')) throw new Error(`${arg} requires a value.`);
+      selectorArgs.push(arg, value);
+      index += 1;
     } else if (arg === '--no-pr') {
       noPr = true;
     } else {
