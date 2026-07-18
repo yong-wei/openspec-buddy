@@ -606,7 +606,7 @@ function recoverUnauthorizedMergeLanes(state) {
   if (!controllerChildMode()) {
     emitBlocked([
       ['stage', 'unauthorized-merge-recovery'],
-      ['reason', 'Unauthorized merge recovery is controller-owned; rerun through buddy-auto.mjs.'],
+      ['reason', 'Unauthorized merge recovery is controller-owned; rerun through buddy-auto.mjs full.'],
     ]);
     return true;
   }
@@ -2510,7 +2510,7 @@ function main() {
   if (!controllerChildMode()) {
     emitBlocked([
       ['stage', 'controller-owned'],
-      ['reason', 'Buddy Auto child drivers are internal. Run buddy-auto.mjs instead.'],
+      ['reason', 'Buddy Auto child drivers are internal. Run buddy-auto.mjs full instead.'],
     ]);
     return;
   }

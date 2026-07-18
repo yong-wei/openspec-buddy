@@ -388,6 +388,60 @@ for (const scenario of [
   assert.match(result.stderr, /partial claim state/i);
 }
 
+for (const activeStatus of ['status:claimed', 'status:in-progress', 'status:in-review']) {
+  const suffix = activeStatus.slice('status:'.length);
+  const currentComment = `OpenSpec Buddy Claim\nissue: 20\nstate: active\nagent: codex/codex\nchange_id: current-${suffix}\nbranch: current-${suffix}\nworktree_alias: dev1`;
+  const currentFixture = makeFixture(`current-${suffix}`, {
+    issues: [
+      issue(10, `ready-${suffix}`),
+      issue(20, `current-${suffix}`, { status: activeStatus, assignees: ['codex'] }),
+    ],
+    comments: { 20: [{ body: currentComment }] },
+    branches: [`current-${suffix}`],
+  });
+  addChange(currentFixture.root, `ready-${suffix}`);
+  addChange(currentFixture.root, `current-${suffix}`);
+  const untargetedCurrent = runSelector(currentFixture);
+  assert.equal(untargetedCurrent.status, 0, untargetedCurrent.stderr);
+  assert.equal(JSON.parse(untargetedCurrent.stdout).issue, 20,
+    `${activeStatus} current Claim must take priority over ready work`);
+  const explicitCurrent = runSelector(currentFixture, ['--issue', '20']);
+  assert.equal(explicitCurrent.status, 0, explicitCurrent.stderr);
+  assert.equal(JSON.parse(explicitCurrent.stdout).issue, 20);
+
+  const foreignComment = `OpenSpec Buddy Claim\nissue: 20\nstate: active\nagent: codex/other\nchange_id: foreign-${suffix}\nbranch: foreign-${suffix}\nworktree_alias: dev2`;
+  const foreignFixture = makeFixture(`foreign-${suffix}`, {
+    issues: [
+      issue(10, `ready-${suffix}`),
+      issue(20, `foreign-${suffix}`, { status: activeStatus, assignees: ['other'] }),
+    ],
+    comments: { 20: [{ body: foreignComment }] },
+    branches: [`foreign-${suffix}`],
+  });
+  addChange(foreignFixture.root, `ready-${suffix}`);
+  addChange(foreignFixture.root, `foreign-${suffix}`);
+  const untargetedForeign = runSelector(foreignFixture);
+  assert.equal(untargetedForeign.status, 0, untargetedForeign.stderr);
+  assert.equal(JSON.parse(untargetedForeign.stdout).issue, 10,
+    `${activeStatus} foreign Claim must be skipped in untargeted selection`);
+  const explicitForeign = runSelector(foreignFixture, ['--issue', '20']);
+  assert.notEqual(explicitForeign.status, 0);
+  assert.match(explicitForeign.stderr, /foreign claim state/i);
+}
+
+{
+  const foreignComment = 'OpenSpec Buddy Claim\nissue: 20\nstate: active\nagent: codex/other\nchange_id: foreign-only\nbranch: foreign-only\nworktree_alias: dev2';
+  const fixture = makeFixture('foreign-exhausted', {
+    issues: [issue(20, 'foreign-only', { status: 'status:in-review', assignees: ['other'] })],
+    comments: { 20: [{ body: foreignComment }] },
+    branches: ['foreign-only'],
+  });
+  addChange(fixture.root, 'foreign-only');
+  const result = runSelector(fixture);
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), { mode: 'lite', result: 'exhausted' });
+}
+
 {
   const fixture = makeFixture('partial-still-blocks-default', {
     issues: [issue(5, 'partial', { status: 'status:claimed' }), issue(10, 'available')],

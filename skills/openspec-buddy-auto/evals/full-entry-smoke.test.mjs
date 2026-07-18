@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const entry = path.resolve(here, '../scripts/buddy-auto.mjs');
 const fullController = path.resolve(here, '../scripts/full/buddy-auto.mjs');
+const fullDir = path.dirname(fullController);
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'buddy-full-entry-'));
 const bin = path.join(root, 'bin');
 const repo = path.join(root, 'repo');
@@ -125,10 +126,12 @@ assert.equal(reset.status, 0, reset.stderr);
 assert.match(reset.stdout, /^DONE\nstage: reset-controller-state/m);
 assertPublicFullCommand(reset, 'reset');
 
-const fullSource = fs.readFileSync(fullController, 'utf8');
-for (const literal of fullSource.matchAll(/(['"`])([^'"`]*buddy-auto\.mjs[^'"`]*)\1/g)) {
-  assert.doesNotMatch(literal[2], /buddy-auto\.mjs(?! full)(?:\s|$)/,
-    `full user-facing command must include full: ${literal[2]}`);
+for (const filename of fs.readdirSync(fullDir).filter((name) => name.endsWith('.mjs'))) {
+  const fullSource = fs.readFileSync(path.join(fullDir, filename), 'utf8');
+  for (const literal of fullSource.matchAll(/(['"`])([^'"`]*buddy-auto\.mjs[^'"`]*)\1/g)) {
+    assert.doesNotMatch(literal[2], /buddy-auto\.mjs(?! full)(?:\s|$)/,
+      `${filename} user-facing command must include full: ${literal[2]}`);
+  }
 }
 
 console.log('full public entry smoke tests passed');

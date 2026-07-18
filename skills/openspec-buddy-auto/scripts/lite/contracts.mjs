@@ -1,5 +1,11 @@
 import { createHash } from 'node:crypto';
 
+export const ACTIVE_CLAIM_STATUSES = Object.freeze([
+  'status:claimed',
+  'status:in-progress',
+  'status:in-review',
+]);
+
 function scalar(value) {
   const text = String(value ?? '').trim();
   if ((text.startsWith('"') && text.endsWith('"')) || (text.startsWith("'") && text.endsWith("'"))) {
@@ -94,7 +100,7 @@ export function classifyIssueClaim(issue, comments, identity, expected = {}) {
   const complete = branchExists
     && String(issue?.state || '').toUpperCase() === 'OPEN'
     && statuses.length === 1
-    && statuses[0] === 'status:claimed'
+    && ACTIVE_CLAIM_STATUSES.includes(statuses[0])
     && assignees.length === 1
     && targetMatches
     && claim.state === 'active'

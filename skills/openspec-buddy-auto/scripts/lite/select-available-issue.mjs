@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import {
+  ACTIVE_CLAIM_STATUSES,
   buildIdentity,
   classifyIssueClaim,
   parseChangeMapping,
@@ -194,7 +195,10 @@ try {
     process.stdout.write(`${JSON.stringify(checked.result)}\n`);
   } else {
     const ready = issues
-      .filter((issue) => isReady(issue) || (String(issue.state || '').toUpperCase() === 'OPEN' && labels(issue).includes('status:claimed')))
+      .filter((issue) => isReady(issue) || (
+        String(issue.state || '').toUpperCase() === 'OPEN'
+        && labels(issue).some((label) => ACTIVE_CLAIM_STATUSES.includes(label))
+      ))
       .sort((left, right) => Number(left.number) - Number(right.number));
     let firstBlocked = '';
     let selected = null;
