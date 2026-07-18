@@ -135,11 +135,15 @@ assert.doesNotMatch(
 );
 assert.ok(
   autoEvals.evals.some(({ expected_output: output }) =>
-    /approved testing seam/i.test(output)
-    && /never restarts product-level seam selection/i.test(output)
-    && /provider availability/i.test(output)
-    && /receipts/i.test(output)),
-  'Auto eval contract must preserve approved seam selection and provider-neutral receipts',
+    /默认 lite/i.test(output)
+    && /不使用 Project、lane、cache、receipt 或 controller/i.test(output)),
+  'Auto eval contract must keep lite as the default without full orchestration state',
+);
+assert.ok(
+  autoEvals.evals.some(({ expected_output: output }) =>
+    /scripts\/buddy-auto\.mjs full/i.test(output)
+    && /不得直接调用 scripts\/full 内部模块/i.test(output)),
+  'Auto eval contract must route explicit full mode through the public entrypoint',
 );
 
 assert.match(
@@ -149,8 +153,8 @@ assert.match(
 );
 assert.match(
   buddyAutoSkill,
-  /EVERY OPENSPEC-BUDDY-AUTO STEP MUST START BY RUNNING THE AUTO CONTROLLER/i,
-  'openspec-buddy-auto SKILL.md must focus agents on the auto controller entrypoint',
+  /`scripts\/buddy-auto\.mjs` default 行为是 lite/i,
+  'openspec-buddy-auto SKILL.md must define the public entrypoint as lite by default',
 );
 
 assert.match(
@@ -252,8 +256,8 @@ assert.match(
 );
 assert.match(
   buddyAutoSkill,
-  /review-fix commits pass independent review/i,
-  'core apply must require independent AC review before the first implementation commit',
+  /完成 change 中全部任务和相关测试[\s\S]*检查完整 diff[\s\S]*Local Review/i,
+  'lite apply must require related tests and a complete-diff Local Review',
 );
 assert.match(
   autoDriverStates,
@@ -263,18 +267,18 @@ assert.match(
 
 assert.match(
   buddyAutoSkill,
-  /review-fix commits pass independent review/i,
-  'auto must forbid implementation threads from checking AC items themselves',
+  /feedback 需要代码变化[\s\S]*相关测试和 Local Review[\s\S]*提交并推送[\s\S]*new head[\s\S]*Review Request/i,
+  'lite feedback fixes must be tested, reviewed, pushed, and re-requested on the new head',
 );
 assert.match(
   buddyAutoSkill,
-  /These files do not replace GitHub truth/i,
-  'auto must require implementation threads to propose AC satisfaction with evidence',
+  /latest head 之后存在明确的 Clearance Comment[\s\S]*没有 unresolved review thread[\s\S]*CI 成功或仓库经核实确实没有 CI/i,
+  'lite merge must require current-head clearance, clear threads, and CI truth',
 );
 assert.match(
   buddyAutoSkill,
-  /buddy-auto\.mjs/,
-  'auto review-fix gate must route through the controller entrypoint',
+  /scripts\/buddy-auto\.mjs full[\s\S]*不得直接调用 `scripts\/full\/` 内部模块/i,
+  'explicit full mode must route through the public entrypoint',
 );
 assert.match(
   executionLoop,
