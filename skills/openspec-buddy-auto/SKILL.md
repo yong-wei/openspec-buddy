@@ -95,7 +95,9 @@ Issue-backed PR 合并成功后，依次完成：
 
 ## Local-only `--no-pr`
 
-`--no-pr` 只允许显式指定且没有任何映射 Issue 的 Local-only change。该路径没有 PR、Codex review、PR thread、PR CI 或 Issue 收尾，但必须在实现分支上完成相关测试、完整 diff Local Review、strict validate、标准 archive、commit 和 push。
+`--no-pr` is valid only for a selected local-only change created through `openspec-buddy propose --no-issue`. Do not create GitHub issue, PR, Project, review, or achievement state.
+
+该路径只允许显式指定且没有任何映射 Issue 的 Local-only change，但必须在实现分支上完成相关测试、完整 diff Local Review、strict validate、标准 archive、commit 和 push。
 
 直接集成前重读远端 base branch。只有远端 base 仍是实现分支祖先时才允许 fast-forward；若基线已前进，先更新实现分支、处理冲突、重新测试并重新完成 Local Review，再推送并重试。禁止 force push。结束前核验远端 base 已包含实现提交和 archive。
 

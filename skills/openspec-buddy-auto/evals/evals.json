@@ -22,7 +22,7 @@
     {
       "id": 4,
       "prompt": "使用 openspec-buddy-auto --change local-change --no-pr 处理一个没有映射 Issue 的本地 change。",
-      "expected_output": "调用 lite 入口确认该 change 完全没有映射 Issue，并提醒用户它尚未登记 Issue。完成相关测试、完整 diff Local Review、strict validate、标准 archive、提交和实现分支推送；实现、测试、主 specs 与 archive 同一交付单元。只在远端 base 仍是实现分支祖先时 fast-forward，基线前进则同步后重新测试与审核；禁止 force push，并核验远端集成结果。",
+      "expected_output": "该 change 必须由 `openspec-buddy propose --no-issue` 创建。调用 lite 入口确认它完全没有映射 Issue，并提醒用户它尚未登记 Issue。不创建 GitHub Issue，也不创建 PR、Project、review 或 achievement state。完成相关测试、完整 diff Local Review、strict validate、标准 archive、提交和实现分支推送；实现、测试、主 specs 与 archive 同一交付单元。只在远端 base 仍是实现分支祖先时 fast-forward，基线前进则同步后重新测试与审核；禁止 force push，并核验远端集成结果。",
       "files": []
     },
     {

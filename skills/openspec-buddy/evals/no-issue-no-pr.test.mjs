@@ -50,20 +50,14 @@ assert.match(
 );
 assert.match(
   autoSkill,
-  /EVERY OPENSPEC-BUDDY-AUTO STEP MUST START BY RUNNING THE AUTO CONTROLLER/i,
-  "openspec-buddy-auto must select local-only changes before any claim step",
+  /`scripts\/buddy-auto\.mjs` default[^]*?`local_only`/i,
+  "openspec-buddy-auto must select local-only changes through the public lite entry",
 );
 assert.match(
   autoSkill,
-  /Forbidden Manual Substitutes[\s\S]*direct deterministic helper invocation during normal auto flow/i,
-  "openspec-buddy-auto --no-pr mode must explicitly skip PR and issue helpers",
+  /不得直接调用 `scripts\/full\/` 内部模块/i,
+  "openspec-buddy-auto must forbid direct full-module invocation",
 );
-assert.match(
-  autoSkill,
-  /`--no-pr` is valid only for a selected local-only change created through\s+`openspec-buddy propose --no-issue`/i,
-  "openspec-buddy-auto must limit --no-pr to local-only changes",
-);
-
 const buddyEvals = JSON.parse(read("skills/openspec-buddy/evals/evals.json"));
 const noIssueEval = buddyEvals.evals.find((item) => item.prompt.includes("--no-issue"));
 assert.ok(noIssueEval, "openspec-buddy evals must include a --no-issue propose case");
@@ -78,8 +72,13 @@ const noPrEval = autoEvals.evals.find((item) => item.prompt.includes("--no-pr"))
 assert.ok(noPrEval, "openspec-buddy-auto evals must include a --no-pr case");
 assert.match(
   noPrEval.expected_output,
-  /不开 PR|不打开 PR|不创建 PR/,
-  "openspec-buddy-auto --no-pr eval must require local review-and-merge behavior",
+  /由 `openspec-buddy propose --no-issue` 创建/,
+  "openspec-buddy-auto --no-pr eval must require the no-issue propose origin",
+);
+assert.match(
+  noPrEval.expected_output,
+  /不创建 GitHub Issue[^。]*不创建 PR、Project、review 或 achievement state/i,
+  "openspec-buddy-auto --no-pr eval must prohibit all remote workflow state",
 );
 
 const readme = read("README.md");
