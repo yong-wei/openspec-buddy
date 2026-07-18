@@ -404,6 +404,55 @@ function runSelector(fixture, args = []) {
 }
 
 {
+  const current = 'OpenSpec Buddy Claim\nissue: 20\nstate: active\nagent: @codex\nchange_id: archived-current\nbranch: archived-current\nworktree_alias: dev1';
+  const fixture = makeFixture('archived-current-missing-local-change', {
+    issues: [
+      issue(10, 'missing-ready'),
+      issue(20, 'archived-current', { status: 'status:in-review', assignees: ['codex'] }),
+    ],
+    comments: { 20: [{ body: current }] },
+    branches: ['archived-current'],
+  });
+  const untargeted = runSelector(fixture);
+  assert.equal(untargeted.status, 0, untargeted.stderr);
+  assert.equal(JSON.parse(untargeted.stdout).issue, 20,
+    'an archived current Claim must win over a smaller ready Issue with no active change directory');
+  const explicit = runSelector(fixture, ['--issue', '20']);
+  assert.equal(explicit.status, 0, explicit.stderr);
+  assert.equal(JSON.parse(explicit.stdout).issue, 20);
+}
+
+{
+  const fixture = makeFixture('ready-missing-local-change', {
+    issues: [issue(10, 'missing-ready')],
+  });
+  const result = runSelector(fixture, ['--issue', '10']);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /missing local change/i);
+}
+
+{
+  const foreign = 'OpenSpec Buddy Claim\nissue: 5\nstate: active\nagent: @other\nchange_id: archived-foreign\nbranch: archived-foreign\nworktree_alias: dev2';
+  const fixture = makeFixture('foreign-missing-local-change', {
+    issues: [
+      issue(5, 'archived-foreign', { status: 'status:in-review', assignees: ['other'] }),
+      issue(10, 'available'),
+    ],
+    comments: { 5: [{ body: foreign }] },
+    branches: ['archived-foreign'],
+  });
+  addChange(fixture.root, 'available');
+  const untargeted = runSelector(fixture);
+  assert.equal(untargeted.status, 0, untargeted.stderr);
+  assert.equal(JSON.parse(untargeted.stdout).issue, 10,
+    'an archived foreign Claim must remain excluded rather than becoming selectable');
+  const explicit = runSelector(fixture, ['--issue', '5']);
+  assert.notEqual(explicit.status, 0);
+  assert.match(explicit.stderr, /foreign claim state/i);
+  assert.doesNotMatch(explicit.stderr, /missing local change/i);
+}
+
+{
   const current = 'OpenSpec Buddy Claim\nissue: 20\nstate: active\nagent: @codex\nchange_id: current-later\nbranch: current-later\nworktree_alias: dev1';
   const fixture = makeFixture('resume-current-before-smaller-ready', {
     issues: [issue(10, 'available-first'), issue(20, 'current-later', { status: 'status:claimed', assignees: ['codex'] })],
@@ -519,11 +568,43 @@ for (const activeStatus of ['status:claimed', 'status:in-progress', 'status:in-r
   const fixture = makeFixture('partial-still-blocks-default', {
     issues: [issue(5, 'partial', { status: 'status:claimed' }), issue(10, 'available')],
   });
-  addChange(fixture.root, 'partial');
   addChange(fixture.root, 'available');
   const result = runSelector(fixture);
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /partial claim state/i);
+  assert.doesNotMatch(result.stderr, /missing local change/i);
+}
+
+{
+  const current = 'OpenSpec Buddy Claim\nissue: 5\nstate: active\nagent: @codex\nchange_id: archived-current\nbranch: archived-current\nworktree_alias: dev1';
+  const fixture = makeFixture('later-partial-still-blocks-current', {
+    issues: [
+      issue(5, 'archived-current', { status: 'status:in-review', assignees: ['codex'] }),
+      issue(20, 'partial', { status: 'status:claimed' }),
+    ],
+    comments: { 5: [{ body: current }] },
+    branches: ['archived-current'],
+  });
+  const result = runSelector(fixture);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /partial claim state/i,
+    'a smaller current Claim must not hide a later partial Claim');
+}
+
+{
+  const current = 'OpenSpec Buddy Claim\nissue: 5\nstate: active\nagent: @codex\nchange_id: archived-current\nbranch: archived-current\nworktree_alias: dev1';
+  const fixture = makeFixture('ready-partial-still-blocks-current', {
+    issues: [
+      issue(5, 'archived-current', { status: 'status:in-review', assignees: ['codex'] }),
+      issue(20, 'dirty-ready', { assignees: ['other'] }),
+    ],
+    comments: { 5: [{ body: current }] },
+    branches: ['archived-current'],
+  });
+  const result = runSelector(fixture);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /partial claim state/i,
+    'a current Claim must not hide a ready-labeled partial Claim');
 }
 
 console.log('lite selector tests passed');

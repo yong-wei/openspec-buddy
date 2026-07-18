@@ -115,10 +115,9 @@ function mappingFor(issue) {
   return mapping.changeId;
 }
 
-function validateIssue(issue, context, { excludeOwnedClaims = false } = {}) {
+function validateIssue(issue, context, { excludeOwnedClaims = false, classifyOnly = false } = {}) {
   if (!issue) fail('Target issue was not found.');
   const changeId = mappingFor(issue);
-  if (!localChangeExists(changeId)) fail(`Ready issue #${issue.number} maps to missing local change ${changeId}.`);
 
   const duplicates = context.allMappings.get(changeId) || [];
   if (duplicates.length > 1) fail(`Change ${changeId} has duplicate issue mappings: ${duplicates.map((item) => `#${item.number}`).join(', ')}.`);
@@ -134,7 +133,9 @@ function validateIssue(issue, context, { excludeOwnedClaims = false } = {}) {
   if (claimClass !== 'unclaimed') {
     fail(`Issue #${issue.number} has ${claimClass} claim state.`);
   }
+  if (classifyOnly) return { unclaimed: true };
   if (!isReady(issue)) fail(`Issue #${issue.number} is not an open status:ready issue.`);
+  if (!localChangeExists(changeId)) fail(`Ready issue #${issue.number} maps to missing local change ${changeId}.`);
 
   const openBlockers = blockersFor(context.repo, Number(issue.number))
     .filter((blocker) => String(blocker.state || '').toUpperCase() === 'OPEN');
@@ -194,21 +195,27 @@ try {
     if (checked.blocked) fail(checked.blocked);
     process.stdout.write(`${JSON.stringify(checked.result)}\n`);
   } else {
-    const ready = issues
+    const candidates = issues
       .filter((issue) => isReady(issue) || (
         String(issue.state || '').toUpperCase() === 'OPEN'
         && labels(issue).some((label) => ACTIVE_CLAIM_STATUSES.includes(label))
       ))
       .sort((left, right) => Number(left.number) - Number(right.number));
-    let firstBlocked = '';
     let selected = null;
-    for (const issue of ready) {
-      const checked = validateIssue(issue, context, { excludeOwnedClaims: true });
+    for (const issue of candidates) {
+      const checked = validateIssue(issue, context, { excludeOwnedClaims: true, classifyOnly: true });
       if (checked.excluded) continue;
       if (checked.current) {
-        selected = checked.result;
-        break;
+        selected ||= checked.result;
       }
+    }
+
+    let firstBlocked = '';
+    const ready = issues
+      .filter(isReady)
+      .sort((left, right) => Number(left.number) - Number(right.number));
+    for (const issue of selected ? [] : ready) {
+      const checked = validateIssue(issue, context);
       if (checked.blocked) {
         firstBlocked ||= checked.blocked;
         continue;

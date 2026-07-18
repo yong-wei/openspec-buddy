@@ -125,15 +125,17 @@ try {
     if (mapping.conflict || mapping.changeId !== changeId || mapping.sources.length !== 1) {
       throw new Error(`Issue #${issueNumber} mapping must uniquely remain ${changeId}; observed ${mapping.changeId || 'none'}.`);
     }
-    if (!fs.statSync(path.join(worktreeRoot, 'openspec', 'changes', changeId), { throwIfNoEntry: false })?.isDirectory()) {
-      throw new Error(`Local change ${changeId} does not exist.`);
-    }
-    return classifyIssueClaim(truth.issue, truth.comments, identity, {
+    const claimClass = classifyIssueClaim(truth.issue, truth.comments, identity, {
       branchExists: truth.branch,
       issue: issueNumber,
       changeId,
       branch: changeId,
     });
+    if (claimClass === 'unclaimed'
+      && !fs.statSync(path.join(worktreeRoot, 'openspec', 'changes', changeId), { throwIfNoEntry: false })?.isDirectory()) {
+      throw new Error(`Local change ${changeId} does not exist.`);
+    }
+    return claimClass;
   }
 
   const initial = classifyTruth(readTruth());

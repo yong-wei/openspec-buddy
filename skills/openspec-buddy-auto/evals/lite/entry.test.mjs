@@ -42,13 +42,17 @@ if (args[0] === 'repo' && args[1] === 'view') return console.log(JSON.stringify(
 if (args[0] === 'api' && args[1] === 'user') return console.log(JSON.stringify({ login: 'alice' }));
 if (args[0] === 'api' && String(args[1]).includes('/issues?')) return console.log(JSON.stringify(state.issues));
 if (args[0] === 'api' && args[1] === 'graphql') return console.log(JSON.stringify({ data: { repository: { issue: { blockedBy: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } } } } } }));
-if (args[0] === 'api' && String(args[1]).endsWith('/issues/17/comments?per_page=100')) return console.log(JSON.stringify(state.comments));
+if (args[0] === 'api' && String(args[1]).includes('/comments?per_page=100')) {
+  const number = Number(args[1].split('/').at(-2));
+  return console.log(JSON.stringify(number === 17 ? state.comments : []));
+}
 if (args[0] === 'api' && args[1] === 'repos/acme/repo/issues/17') return console.log(JSON.stringify(state.issues.find((issue) => issue.number === 17)));
 if (args[0] === 'api' && args[1] === 'repos/acme/repo/git/ref/heads/demo-change') {
   if (!state.branch) { console.error('HTTP 404: Not Found'); process.exit(1); }
   return console.log(JSON.stringify({ object: { sha: '1111111111111111111111111111111111111111' } }));
 }
 if (args[0] === 'api' && args[1] === 'repos/acme/repo/git/ref/heads/integration') return console.log(JSON.stringify({ object: { sha: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' } }));
+if (args[0] === 'api' && String(args[1]).includes('/git/ref/heads/')) { console.error('HTTP 404: Not Found'); process.exit(1); }
 if (args[0] === 'api' && args[1] === '--method' && args[2] === 'POST') { state.branch = true; save(); return console.log('{}'); }
 if (args[0] === 'issue' && args[1] === 'edit' && args.includes('--add-assignee')) {
   const issue = state.issues.find((item) => item.number === 17); issue.assignees = [{ login: args[args.indexOf('--add-assignee') + 1] }]; save(); return;
@@ -128,6 +132,17 @@ assert.deepEqual(JSON.parse(claimed.stdout), {
 const current = run(['--issue', '17']);
 assert.equal(current.status, 0, current.stderr);
 assert.equal(JSON.parse(current.stdout).result, 'current_claim');
+
+const archivedCurrentState = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+archivedCurrentState.issues.find((issue) => issue.number === 17).labels = [{ name: 'status:in-review' }];
+fs.writeFileSync(stateFile, JSON.stringify(archivedCurrentState));
+fs.rmSync(path.join(root, 'openspec/changes/demo-change'), { recursive: true });
+const archivedCurrentExplicit = run(['--issue', '17']);
+assert.equal(archivedCurrentExplicit.status, 0, archivedCurrentExplicit.stderr);
+assert.equal(JSON.parse(archivedCurrentExplicit.stdout).result, 'current_claim');
+const archivedCurrentUntargeted = run([]);
+assert.equal(archivedCurrentUntargeted.status, 0, archivedCurrentUntargeted.stderr);
+assert.equal(JSON.parse(archivedCurrentUntargeted.stdout).result, 'current_claim');
 
 const localOnly = run(['--change', 'local-change', '--no-pr']);
 assert.equal(localOnly.status, 0, localOnly.stderr);
