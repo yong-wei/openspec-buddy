@@ -138,15 +138,15 @@ assert.equal(fs.readFileSync(item.log, 'utf8').split('\n').filter((line) => /api
 fs.mkdirSync(path.join(item.root, 'openspec/changes/archive'), { recursive: true });
 fs.renameSync(
   path.join(item.root, 'openspec/changes/demo-change'),
-  path.join(item.root, 'openspec/changes/archive/demo-change'),
+  path.join(item.root, 'openspec/changes/archive/2026-07-18-demo-change'),
 );
 const archivedCurrent = run(item);
 assert.equal(archivedCurrent.status, 0, archivedCurrent.stderr);
 assert.equal(JSON.parse(archivedCurrent.stdout).result, 'current_claim');
-fs.rmSync(path.join(item.root, 'openspec/changes/archive/demo-change'), { recursive: true });
+fs.rmSync(path.join(item.root, 'openspec/changes/archive/2026-07-18-demo-change'), { recursive: true });
 const missingCurrent = run(item);
 assert.notEqual(missingCurrent.status, 0);
-assert.match(missingCurrent.stderr, /does not exist in active or archive paths/i);
+assert.match(missingCurrent.stderr, /does not exist in active or dated archive paths/i);
 fs.mkdirSync(path.join(item.root, 'openspec/changes/demo-change'), { recursive: true });
 
 for (const branchResponse of ['prefix-array', 'mismatching-object']) {

@@ -459,8 +459,8 @@ for (const [name, body] of [
   });
   const missing = runSelector(fixture, ['--issue', '20']);
   assert.notEqual(missing.status, 0);
-  assert.match(missing.stderr, /active or archive paths/i);
-  fs.mkdirSync(path.join(fixture.root, 'openspec', 'changes', 'archive', 'archived-current'), { recursive: true });
+  assert.match(missing.stderr, /active or dated archive paths/i);
+  fs.mkdirSync(path.join(fixture.root, 'openspec', 'changes', 'archive', '2026-07-18-archived-current'), { recursive: true });
   const untargeted = runSelector(fixture);
   assert.equal(untargeted.status, 0, untargeted.stderr);
   assert.equal(JSON.parse(untargeted.stdout).issue, 20,

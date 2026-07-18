@@ -1,10 +1,24 @@
 import { createHash } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 
 export const ACTIVE_CLAIM_STATUSES = Object.freeze([
   'status:claimed',
   'status:in-progress',
   'status:in-review',
 ]);
+
+export function localDeliveryExists(worktreeRoot, changeId) {
+  if (fs.statSync(path.join(worktreeRoot, 'openspec', 'changes', changeId), { throwIfNoEntry: false })?.isDirectory()) {
+    return true;
+  }
+  const archiveRoot = path.join(worktreeRoot, 'openspec', 'changes', 'archive');
+  if (!fs.statSync(archiveRoot, { throwIfNoEntry: false })?.isDirectory()) return false;
+  const escaped = changeId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const archivePattern = new RegExp(`^\\d{4}-\\d{2}-\\d{2}-${escaped}$`);
+  return fs.readdirSync(archiveRoot, { withFileTypes: true })
+    .some((entry) => entry.isDirectory() && archivePattern.test(entry.name));
+}
 
 function scalar(value) {
   const text = String(value ?? '').trim();

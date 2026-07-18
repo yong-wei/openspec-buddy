@@ -8,6 +8,7 @@ import {
   buildIdentity,
   branchExistsFromRefResult,
   classifyIssueClaim,
+  localDeliveryExists,
   parseChangeMapping,
   summarizeIssueClaim,
 } from './contracts.mjs';
@@ -108,12 +109,8 @@ try {
       path.join(worktreeRoot, 'openspec', 'changes', changeId),
       { throwIfNoEntry: false },
     )?.isDirectory();
-    const archivedChangeExists = fs.statSync(
-      path.join(worktreeRoot, 'openspec', 'changes', 'archive', changeId),
-      { throwIfNoEntry: false },
-    )?.isDirectory();
-    if (claimClass === 'current' && !activeChangeExists && !archivedChangeExists) {
-      throw new Error(`Local change ${changeId} does not exist in active or archive paths.`);
+    if (claimClass === 'current' && !localDeliveryExists(worktreeRoot, changeId)) {
+      throw new Error(`Local change ${changeId} does not exist in active or dated archive paths.`);
     }
     if (claimClass === 'unclaimed'
       && !activeChangeExists) {

@@ -9,6 +9,7 @@ import {
   buildIdentity,
   branchExistsFromRefResult,
   classifyIssueClaim,
+  localDeliveryExists,
   parseChangeMapping,
   summarizeIssueClaim,
 } from './contracts.mjs';
@@ -66,11 +67,6 @@ function isReady(issue) {
 
 function localChangeExists(changeId) {
   return fs.statSync(path.join(process.cwd(), 'openspec', 'changes', changeId), { throwIfNoEntry: false })?.isDirectory() === true;
-}
-
-function localDeliveryExists(changeId) {
-  return localChangeExists(changeId)
-    || fs.statSync(path.join(process.cwd(), 'openspec', 'changes', 'archive', changeId), { throwIfNoEntry: false })?.isDirectory() === true;
 }
 
 function commentsFor(repo, number) {
@@ -158,7 +154,7 @@ function validateIssue(issue, context, { excludeOwnedClaims = false, classifyOnl
   );
   if (claimClass === 'foreign' && excludeOwnedClaims) return { excluded: true };
   if (claimClass === 'current') {
-    if (!localDeliveryExists(changeId)) fail(`Local change ${changeId} does not exist in active or archive paths.`);
+    if (!localDeliveryExists(process.cwd(), changeId)) fail(`Local change ${changeId} does not exist in active or dated archive paths.`);
     return { current: true, result: resultFor(issue, changeId) };
   }
   if (claimClass !== 'unclaimed') {

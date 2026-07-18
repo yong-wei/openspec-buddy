@@ -137,7 +137,7 @@ assert.equal(JSON.parse(current.stdout).result, 'current_claim');
 const archivedCurrentState = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
 archivedCurrentState.issues.find((issue) => issue.number === 17).labels = [{ name: 'status:in-review' }];
 fs.writeFileSync(stateFile, JSON.stringify(archivedCurrentState));
-fs.mkdirSync(path.join(root, 'openspec/changes/archive/demo-change'), { recursive: true });
+fs.mkdirSync(path.join(root, 'openspec/changes/archive/2026-07-18-demo-change'), { recursive: true });
 fs.rmSync(path.join(root, 'openspec/changes/demo-change'), { recursive: true });
 const archivedCurrentExplicit = run(['--issue', '17']);
 assert.equal(archivedCurrentExplicit.status, 0, archivedCurrentExplicit.stderr);
