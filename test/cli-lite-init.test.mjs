@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { renderConfigFile, writeConfigFile } from '../src/cli.mjs';
+import { renderConfigFile } from '../src/cli.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const cli = path.resolve(here, '../bin/openspec-buddy.mjs');
@@ -49,17 +49,10 @@ for (const key of [
   assert.match(fullText, new RegExp(`^${key}=`,'m'), `full init must write ${key}`);
 }
 
-const supersetFile = tempFile('.env.openspec-buddy');
-writeConfigFile(supersetFile, {
-  OPENSPEC_BUDDY_BASE_BRANCH: 'integration',
-  OPENSPEC_BUDDY_RELEASE_BRANCH: 'main',
-  OPENSPEC_BUDDY_PROJECT_OWNER: 'acme',
-  OPENSPEC_BUDDY_PROJECT_NUMBER: '7',
-  OPENSPEC_BUDDY_PROJECT_TITLE: 'OpenSpec Work',
-  OPENSPEC_BUDDY_PR_REVIEW_REQUEST: '@codex review',
-});
-assert.match(fs.readFileSync(supersetFile, 'utf8'), /OPENSPEC_BUDDY_PROJECT_NUMBER=7/,
-  'an existing full configuration remains a valid lite superset');
+assert.match(fullText, /^OPENSPEC_BUDDY_BASE_BRANCH=integration$/m,
+  'a real full init artifact contains the only lite-required key');
+assert.match(fullText, /^OPENSPEC_BUDDY_PROJECT_NUMBER=7$/m,
+  'the full init artifact also retains its full-only keys');
 
 const renderedLite = renderConfigFile({ OPENSPEC_BUDDY_BASE_BRANCH: 'dev' });
 assert.equal(renderedLite.includes('OPENSPEC_BUDDY_BASE_BRANCH=dev'), true);

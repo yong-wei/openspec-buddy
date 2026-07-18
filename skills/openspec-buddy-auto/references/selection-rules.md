@@ -1,154 +1,70 @@
-# Selecting A Claim Target（Full Mode Only）
+# Full Mode Selection Rules（Full Mode Only）
 
-本参考只描述显式 Full Mode 的 selection 规则，不适用于默认 lite。Full workflow 只能通过公开 `buddy-auto.mjs full` 入口运行。
-
-Recalculate candidates at the start of every iteration.
-
-## Candidate Source
-
-For GitHub-coordinated changes, `openspec-buddy claim` is the first action. If
-the user supplies an issue number, claim that issue. If not, select the
-smallest claimable open issue number and claim it before doing deeper
-exploration or decomposition.
-
-Automatic empty-context selection is allowed only in explicit goal mode. The
-auto driver must see `OPENSPEC_BUDDY_AUTO_GOAL=1` or `--goal`; otherwise it
-must stop instead of claiming new work.
-
-For ordinary open issues, use:
+本参考只描述 Full controller 的内部选择语义，不适用于默认 lite。代理不得直接调用 claim、relationship list 或 selector helper；正常推进只有一个公开入口：
 
 ```bash
-<openspec-buddy-skill-dir>/scripts/claim-issue.sh [issue-number]
+<openspec-buddy-auto-skill-dir>/scripts/buddy-auto.mjs full
 ```
 
-The claim selector skips closed issues, issues assigned to another user, series
-parents, and issues labeled with active or terminal `status:*` values. Missing
-status, `status:backlog`, and `status:ready` are claimable.
-Automatic selection uses the lowest issue number among those candidates.
+Controller 返回 `HANDOFF` 或 `BLOCKED` 后，代理只完成该 interrupt 明确授权的外部工作，再重新运行同一公开命令。Helper 的调用顺序、输入拼装、重试与状态更新均属于 controller 内部实现。
 
-Selection is not authority to execute. Before acting on a selected
-GitHub-backed issue, the claim scripts must pass the worktree claim guard. A
-ready issue whose claim branch is already bound to another local worktree, or
-whose active claim comment carries another `worktree_path_hash`, is not
-claimable by the current worker.
+## 候选来源
 
-`status:claimed` is skipped by default. Do not inspect its lease while there
-is any `status:ready`, `status:backlog`, or unlabeled claimable issue. Claimed
-issues enter stale-claim investigation only as a fallback when no other
-claimable issue exists.
+Full controller 每轮从实时 GitHub 与 active OpenSpec change 重新计算候选。显式 target 限定本轮目标；没有 target 时，只有 goal 状态允许从空上下文选择新工作。既有 controller state 优先于新的环境 seed。
 
-After claim, immediately classify the issue:
+普通开放 Issue 在深入实现或拆分前先进入 full claim。Controller 内部核验：
 
-- Simple issue: adopt it as one executable Buddy change and continue with the
-  apply flow.
-- Complex issue: keep the source issue claimed while creating child change
-  issues, then make the source issue a `status:tracking` series parent.
+- Issue 未关闭，也未被其他执行者有效认领；
+- 当前 worktree 与绑定分支满足 claim guard；
+- 远端 claim branch、Development link、assignee、claim comment 与状态不存在矛盾；
+- status 与 issue 类型允许进入 claim；
+- 任何部分 Claim 或不一致事实进入恢复或人工处理，不作为普通 ready 候选。
 
-The classification input is the validated final disposition from
-`.buddy/triage.json`. Auto consumes that disposition only. It does not run
-research, grilling, prototyping, or any other exploratory method while selecting
-or advancing work. Evidence interpretation and the triage judgment remain
-agent-owned outside the Auto state machine.
+Claim 后的 triage 只消费已经验证的 `.buddy/triage.json` disposition，不在 selection 阶段重新做研究或产品判断：
 
-Map the disposition into the existing status model:
+- `executable`：继续该变更；
+- `series-parent`：保持父 Issue 的 claim，创建并关联可独立执行的 children，满足 readiness 后转 tracking；
+- `needs-human`：进入人工处理；
+- `blocked`：记录依赖或冲突证据；
+- `close`：记录明确原因并关闭，不创建重复 change。
 
-- `executable`: continue the claimed change.
-- `series-parent`: create independently executable children, then use
-  `status:tracking` on the parent.
-- `needs-human`: use `status:needs-human`.
-- `blocked`: use `status:blocked` with the dependency or conflict evidence.
-- `close`: close with the explicit triage reason and do not create a duplicate
-  change.
+## 已准备的 Issue-backed change
 
-For an ordinary open issue, claim and normalize that original issue in place by
-adding Buddy metadata at the top. Do not create a second issue that mirrors the
-same task; child issues are only for executable pieces of a genuinely complex
-parent.
-
-## Prepared Change Source
-
-For already prepared Buddy issues with active OpenSpec changes, use both
-sources:
-
-```bash
-openspec list --json
-<openspec-buddy-skill-dir>/scripts/list-ready-change-relationships.sh 100
-```
-
-Then feed the active OpenSpec changes, relationship issue list, and optional current series into:
-
-```bash
-node <openspec-buddy-skill-dir>/scripts/select-next-change.mjs < selection-input.json
-```
-
-For the common case, use the wrapper:
-
-```bash
-<openspec-buddy-skill-dir>/scripts/select-next-change.sh [current-series]
-```
-
-A prepared issue is executable only when:
+Full controller 内部将 active OpenSpec changes、GitHub relationship facts 与可选 current series 交给 full selector。可执行候选至少满足：
 
 ```text
-local active OpenSpec change exists on latest $OPENSPEC_BUDDY_BASE_BRANCH
-issue front matter parses successfully
-issue change_id equals the OpenSpec change name
-issue openspec_path exists
+local active OpenSpec change exists on the latest configured base
+issue metadata parses and maps to the same change_id
+openspec_path exists
 claim_branch equals change_id
-base_branch equals $OPENSPEC_BUDDY_BASE_BRANCH
-issue has status:ready
-issue is not a type:series-parent tracking issue
-native blockedBy contains no open, unarchived issue
-no open PR exists for claim_branch
-origin/<claim_branch> does not exist
-issue has no existing Development link for claim_branch
-latest claim comment does not indicate another active or partial claim
-depends_on entries are not active unfinished OpenSpec changes
-same coupling_group has no claimed or in-progress issue
+base_branch equals the configured base branch
+issue has status:ready and is not a tracking parent
+native blockedBy has no open unfinished blocker
+no conflicting open PR, remote claim branch, Development link, or claim comment exists
+depends_on and coupling constraints are satisfied
 ```
 
-If an issue is `status:ready` but already has `origin/<claim_branch>`, a
-Development link, an open PR for the same head branch, or an OpenSpec Buddy
-Claim comment, treat it as a partial claim or inconsistent state. Do not claim
-it as a normal ready issue; recover it through the stale-claim rules or mark it
-`status:needs-human` with the observed evidence.
+`status:ready` 与远端 branch、Development link、open PR 或 Claim comment 并存时属于部分 Claim 或状态不一致。Controller 必须进入既有 recovery/needs-human 规则，不能按普通候选继续，也不能由代理直接调用 helper 修补。
 
-## Local-Only Prepared Change Source
+## Local-only 候选
 
-If `openspec list --json` returns an active change explicitly marked as local
-only, such as `no_issue: true`, `noIssue: true`, `issue: false`, or
-`coordination: local`, treat it as a no-issue candidate. This path exists only
-for changes intentionally created by `openspec-buddy propose --no-issue`.
+Full controller 保留既有 Local-only 识别：active change 明确包含 `no_issue: true`、`noIssue: true`、`issue: false` 或 `coordination: local`。该路径不创建 GitHub Issue、Project、Development link 或 claim branch。
 
-For local-only changes:
+Controller 内部必须保留 `openspec list --json` 的结构化条目，不能在识别 no-issue marker 前退化为 change 名称字符串。Local-only 只在用户显式指定，或没有可执行 Issue-backed change 且 full 状态允许选择时进入。
 
-- evaluate this path before any GitHub claim step
-- do not call `claim`
-- do not require GitHub issue metadata, labels, Project membership, or branch locks
-- do not synthesize a placeholder issue
-- prefer the current series when that metadata exists locally
-- fall back to local-only selection only when no executable issue-backed change
-  is ready or when the user explicitly asked for the local-only change
+## 排序与重算
 
-The selector wrapper must preserve structured `openspec list --json` entries
-instead of collapsing every active change to a plain string, otherwise the
-no-issue marker is lost before selection.
+所有可执行 Issue-backed 候选按 Issue 编号升序，选择编号最小者。Current series、downstream blocking、risk 与 coupling 只作为 full 诊断和可执行性事实，不改变编号排序。
 
-If any condition is unclear, mark the issue `status:blocked` or `status:needs-human` with a comment rather than guessing.
+Claim 竞态或候选远端事实变化后，controller 重新读取关系并计算候选。旧缓存列表没有选择权；cache 只用于降低读取成本，不能覆盖 claim、dependency 或 availability 的远端真源。
 
-## Tie Breaker
+## 停止条件
 
-Prepared executable changes prefer the oldest issue: select the smallest issue
-number among all currently executable issue-backed candidates. Current series,
-downstream `blocking` impact, and risk remain visible in selector output for
-diagnostics, but they do not outrank issue number.
+以下事实必须由 controller 返回 `BLOCKED` 或相应恢复 interrupt，不得让代理绕过公开入口自行选择另一项：
 
-Never select an issue solely because it appears first in an old cached list.
-
-## Current Series Preference
-
-Auto mode should keep a `currentSeries` value after claiming or completing a change. On the next iteration:
-
-- If the same series has any executable issue, keep reporting the same-series marker.
-- Selection still chooses the smallest executable issue number globally.
-- If another agent claimed the preferred issue first, recalculate relationships and retry selection once.
+- metadata 与 OpenSpec change 不一致；
+- 远端 Claim tuple 部分写入或相互矛盾；
+- dependency、series 或 coupling 状态无法确定；
+- claim branch 已包含来源不明的提交；
+- 同一 change 已存在冲突 PR 或 Development link；
+- controller 无法证明当前 worktree 的 claim ownership。

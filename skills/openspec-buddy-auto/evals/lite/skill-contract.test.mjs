@@ -7,9 +7,18 @@ import { fileURLToPath } from 'node:url';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const skillPath = path.resolve(here, '../../SKILL.md');
 const skill = fs.readFileSync(skillPath, 'utf8');
+const selectionReference = fs.readFileSync(path.resolve(here, '../../references/selection-rules.md'), 'utf8');
 
 function requires(pattern, message) {
   assert.match(skill, pattern, message);
+}
+
+function section(heading, nextHeading) {
+  const start = skill.indexOf(heading);
+  const end = skill.indexOf(nextHeading, start + heading.length);
+  assert.notEqual(start, -1, `missing section: ${heading}`);
+  assert.notEqual(end, -1, `missing following section: ${nextHeading}`);
+  return skill.slice(start, end);
 }
 
 requires(/scripts\/buddy-auto\.mjs[^\n]*default|default[^\n]*scripts\/buddy-auto\.mjs/i,
@@ -54,5 +63,27 @@ requires(/branch[^\n]*(?:best[- ]effort|尽力)|(?:best[- ]effort|尽力)[^\n]*b
   'claim branch deletion must be best-effort cleanup');
 requires(/(?:no Available Issue|没有可用 Issue|无可用 Issue)[^\n]*(?:stop|停止|结束)|(?:continue|继续)[^\n]*(?:select|选择)/i,
   'untargeted execution must continue selecting until exhausted');
+
+assert.match(selectionReference, /scripts\/buddy-auto\.mjs full/,
+  'the full selection reference must expose only the public full entry');
+assert.doesNotMatch(selectionReference,
+  /<openspec-buddy-skill-dir>\/scripts\/(?:claim-issue|list-ready-change-relationships|select-next-change)\.(?:sh|mjs)|node <openspec-buddy-skill-dir>\/scripts\/select-next-change\.mjs/,
+  'the full selection reference must not instruct the agent to invoke controller-owned helpers');
+
+const noPr = section('## Local-only `--no-pr`', '## Full Mode');
+assert.match(noPr,
+  /实现分支上完成[\s\S]{0,180}相关测试[\s\S]{0,180}Local Review[\s\S]{0,220}(?:commit|提交)[\s\S]{0,180}(?:push|推送)/i,
+  'no-PR work, tests, Local Review, commit, and push must be bound to the implementation branch');
+assert.match(noPr,
+  /远端 base[\s\S]{0,160}实现分支祖先[\s\S]{0,100}fast-forward/i,
+  'remote base must still be an ancestor of the implementation branch before fast-forward');
+assert.match(noPr,
+  /(?:base|基线)[^\n]*(?:前进|advanced)[\s\S]{0,220}(?:同步|更新)[\s\S]{0,220}(?:重新测试|retest)[\s\S]{0,180}(?:重新[^\n]*Local Review|重新[^\n]*审核|review again)/i,
+  'an advanced base must be integrated before tests and Local Review are repeated');
+assert.match(noPr, /禁止 force push|force push[^\n]*(?:禁止|never)/i,
+  'Direct Integration Delivery must forbid force push');
+assert.match(noPr,
+  /核验远端 base[\s\S]{0,180}(?:实现提交|implementation commit)[\s\S]{0,120}archive/i,
+  'completion must verify the remote base contains the implementation and archive');
 
 console.log('lite skill contract tests passed');

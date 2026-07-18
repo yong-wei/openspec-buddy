@@ -8,6 +8,20 @@ const selector = path.join(scriptDir, 'lite/select-available-issue.mjs');
 const claim = path.join(scriptDir, 'lite/claim-issue.mjs');
 const fullController = path.join(scriptDir, 'full/buddy-auto.mjs');
 
+function helpText() {
+  return `OpenSpec Buddy Auto
+
+Usage:
+  buddy-auto.mjs                         无参数默认使用 lite
+  buddy-auto.mjs --issue <number>        使用 lite 处理指定 Issue
+  buddy-auto.mjs --change <change_id>    使用 lite 处理指定 change
+  buddy-auto.mjs --change <change_id> --no-pr  仅用于 Local-only change
+  buddy-auto.mjs full [full options]      进入 Full Mode
+
+迁移：旧版无参数 full 调用改为 buddy-auto.mjs full。
+`;
+}
+
 function finish(result) {
   if (result.signal) process.kill(process.pid, result.signal);
   process.exit(result.status ?? 1);
@@ -70,7 +84,8 @@ function runLite(argv) {
 
 try {
   const args = process.argv.slice(2);
-  if (args[0] === 'full') runFull(args.slice(1));
+  if (args[0] === '--help') process.stdout.write(helpText());
+  else if (args[0] === 'full') runFull(args.slice(1));
   else runLite(args);
 } catch (error) {
   process.stderr.write(`${error.message}\n`);

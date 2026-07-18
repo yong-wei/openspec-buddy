@@ -47,3 +47,16 @@
 ## 自审
 
 完整 diff 自审未发现阻断问题。Lite 文档没有把 Project、cache、controller 或 receipt 作为执行依赖；Full 文档没有暴露 `scripts/full/` 内部模块为公开入口；版本、帮助、README、环境示例、release notes 与技能合同一致。
+
+## 审核修复补充
+
+后续审核指出三项 Important 与一项 Minor，现已全部修复：
+
+- Full selection reference 已改写为 controller 内部语义，删除面向代理的 claim、relationship list 与 selector helper 命令；正常推进只暴露 `scripts/buddy-auto.mjs full`。
+- 公开 `buddy-auto.mjs --help` 现在只读返回且退出码为 0，不进入 selector 或 GitHub。帮助文本列出默认 lite、`--issue`、`--change`、Local-only `--no-pr` 和旧无参数 full 的迁移命令。
+- no-PR skill contract 测试现在限定在 Local-only 章节内，分别约束实现分支测试/Local Review/commit/push、远端 base 祖先条件、基线前进后的同步与重新验证、禁止 force push 和远端集成核验。
+- CLI init 测试移除了无法证明“读取既有配置”的间接断言，改为检查真实 `init --full` 产物同时包含 lite 必填 base branch 与 full-only 键。
+
+严格 TDD 证据：公开 help、no-PR 实现分支绑定、Full selection 单一公开入口三项断言均先按预期 RED，再完成实现并转为 GREEN。修复后重新执行全部 lite、full-entry-smoke、cli-lite-init、语法、`npm pack --dry-run` 与 `git diff --check`，全部通过；仍未运行 `npm test` 或 full suite。
+
+本补充取代上一节“未发现阻断问题”的初次自审结论；该结论形成于后续审核之前。

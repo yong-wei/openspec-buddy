@@ -76,6 +76,15 @@ function run(args) {
   });
 }
 
+const help = run(['--help']);
+assert.equal(help.status, 0, help.stderr);
+assert.equal(fs.existsSync(callsFile), false, '--help must not invoke selector or GitHub');
+assert.match(help.stdout, /no arguments[^\n]*lite|无参数[^\n]*lite/i);
+assert.match(help.stdout, /--issue <number>/);
+assert.match(help.stdout, /--change <change_id>/);
+assert.match(help.stdout, /--change <change_id> --no-pr[^\n]*local-only/i);
+assert.match(help.stdout, /previous[^\n]*no-argument[^\n]*full[^\n]*buddy-auto\.mjs full|旧[^\n]*无参数[^\n]*full[^\n]*buddy-auto\.mjs full/i);
+
 const conflicting = run(['--issue', '17', '--change', 'demo-change']);
 assert.notEqual(conflicting.status, 0);
 assert.match(conflicting.stderr, /mutually exclusive/i);
