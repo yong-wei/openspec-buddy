@@ -2,6 +2,7 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import {
   ACTIVE_CLAIM_STATUSES,
@@ -9,14 +10,33 @@ import {
   branchExistsFromRefResult,
   classifyIssueClaim,
   parseChangeMapping,
+  summarizeIssueClaim,
 } from './contracts.mjs';
 
-function run(command, args) {
-  return execFileSync(command, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+const here = path.dirname(fileURLToPath(import.meta.url));
+const githubFetch = path.resolve(here, '../../../openspec-buddy/scripts/github-fetch.sh');
+
+function run(command, args, options = {}) {
+  return execFileSync(command, args, {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    ...options,
+  }).trim();
 }
 
 function ghJson(args) {
   const output = run('gh', args);
+  return output ? JSON.parse(output) : null;
+}
+
+function managedGraphql(args) {
+  const output = run('bash', [
+    '-c',
+    'source "$1"; shift; buddy_graphql_api "$@"',
+    'buddy-lite-graphql',
+    githubFetch,
+    ...args,
+  ], { env: { ...process.env, OPENSPEC_BUDDY_GRAPHQL_METRICS: '0' } });
   return output ? JSON.parse(output) : null;
 }
 
@@ -25,20 +45,15 @@ function fail(message) {
 }
 
 function parseOptions(argv) {
-  const options = { issue: null, change: '' };
-  let issueCount = 0;
-  let changeCount = 0;
-  for (let index = 0; index < argv.length; index += 1) {
-    if (argv[index] === '--issue') { issueCount += 1; options.issue = Number(argv[++index]); }
-    else if (argv[index] === '--change') { changeCount += 1; options.change = String(argv[++index] || ''); }
-    else fail(`Unknown argument: ${argv[index]}`);
+  if (argv.length === 0) return { issue: null, change: '' };
+  if (argv.length !== 2) fail('Usage: select-available-issue.mjs [--issue NUMBER | --change CHANGE_ID]');
+  if (argv[0] === '--issue') {
+    const issue = Number(argv[1]);
+    if (!Number.isInteger(issue) || issue < 1) fail('--issue requires a positive integer.');
+    return { issue, change: '' };
   }
-  if (issueCount > 1) fail('--issue may be specified only once.');
-  if (changeCount > 1) fail('--change may be specified only once.');
-  if (options.issue !== null && (!Number.isInteger(options.issue) || options.issue < 1)) fail('--issue requires a positive integer.');
-  if (options.issue !== null && options.change) fail('--issue and --change are mutually exclusive.');
-  if (argv.includes('--change') && !options.change) fail('--change requires a change id.');
-  return options;
+  if (argv[0] === '--change' && argv[1]) return { issue: null, change: argv[1] };
+  fail('Usage: select-available-issue.mjs [--issue NUMBER | --change CHANGE_ID]');
 }
 
 function labels(issue) {
@@ -53,6 +68,11 @@ function localChangeExists(changeId) {
   return fs.statSync(path.join(process.cwd(), 'openspec', 'changes', changeId), { throwIfNoEntry: false })?.isDirectory() === true;
 }
 
+function localDeliveryExists(changeId) {
+  return localChangeExists(changeId)
+    || fs.statSync(path.join(process.cwd(), 'openspec', 'changes', 'archive', changeId), { throwIfNoEntry: false })?.isDirectory() === true;
+}
+
 function commentsFor(repo, number) {
   const response = ghJson(['api', `repos/${repo}/issues/${number}/comments?per_page=100`, '--paginate', '--slurp']) || [];
   return Array.isArray(response[0]) ? response.flat() : response;
@@ -65,35 +85,43 @@ function branchExists(repo, branch) {
   return branchExistsFromRefResult(result, branch);
 }
 
-function blockersFor(repo, number) {
+function blockersByIssue(repo, numbers) {
+  const uniqueNumbers = [...new Set(numbers.map(Number))];
+  if (uniqueNumbers.length === 0) return new Map();
+  if (uniqueNumbers.length > 100) fail('Could not safely read blockedBy for more than 100 candidate issues.');
   const [owner, name] = repo.split('/');
-  const query = `query($owner:String!,$name:String!,$number:Int!,$after:String){repository(owner:$owner,name:$name){issue(number:$number){blockedBy(first:100,after:$after){nodes{number state}pageInfo{hasNextPage endCursor}}}}}`;
-  const blockers = [];
-  const seenCursors = new Set();
-  let after = '';
-  do {
-    const args = [
-      'api', 'graphql',
-      '-F', `owner=${owner}`,
-      '-F', `name=${name}`,
-      '-F', `number=${number}`,
-      '-f', `query=${query}`,
-    ];
-    if (after) args.splice(-2, 0, '-F', `after=${after}`);
-    const response = ghJson(args);
-    const connection = response?.data?.repository?.issue?.blockedBy;
-    if (!connection) fail(`Could not read blockedBy for issue #${number}.`);
-    if (!connection.pageInfo || typeof connection.pageInfo.hasNextPage !== 'boolean') {
-      fail(`Could not safely paginate blockedBy for issue #${number}.`);
+  const fields = uniqueNumbers.map((number, index) => (
+    `candidate${index}:issue(number:${number}){number blockedBy(first:100){nodes{number state}pageInfo{hasNextPage}}}`
+  )).join(' ');
+  const query = `query($owner:String!,$name:String!){repository(owner:$owner,name:$name){${fields}}}`;
+  const response = managedGraphql([
+    '-F', `owner=${owner}`, '-F', `name=${name}`, '-f', `query=${query}`,
+  ]);
+  if (Array.isArray(response?.errors) && response.errors.length > 0) {
+    fail('Could not read complete blockedBy data for candidate issues.');
+  }
+  const repository = response?.data?.repository;
+  if (!repository) fail('Could not read blockedBy for candidate issues.');
+
+  const result = new Map();
+  for (const [index, number] of uniqueNumbers.entries()) {
+    const issue = repository[`candidate${index}`];
+    const connection = issue?.blockedBy;
+    if (Number(issue?.number) !== number || !Array.isArray(connection?.nodes)
+      || typeof connection?.pageInfo?.hasNextPage !== 'boolean') {
+      fail(`Could not read complete blockedBy data for issue #${number}.`);
     }
-    blockers.push(...(connection.nodes || []));
-    if (!connection.pageInfo.hasNextPage) break;
-    const next = String(connection.pageInfo.endCursor || '');
-    if (!next || seenCursors.has(next)) fail(`Could not safely paginate blockedBy for issue #${number}.`);
-    seenCursors.add(next);
-    after = next;
-  } while (true);
-  return blockers;
+    if (connection.nodes.some((blocker) => !Number.isInteger(Number(blocker?.number))
+      || Number(blocker.number) < 1
+      || !['OPEN', 'CLOSED'].includes(String(blocker?.state || '').toUpperCase()))) {
+      fail(`Could not read complete blockedBy data for issue #${number}.`);
+    }
+    if (connection.pageInfo.hasNextPage) {
+      fail(`Issue #${number} has more than 100 blockers; blockedBy batch is incomplete.`);
+    }
+    result.set(number, connection.nodes);
+  }
+  return result;
 }
 
 function resultFor(issue, changeId) {
@@ -120,27 +148,35 @@ function validateIssue(issue, context, { excludeOwnedClaims = false, classifyOnl
   const duplicates = context.allMappings.get(changeId) || [];
   if (duplicates.length > 1) fail(`Change ${changeId} has duplicate issue mappings: ${duplicates.map((item) => `#${item.number}`).join(', ')}.`);
 
+  const comments = commentsFor(context.repo, issue.number);
+  const hasBranch = branchExists(context.repo, changeId);
   const claimClass = classifyIssueClaim(
     issue,
-    commentsFor(context.repo, issue.number),
+    comments,
     context.identity,
-    { branchExists: branchExists(context.repo, changeId), issue: issue.number, changeId, branch: changeId },
+    { branchExists: hasBranch, issue: issue.number, changeId, branch: changeId },
   );
   if (claimClass === 'foreign' && excludeOwnedClaims) return { excluded: true };
-  if (claimClass === 'current') return { current: true, result: resultFor(issue, changeId) };
+  if (claimClass === 'current') {
+    if (!localDeliveryExists(changeId)) fail(`Local change ${changeId} does not exist in active or archive paths.`);
+    return { current: true, result: resultFor(issue, changeId) };
+  }
   if (claimClass !== 'unclaimed') {
-    fail(`Issue #${issue.number} has ${claimClass} claim state.`);
+    fail(`Issue #${issue.number} has ${claimClass} claim state: ${summarizeIssueClaim(issue, comments, hasBranch)}`);
   }
   if (classifyOnly) return { unclaimed: true };
   if (!isReady(issue)) fail(`Issue #${issue.number} is not an open status:ready issue.`);
   if (!localChangeExists(changeId)) fail(`Ready issue #${issue.number} maps to missing local change ${changeId}.`);
 
-  const openBlockers = blockersFor(context.repo, Number(issue.number))
-    .filter((blocker) => String(blocker.state || '').toUpperCase() === 'OPEN');
-  if (openBlockers.length > 0) {
-    return { blocked: `Issue #${issue.number} is blocked by open issue #${openBlockers[0].number}.` };
-  }
   return { result: resultFor(issue, changeId) };
+}
+
+function withBlockers(checked, issue, blockers) {
+  const open = (blockers.get(Number(issue.number)) || [])
+    .find((blocker) => String(blocker.state || '').toUpperCase() === 'OPEN');
+  return open
+    ? { blocked: `Issue #${issue.number} is blocked by open issue #${open.number}.` }
+    : checked;
 }
 
 try {
@@ -179,7 +215,11 @@ try {
     if (allMapped.length > 1) fail(`Change ${options.change} has duplicate issue mappings.`);
     const mapped = openMappings.get(options.change) || [];
     if (mapped.length === 1) {
-      const checked = validateIssue(mapped[0], context);
+      const checked = withBlockers(
+        validateIssue(mapped[0], context),
+        mapped[0],
+        blockersByIssue(repo, [mapped[0].number]),
+      );
       if (checked.blocked) fail(checked.blocked);
       process.stdout.write(`${JSON.stringify(checked.result)}\n`);
     } else {
@@ -189,7 +229,11 @@ try {
     }
   } else if (options.issue !== null) {
     const target = issues.find((issue) => Number(issue.number) === options.issue);
-    const checked = validateIssue(target, context);
+    const checked = withBlockers(
+      validateIssue(target, context),
+      target,
+      blockersByIssue(repo, target ? [target.number] : []),
+    );
     if (checked.blocked) fail(checked.blocked);
     process.stdout.write(`${JSON.stringify(checked.result)}\n`);
   } else {
@@ -212,8 +256,9 @@ try {
     const ready = issues
       .filter(isReady)
       .sort((left, right) => Number(left.number) - Number(right.number));
+    const blockers = selected ? new Map() : blockersByIssue(repo, ready.map((issue) => issue.number));
     for (const issue of selected ? [] : ready) {
-      const checked = validateIssue(issue, context);
+      const checked = withBlockers(validateIssue(issue, context), issue, blockers);
       if (checked.blocked) {
         firstBlocked ||= checked.blocked;
         continue;

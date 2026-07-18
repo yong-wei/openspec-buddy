@@ -45,19 +45,16 @@ export function parseChangeMapping(markdown) {
 
 export function parseLiteClaimComment(body) {
   const text = String(body || '');
-  if (!/^OpenSpec Buddy Claim(?:\s|$)/m.test(text)) return null;
+  if (!/^OpenSpec Buddy Claim\s*$/m.test(text)) return null;
   const agent = field(text, 'agent').replace(/^@/, '');
-  const claim = {
+  return {
     issue: Number(field(text, 'issue')) || null,
-    claimId: field(text, 'claim_id'),
-    state: field(text, 'state') || 'active',
     agent: agent.startsWith('codex/') ? agent : `codex/${agent}`,
     viewer: agent.replace(/^codex\//, ''),
     changeId: field(text, 'change_id'),
     branch: field(text, 'branch'),
     worktree: field(text, 'worktree_alias'),
   };
-  return claim;
 }
 
 export function buildIdentity(viewer, worktreeAlias = '', realWorktree = '') {
@@ -87,29 +84,14 @@ export function branchExistsFromRefResult(result, branch) {
   return !Array.isArray(response) && response?.ref === `refs/heads/${branch}`;
 }
 
-export function classifyClaim(claim, identity) {
-  if (!claim || String(claim.state || 'active').toLowerCase() !== 'active') return 'unclaimed';
-  if (!claim.viewer || !claim.changeId || (!claim.claimId && !claim.branch) || !claim.worktree) return 'partial';
-  if (claim.agent === identity?.agent && claim.worktree === identity?.worktree) return 'current';
-  return 'foreign';
-}
-
 function activeClaimsFrom(comments) {
-  const active = new Map();
-  for (const [index, comment] of (comments || []).entries()) {
+  const active = [];
+  for (const comment of comments || []) {
     const body = comment?.body ?? comment;
     const claim = parseLiteClaimComment(body);
-    if (!claim) continue;
-    const state = String(claim.state || 'active').toLowerCase();
-    const terminal = /^OpenSpec Buddy Claim Release(?:\s|$)/m.test(String(body || ''))
-      || ['released', 'abandoned', 'lost'].includes(state);
-    if (terminal) {
-      if (claim.claimId) active.delete(claim.claimId);
-      continue;
-    }
-    active.set(claim.claimId || `comment-${index}`, claim);
+    if (claim) active.push(claim);
   }
-  return [...active.values()];
+  return active;
 }
 
 export function classifyIssueClaim(issue, comments, identity, expected = {}) {
@@ -131,14 +113,13 @@ export function classifyIssueClaim(issue, comments, identity, expected = {}) {
     && (!expected.issue || claim.issue === Number(expected.issue))
     && (!expected.changeId || claim.changeId === expected.changeId)
     && (!expected.branch || claim.branch === expected.branch);
-  const complete = claims.length === 1
+  const complete = Boolean(claim)
     && branchExists
     && String(issue?.state || '').toUpperCase() === 'OPEN'
     && statuses.length === 1
     && ACTIVE_CLAIM_STATUSES.includes(statuses[0])
     && assignees.length === 1
     && targetMatches
-    && claim.state === 'active'
     && claim.viewer === assignees[0]
     && Boolean(claim.agent && claim.worktree);
   if (complete) {
@@ -147,7 +128,25 @@ export function classifyIssueClaim(issue, comments, identity, expected = {}) {
   return 'partial';
 }
 
-export const parseIssueMapping = parseChangeMapping;
-export const parseClaimComment = parseLiteClaimComment;
-export const createIdentity = buildIdentity;
-export const classifyIssue = classifyIssueClaim;
+export function summarizeIssueClaim(issue, comments, branchExists) {
+  const statuses = (issue?.labels || [])
+    .map((label) => typeof label === 'string' ? label : label?.name)
+    .filter((label) => label?.startsWith('status:'));
+  const assignees = (issue?.assignees || [])
+    .map((assignee) => typeof assignee === 'string' ? assignee : assignee?.login)
+    .filter(Boolean);
+  const claim = activeClaimsFrom(comments).at(-1) || null;
+  return JSON.stringify({
+    issue_state: String(issue?.state || '').toUpperCase() || null,
+    statuses,
+    assignees,
+    branch_exists: branchExists === true,
+    latest_claim: claim ? {
+      issue: claim.issue,
+      change_id: claim.changeId,
+      branch: claim.branch,
+      agent: claim.agent,
+      worktree: claim.worktree,
+    } : null,
+  });
+}

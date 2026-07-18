@@ -10,7 +10,6 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const entry = path.resolve(here, '../scripts/buddy-auto.mjs');
 const fullController = path.resolve(here, '../scripts/full/buddy-auto.mjs');
 const fullDir = path.dirname(fullController);
-const repoRoot = path.resolve(here, '../../..');
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'buddy-full-entry-'));
 const bin = path.join(root, 'bin');
 const repo = path.join(root, 'repo');
@@ -132,32 +131,6 @@ for (const filename of fs.readdirSync(fullDir).filter((name) => name.endsWith('.
   for (const literal of fullSource.matchAll(/(['"`])([^'"`]*buddy-auto\.mjs[^'"`]*)\1/g)) {
     assert.doesNotMatch(literal[2], /buddy-auto\.mjs(?! full)(?:\s|$)/,
       `${filename} user-facing command must include full: ${literal[2]}`);
-  }
-}
-
-const migratedInternalModules = fs.readdirSync(fullDir)
-  .filter((name) => name.endsWith('.mjs') && name !== 'buddy-auto.mjs');
-const trackedFiles = spawnSync('git', ['ls-files', 'README.md', 'bin', 'src', 'test', 'skills'], {
-  cwd: repoRoot,
-  encoding: 'utf8',
-});
-assert.equal(trackedFiles.status, 0, trackedFiles.stderr);
-const activeFiles = trackedFiles.stdout.trim().split('\n').filter((relativePath) =>
-  /\.(?:md|mjs|js|sh|json)$/.test(relativePath));
-for (const evalsPath of [
-  'skills/openspec-buddy/evals/evals.json',
-  'skills/openspec-buddy-auto/evals/evals.json',
-]) {
-  assert.ok(activeFiles.includes(evalsPath), `${evalsPath} must be included in the stale-path scan`);
-}
-for (const relativePath of activeFiles) {
-  const source = fs.readFileSync(path.join(repoRoot, relativePath), 'utf8');
-  for (const filename of migratedInternalModules) {
-    assert.doesNotMatch(
-      source,
-      new RegExp(`skills/openspec-buddy-auto/scripts/${filename.replaceAll('.', '\\.')}(?![\\w.-])`),
-      `${relativePath} must reference migrated full module through scripts/full/${filename}`,
-    );
   }
 }
 

@@ -82,6 +82,7 @@ const state = JSON.parse(fs.readFileSync(statePath)); fs.appendFileSync(log, 'st
 if (state.failWrite === 'status') process.exit(1);
 state.labels = ['status:' + process.argv[3]]; fs.writeFileSync(statePath, JSON.stringify(state));
 if (state.failWrite === 'final-mapping-change') { state.issueBody = '<!-- openspec-buddy change_id: other-change -->'; fs.writeFileSync(statePath, JSON.stringify(state)); }
+if (state.failWrite === 'final-assignee-change') { state.assignees = []; fs.writeFileSync(statePath, JSON.stringify(state)); }
 if (state.failWrite === 'status-after') process.exit(1);
 `, { mode: 0o755 });
   return { root, bin, state, log };
@@ -102,59 +103,17 @@ function run(item, env = {}) {
   });
 }
 
-for (const [name, assignment] of [
-  ['plain-project-env', 'OPENSPEC_BUDDY_BASE_BRANCH=integration'],
-  ['double-quoted-project-env', 'OPENSPEC_BUDDY_BASE_BRANCH="integration"'],
-  ['exported-single-quoted-project-env', "export OPENSPEC_BUDDY_BASE_BRANCH='integration'"],
-]) {
-  const projectEnv = fixture(name);
-  fs.writeFileSync(path.join(projectEnv.root, '.env.openspec-buddy'), [
-    '# generated project configuration',
-    'UNRELATED_VALUE=ignored',
-    assignment,
-    '',
-  ].join('\n'));
-  const projectEnvResult = run(projectEnv, { OPENSPEC_BUDDY_BASE_BRANCH: '' });
-  assert.equal(projectEnvResult.status, 0, projectEnvResult.stderr);
-  assert.equal(JSON.parse(projectEnvResult.stdout).result, 'claimed');
-}
+const projectEnv = fixture('project-env');
+fs.writeFileSync(path.join(projectEnv.root, '.env.openspec-buddy'), 'OPENSPEC_BUDDY_BASE_BRANCH=integration\n');
+const projectEnvResult = run(projectEnv, { OPENSPEC_BUDDY_BASE_BRANCH: '' });
+assert.equal(projectEnvResult.status, 0, projectEnvResult.stderr);
+assert.equal(JSON.parse(projectEnvResult.stdout).result, 'claimed');
 
-const envPrecedence = fixture('env-precedence');
-fs.writeFileSync(path.join(envPrecedence.root, '.env.openspec-buddy'), 'OPENSPEC_BUDDY_BASE_BRANCH=missing-branch\n');
-const envPrecedenceResult = run(envPrecedence);
-assert.equal(envPrecedenceResult.status, 0, envPrecedenceResult.stderr);
-
-const projectEnvPrecedence = fixture('project-env-precedence');
-execFileSync('/usr/bin/git', ['config', '--worktree', 'buddy.boundBase', 'missing-branch'], { cwd: projectEnvPrecedence.root });
-fs.writeFileSync(path.join(projectEnvPrecedence.root, '.env.openspec-buddy'), 'OPENSPEC_BUDDY_BASE_BRANCH=integration\n');
-const projectEnvPrecedenceResult = run(projectEnvPrecedence, { OPENSPEC_BUDDY_BASE_BRANCH: '' });
-assert.equal(projectEnvPrecedenceResult.status, 0, projectEnvPrecedenceResult.stderr);
-
-const gitConfigFallback = fixture('git-config-fallback');
-execFileSync('/usr/bin/git', ['config', '--worktree', 'buddy.boundBase', 'origin/integration'], { cwd: gitConfigFallback.root });
-const gitConfigFallbackResult = run(gitConfigFallback, { OPENSPEC_BUDDY_BASE_BRANCH: '' });
-assert.equal(gitConfigFallbackResult.status, 0, gitConfigFallbackResult.stderr);
-
-const inertEnv = fixture('inert-project-env');
-const executionMarker = path.join(inertEnv.root, 'must-not-exist');
-fs.writeFileSync(
-  path.join(inertEnv.root, '.env.openspec-buddy'),
-  `OPENSPEC_BUDDY_BASE_BRANCH=$(touch ${executionMarker})\n`,
-);
-const inertEnvResult = run(inertEnv, { OPENSPEC_BUDDY_BASE_BRANCH: '' });
-assert.notEqual(inertEnvResult.status, 0);
-assert.equal(fs.existsSync(executionMarker), false, 'project env values must never execute shell code');
-
-const invalidTrailingLine = fixture('invalid-trailing-line');
-fs.writeFileSync(
-  path.join(invalidTrailingLine.root, '.env.openspec-buddy'),
-  'OPENSPEC_BUDDY_BASE_BRANCH=integration\nthis is not an assignment\n',
-);
-const invalidTrailingLineResult = run(invalidTrailingLine, { OPENSPEC_BUDDY_BASE_BRANCH: '' });
-assert.notEqual(invalidTrailingLineResult.status, 0);
-assert.match(invalidTrailingLineResult.stderr, /Invalid OpenSpec Buddy env file line/);
-assert.doesNotMatch(fs.readFileSync(invalidTrailingLine.log, 'utf8'), /api --method POST/,
-  'invalid project configuration must stop before Claim writes');
+const missingConfig = fixture('missing-config');
+const missingConfigResult = run(missingConfig, { OPENSPEC_BUDDY_BASE_BRANCH: '' });
+assert.notEqual(missingConfigResult.status, 0);
+assert.match(missingConfigResult.stderr, /Missing OpenSpec Buddy configuration.*OPENSPEC_BUDDY_BASE_BRANCH/s);
+assert.doesNotMatch(fs.readFileSync(missingConfig.log, 'utf8'), /api --method POST/);
 
 const item = fixture('success');
 const claimed = run(item);
@@ -175,6 +134,20 @@ const rerun = run(item);
 assert.equal(rerun.status, 0, rerun.stderr);
 assert.equal(JSON.parse(rerun.stdout).result, 'current_claim');
 assert.equal(fs.readFileSync(item.log, 'utf8').split('\n').filter((line) => /api --method POST|issue edit|issue comment|^status /.test(line)).length, 4);
+
+fs.mkdirSync(path.join(item.root, 'openspec/changes/archive'), { recursive: true });
+fs.renameSync(
+  path.join(item.root, 'openspec/changes/demo-change'),
+  path.join(item.root, 'openspec/changes/archive/demo-change'),
+);
+const archivedCurrent = run(item);
+assert.equal(archivedCurrent.status, 0, archivedCurrent.stderr);
+assert.equal(JSON.parse(archivedCurrent.stdout).result, 'current_claim');
+fs.rmSync(path.join(item.root, 'openspec/changes/archive/demo-change'), { recursive: true });
+const missingCurrent = run(item);
+assert.notEqual(missingCurrent.status, 0);
+assert.match(missingCurrent.stderr, /does not exist in active or archive paths/i);
+fs.mkdirSync(path.join(item.root, 'openspec/changes/demo-change'), { recursive: true });
 
 for (const branchResponse of ['prefix-array', 'mismatching-object']) {
   const refShape = fixture(branchResponse, { branchResponse });
@@ -208,6 +181,8 @@ const raced = fixture('race', { failWrite: 'branch-race' });
 const racedResult = run(raced);
 assert.notEqual(racedResult.status, 0);
 assert.match(racedResult.stderr, /complete Claim reread is partial/);
+assert.match(racedResult.stderr, /"branch_exists":true/);
+assert.match(racedResult.stderr, /"statuses":\["status:ready"\]/);
 const racedCalls = fs.readFileSync(raced.log, 'utf8');
 assert.doesNotMatch(racedCalls, /issue edit|issue comment|^status /m, 'losing atomic ref creation must not continue Claim writes');
 assert.equal(racedCalls.split('\n').filter((line) => line === 'gh api repos/acme/repo/issues/17').length, 2);
@@ -229,33 +204,6 @@ fs.writeFileSync(foreign.state, JSON.stringify({
 const foreignResult = run(foreign);
 assert.notEqual(foreignResult.status, 0);
 assert.match(foreignResult.stderr, /foreign Claim truth/);
-
-const releasedHistory = fixture('released-history');
-fs.writeFileSync(releasedHistory.state, JSON.stringify({
-  ...JSON.parse(fs.readFileSync(releasedHistory.state, 'utf8')),
-  comments: [
-    { body: 'OpenSpec Buddy Claim\nissue: 17\nclaim_id: claim-old\nstate: active\nchange_id: demo-change\nbranch: demo-change\nagent: codex/bob\nworktree_alias: dev2' },
-    { body: 'OpenSpec Buddy Claim Release\nclaim_id: claim-old\nstate: released\nchange_id: demo-change\nbranch: demo-change\nagent: @bob' },
-  ],
-}));
-const reclaimed = run(releasedHistory);
-assert.equal(reclaimed.status, 0, reclaimed.stderr);
-assert.equal(JSON.parse(reclaimed.stdout).result, 'claimed');
-
-const unrelatedRelease = fixture('unrelated-release');
-fs.writeFileSync(unrelatedRelease.state, JSON.stringify({
-  ...JSON.parse(fs.readFileSync(unrelatedRelease.state, 'utf8')),
-  labels: ['status:claimed'],
-  assignees: ['bob'],
-  comments: [
-    { body: 'OpenSpec Buddy Claim\nissue: 17\nstate: active\nchange_id: demo-change\nbranch: demo-change\nagent: codex/bob\nworktree_alias: dev2' },
-    { body: 'OpenSpec Buddy Claim Release\nclaim_id: claim-other\nstate: released' },
-  ],
-  branch: true,
-}));
-const unrelatedReleaseResult = run(unrelatedRelease);
-assert.notEqual(unrelatedReleaseResult.status, 0);
-assert.match(unrelatedReleaseResult.stderr, /foreign Claim truth/);
 
 const hashedWorktree = fixture('hashed-worktree', { alias: '' });
 const hashedResult = run(hashedWorktree);
@@ -283,5 +231,12 @@ const changedAtFinalRead = fixture('changed-at-final-read', { failWrite: 'final-
 const changedAtFinalResult = run(changedAtFinalRead);
 assert.notEqual(changedAtFinalResult.status, 0);
 assert.match(changedAtFinalResult.stderr, /mapping.*demo-change|maps to.*other-change/i);
+
+const partialAtFinalRead = fixture('partial-at-final-read', { failWrite: 'final-assignee-change' });
+const partialAtFinalResult = run(partialAtFinalRead);
+assert.notEqual(partialAtFinalResult.status, 0);
+assert.match(partialAtFinalResult.stderr, /complete Claim truth is partial/);
+assert.match(partialAtFinalResult.stderr, /"assignees":\[\]/);
+assert.match(partialAtFinalResult.stderr, /"branch_exists":true/);
 
 console.log('lite claim tests passed');

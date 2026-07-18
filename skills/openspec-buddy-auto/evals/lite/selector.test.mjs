@@ -10,7 +10,6 @@ import { fileURLToPath } from 'node:url';
 import {
   buildIdentity,
   branchExistsFromRefResult,
-  classifyClaim,
   classifyIssueClaim,
   parseChangeMapping,
   parseLiteClaimComment,
@@ -73,27 +72,14 @@ assert.equal(
 
 const claim = parseLiteClaimComment(`OpenSpec Buddy Claim
 
-claim_id: claim-1
-state: active
+issue: 1
 agent: @codex
 change_id: demo-change
+branch: demo-change
 worktree_alias: dev1`);
-assert.equal(claim.claimId, 'claim-1');
+assert.equal(claim.issue, 1);
 assert.equal(claim.viewer, 'codex');
 assert.equal(claim.worktree, 'dev1');
-assert.equal(claim.head, undefined);
-assert.equal(classifyClaim(null, buildIdentity('codex', 'dev1')), 'unclaimed');
-assert.equal(classifyClaim(claim, buildIdentity('codex', 'dev1')), 'current');
-assert.equal(classifyClaim(claim, buildIdentity('other', 'dev1')), 'foreign');
-assert.equal(classifyClaim({ ...claim, worktree: '' }, buildIdentity('codex', 'dev1')), 'partial');
-const released = parseLiteClaimComment(`OpenSpec Buddy Claim Release
-
-claim_id: claim-1
-state: released
-agent: @codex
-change_id: demo-change`);
-assert.equal(released.state, 'released');
-assert.equal(classifyClaim(released, buildIdentity('codex', 'dev1')), 'unclaimed');
 assert.equal(
   classifyIssueClaim({ labels: [{ name: 'status:claimed' }], assignees: [] }, [], buildIdentity('codex', 'dev1')),
   'partial',
@@ -107,62 +93,17 @@ assert.equal(
   ),
   'current',
 );
-
-const historicalClaim = `OpenSpec Buddy Claim
-
-issue: 1
-claim_id: claim-1
-state: active
-agent: @codex
-change_id: demo
-branch: demo
-worktree_alias: dev1`;
-const releaseForHistoricalClaim = `OpenSpec Buddy Claim Release
-
-claim_id: claim-1
-state: released
-agent: @codex
-change_id: demo
-branch: demo`;
-for (const terminalState of ['released', 'abandoned', 'lost']) {
-  const terminal = terminalState === 'released'
-    ? releaseForHistoricalClaim
-    : `OpenSpec Buddy Claim
-
-claim_id: claim-1
-state: ${terminalState}`;
-  assert.equal(
-    classifyIssueClaim(
-      { state: 'open', labels: [{ name: 'status:ready' }], assignees: [] },
-      [{ body: historicalClaim }, { body: terminal }],
-      buildIdentity('codex', 'dev1'),
-      { branchExists: false, issue: 1, changeId: 'demo', branch: 'demo' },
-    ),
-    'unclaimed',
-    `${terminalState} must retire only its matching historical Claim`,
-  );
-}
 assert.equal(
   classifyIssueClaim(
-    { state: 'open', labels: [{ name: 'status:claimed' }], assignees: [{ login: 'other' }] },
+    { state: 'open', labels: [{ name: 'status:claimed' }], assignees: [{ login: 'codex' }] },
     [
-      { body: historicalClaim },
-      { body: `OpenSpec Buddy Claim
-
-issue: 1
-claim_id: claim-2
-state: active
-agent: @other
-change_id: demo
-branch: demo
-worktree_alias: dev2` },
-      { body: releaseForHistoricalClaim },
+      { body: 'OpenSpec Buddy Claim\nissue: 1\nagent: @other\nchange_id: demo\nbranch: demo\nworktree_alias: old' },
+      { body: 'OpenSpec Buddy Claim\nissue: 1\nagent: @codex\nchange_id: demo\nbranch: demo\nworktree_alias: dev1' },
     ],
     buildIdentity('codex', 'dev1'),
     { branchExists: true, issue: 1, changeId: 'demo', branch: 'demo' },
   ),
-  'foreign',
-  'releasing one Claim must not hide another active foreign Claim',
+  'current',
 );
 
 function writeExecutable(file, contents) {
@@ -184,6 +125,7 @@ function issue(number, changeId, { state = 'open', status = 'status:ready', body
 
 function makeFixture(name, {
   issues, comments = {}, blockedBy = {}, branches = [], refResponses = {}, alias = 'dev1',
+  graphqlError = false, partialGraphql = false, incompleteBlockedBy = [], oversizedBlockedBy = [],
 }) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `buddy-lite-${name}-`));
   const bin = path.join(root, 'bin');
@@ -193,13 +135,17 @@ function makeFixture(name, {
   fs.writeFileSync(path.join(root, 'blocked.json'), JSON.stringify(blockedBy));
   fs.writeFileSync(path.join(root, 'branches.json'), JSON.stringify(branches));
   fs.writeFileSync(path.join(root, 'ref-responses.json'), JSON.stringify(refResponses));
+  fs.writeFileSync(path.join(root, 'graphql-options.json'), JSON.stringify({ graphqlError, partialGraphql, incompleteBlockedBy, oversizedBlockedBy }));
+  fs.writeFileSync(path.join(root, 'calls.log'), '');
   writeExecutable(path.join(bin, 'gh'), `#!/usr/bin/env node
 const fs = require('node:fs');
 const path = require('node:path');
 const root = ${JSON.stringify(root)};
 const args = process.argv.slice(2);
+fs.appendFileSync(path.join(root, 'calls.log'), JSON.stringify(args) + '\\n');
 const issues = JSON.parse(fs.readFileSync(path.join(root, 'issues.json')));
 if (args[0] === 'api' && args[1] === 'user') return console.log(JSON.stringify({ login: 'codex' }));
+if (args[0] === 'api' && args[1] === 'rate_limit') return console.log(JSON.stringify({ remaining: 5000, reset: 0 }));
 if (args[0] === 'repo' && args[1] === 'view') return console.log(JSON.stringify({ nameWithOwner: 'acme/repo' }));
 if (args[0] === 'api' && String(args[1]).includes('/issues?')) return console.log(JSON.stringify(issues));
 if (args[0] === 'api' && String(args[1]).endsWith('/comments?per_page=100')) {
@@ -221,18 +167,24 @@ if (args[0] === 'api' && String(args[1]).includes('/git/ref/heads/')) {
 }
 
 if (args[0] === 'api' && args[1] === 'graphql') {
-  const numberArg = args.find((value) => value.startsWith('number='));
-  const number = numberArg ? numberArg.slice('number='.length) : '';
+  const options = JSON.parse(fs.readFileSync(path.join(root, 'graphql-options.json')));
+  if (options.graphqlError) { console.error('HTTP 500: GraphQL failed'); process.exit(1); }
+  const queryArg = args.find((value) => value.startsWith('query=')) || '';
+  const query = queryArg.slice('query='.length);
   const blocked = JSON.parse(fs.readFileSync(path.join(root, 'blocked.json')));
-  const configured = blocked[number] || [];
-  const pages = Array.isArray(configured) ? [configured] : configured.pages;
-  const afterArg = args.find((value) => value.startsWith('after='));
-  const index = afterArg && afterArg !== 'after=' ? Number(afterArg.slice('after=page-'.length)) : 0;
-  const hasNextPage = index < pages.length - 1;
-  return console.log(JSON.stringify({ data: { repository: { issue: { blockedBy: {
-    nodes: pages[index] || [],
-    ...(configured.omitPageInfo ? {} : { pageInfo: { hasNextPage, endCursor: hasNextPage ? 'page-' + (index + 1) : null } }),
-  } } } } }));
+  const repository = {};
+  for (const match of query.matchAll(/(candidate\\d+):issue\\(number:(\\d+)\\)/g)) {
+    const [, alias, number] = match;
+    if (options.incompleteBlockedBy.map(String).includes(number)) {
+      repository[alias] = { number: Number(number), blockedBy: { nodes: blocked[number] || [] } };
+    } else {
+      repository[alias] = { number: Number(number), blockedBy: {
+        nodes: blocked[number] || [],
+        pageInfo: { hasNextPage: options.oversizedBlockedBy.map(String).includes(number) },
+      } };
+    }
+  }
+  return console.log(JSON.stringify({ data: { repository }, ...(options.partialGraphql ? { errors: [{ message: 'partial result' }] } : {}) }));
 }
 console.error('unexpected gh call: ' + args.join(' '));
 process.exit(90);
@@ -255,6 +207,12 @@ function runSelector(fixture, args = []) {
   });
 }
 
+function graphqlCalls(fixture) {
+  return fs.readFileSync(path.join(fixture.root, 'calls.log'), 'utf8')
+    .trim().split('\n').filter(Boolean).map(JSON.parse)
+    .filter((args) => args[0] === 'api' && args[1] === 'graphql');
+}
+
 for (const [name, body] of [
   ['prefix-array', [{ ref: 'refs/heads/claimed-more', object: { sha: '1'.repeat(40) } }]],
   ['mismatching-object', { ref: 'refs/heads/other', object: { sha: '2'.repeat(40) } }],
@@ -269,6 +227,7 @@ for (const [name, body] of [
   const result = runSelector(fixture, ['--issue', '5']);
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /partial claim state/i);
+  assert.match(result.stderr, /"branch_exists":false/);
 }
 
 {
@@ -293,33 +252,9 @@ for (const [name, body] of [
   assert.deepEqual(JSON.parse(result.stdout), {
     mode: 'lite', result: 'issue', issue: 11, change_id: 'earlier', url: 'https://example.test/issues/11',
   });
-}
-
-{
-  const fixture = makeFixture('released-claim-is-ready-again', {
-    issues: [issue(11, 'released-ready')],
-    comments: {
-      11: [
-        { body: historicalClaim.replaceAll('issue: 1', 'issue: 11').replaceAll('demo', 'released-ready') },
-        { body: releaseForHistoricalClaim.replaceAll('demo', 'released-ready') },
-      ],
-    },
-  });
-  addChange(fixture.root, 'released-ready');
-  const result = runSelector(fixture, ['--issue', '11']);
-  assert.equal(result.status, 0, result.stderr);
-  assert.equal(JSON.parse(result.stdout).issue, 11);
-}
-
-{
-  const fixture = makeFixture('duplicate-target-args', { issues: [issue(11, 'earlier')] });
-  addChange(fixture.root, 'earlier');
-  const duplicateIssue = runSelector(fixture, ['--issue', '11', '--issue', '11']);
-  assert.notEqual(duplicateIssue.status, 0);
-  assert.match(duplicateIssue.stderr, /--issue.*only once|duplicate --issue/i);
-  const duplicateChange = runSelector(fixture, ['--change', 'earlier', '--change', 'earlier']);
-  assert.notEqual(duplicateChange.status, 0);
-  assert.match(duplicateChange.stderr, /--change.*only once|duplicate --change/i);
+  const calls = graphqlCalls(fixture);
+  assert.equal(calls.length, 1, 'all ready candidates must share one blockedBy query');
+  assert.match(calls[0].find((value) => value.startsWith('query=')), /issue\(number:11\).*issue\(number:22\)/);
 }
 
 {
@@ -329,6 +264,13 @@ for (const [name, body] of [
   const result = runSelector(fixture, ['--issue', '22']);
   assert.equal(result.status, 0, result.stderr);
   assert.equal(JSON.parse(result.stdout).issue, 22);
+}
+
+{
+  const fixture = makeFixture('invalid-usage', { issues: [] });
+  const result = runSelector(fixture, ['--unknown', 'value']);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Usage:/i);
 }
 
 {
@@ -417,25 +359,60 @@ for (const [name, body] of [
 }
 
 {
-  const fixture = makeFixture('paginated-blocker', {
-    issues: [issue(11, 'paged-blocked')],
-    blockedBy: { 11: { pages: [[{ number: 6, state: 'CLOSED' }], [{ number: 7, state: 'OPEN' }]] } },
-  });
-  addChange(fixture.root, 'paged-blocked');
-  const result = runSelector(fixture, ['--issue', '11']);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /blocked by open issue #7/i);
-}
-
-{
-  const fixture = makeFixture('missing-page-info', {
+  const fixture = makeFixture('incomplete-blocked-by', {
     issues: [issue(11, 'unsafe-page')],
-    blockedBy: { 11: { pages: [[{ number: 6, state: 'CLOSED' }]], omitPageInfo: true } },
+    blockedBy: { 11: [{ number: 6, state: 'CLOSED' }] },
+    incompleteBlockedBy: [11],
   });
   addChange(fixture.root, 'unsafe-page');
   const result = runSelector(fixture, ['--issue', '11']);
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /safely paginate blockedBy/i);
+  assert.match(result.stderr, /complete blockedBy data/i);
+}
+
+{
+  const fixture = makeFixture('blocked-by-query-error', {
+    issues: [issue(11, 'query-error')],
+    graphqlError: true,
+  });
+  addChange(fixture.root, 'query-error');
+  const result = runSelector(fixture, ['--issue', '11']);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /GraphQL failed|HTTP 500/i);
+}
+
+{
+  const fixture = makeFixture('blocked-by-partial-result', {
+    issues: [issue(11, 'partial-result')],
+    partialGraphql: true,
+  });
+  addChange(fixture.root, 'partial-result');
+  const result = runSelector(fixture, ['--issue', '11']);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /complete blockedBy data/i);
+}
+
+{
+  const fixture = makeFixture('blocked-by-invalid-node', {
+    issues: [issue(11, 'invalid-node')],
+    blockedBy: { 11: [{ number: 7 }] },
+  });
+  addChange(fixture.root, 'invalid-node');
+  const result = runSelector(fixture, ['--issue', '11']);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /complete blockedBy data/i);
+}
+
+{
+  const fixture = makeFixture('too-many-blockers', {
+    issues: [issue(11, 'too-many')],
+    oversizedBlockedBy: [11],
+  });
+  addChange(fixture.root, 'too-many');
+  const result = runSelector(fixture, ['--change', 'too-many']);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /more than 100 blockers|batch is incomplete/i);
+  assert.equal(graphqlCalls(fixture).length, 1);
 }
 
 {
@@ -480,6 +457,10 @@ for (const [name, body] of [
     comments: { 20: [{ body: current }] },
     branches: ['archived-current'],
   });
+  const missing = runSelector(fixture, ['--issue', '20']);
+  assert.notEqual(missing.status, 0);
+  assert.match(missing.stderr, /active or archive paths/i);
+  fs.mkdirSync(path.join(fixture.root, 'openspec', 'changes', 'archive', 'archived-current'), { recursive: true });
   const untargeted = runSelector(fixture);
   assert.equal(untargeted.status, 0, untargeted.stderr);
   assert.equal(JSON.parse(untargeted.stdout).issue, 20,

@@ -9,13 +9,19 @@ import {
   branchExistsFromRefResult,
   classifyIssueClaim,
   parseChangeMapping,
+  summarizeIssueClaim,
 } from './contracts.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const statusHelper = process.env.OPENSPEC_BUDDY_LITE_STATUS_HELPER || path.join(here, 'set-issue-status.sh');
+const loadConfig = path.resolve(here, '../../../openspec-buddy/scripts/load-config.sh');
 
-function command(file, args) {
-  return execFileSync(file, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+function command(file, args, options = {}) {
+  return execFileSync(file, args, {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    ...options,
+  }).trim();
 }
 
 function json(file, args) {
@@ -27,38 +33,15 @@ function attempt(file, args) {
   return spawnSync(file, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
 }
 
-function decodeEnvValue(raw) {
-  const value = raw.trim();
-  if (value.length >= 2 && (
-    (value.startsWith('"') && value.endsWith('"'))
-    || (value.startsWith("'") && value.endsWith("'"))
-  )) {
-    return value.slice(1, -1);
-  }
-  return value;
-}
-
 function readProjectBaseBranch(worktreeRoot) {
-  const configuredPath = String(process.env.OPENSPEC_BUDDY_ENV_FILE || '').trim();
-  const envFile = configuredPath
-    ? path.resolve(configuredPath)
-    : path.join(worktreeRoot, '.env.openspec-buddy');
-  if (!fs.statSync(envFile, { throwIfNoEntry: false })?.isFile()) return '';
-
-  const lines = fs.readFileSync(envFile, 'utf8').split(/\n/);
-  let baseBranch = '';
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index].replace(/\r$/, '').trim();
-    if (!line || line.startsWith('#')) continue;
-    const assignment = line.match(/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
-    if (!assignment) {
-      throw new Error(`Invalid OpenSpec Buddy env file line: ${envFile}:${index + 1}`);
-    }
-    if (assignment[1] === 'OPENSPEC_BUDDY_BASE_BRANCH' && !baseBranch) {
-      baseBranch = decodeEnvValue(assignment[2]).trim();
-    }
-  }
-  return baseBranch;
+  return command('bash', [
+    '-c',
+    'source "$1"; openspec_buddy_require_local_only_config; printf "%s" "$OPENSPEC_BUDDY_BASE_BRANCH"',
+    'buddy-lite-load-config',
+    loadConfig,
+  ], {
+    env: { ...process.env, OPENSPEC_BUDDY_REPO_ROOT: worktreeRoot },
+  });
 }
 
 function readBranch(repo, branch) {
@@ -94,19 +77,7 @@ try {
   }
   const worktreeRoot = fs.realpathSync(command('git', ['rev-parse', '--show-toplevel']));
   const identity = buildIdentity(viewer, worktree, worktreeRoot);
-  let baseBranch = String(process.env.OPENSPEC_BUDDY_BASE_BRANCH || '').trim();
-  if (!baseBranch) {
-    baseBranch = readProjectBaseBranch(worktreeRoot);
-  }
-  if (!baseBranch) {
-    try {
-      baseBranch = command('git', ['config', '--worktree', 'buddy.boundBase'])
-        .replace(/^refs\/remotes\/origin\//, '')
-        .replace(/^origin\//, '');
-    } catch {
-      // Report the missing configured base below.
-    }
-  }
+  const baseBranch = readProjectBaseBranch(worktreeRoot);
   if (!baseBranch || !/^[A-Za-z0-9](?:[A-Za-z0-9._/-]*[A-Za-z0-9])?$/.test(baseBranch) || baseBranch.includes('..')) {
     throw new Error('A valid configured base branch is required for Lite Claim.');
   }
@@ -133,28 +104,42 @@ try {
       changeId,
       branch: changeId,
     });
+    const activeChangeExists = fs.statSync(
+      path.join(worktreeRoot, 'openspec', 'changes', changeId),
+      { throwIfNoEntry: false },
+    )?.isDirectory();
+    const archivedChangeExists = fs.statSync(
+      path.join(worktreeRoot, 'openspec', 'changes', 'archive', changeId),
+      { throwIfNoEntry: false },
+    )?.isDirectory();
+    if (claimClass === 'current' && !activeChangeExists && !archivedChangeExists) {
+      throw new Error(`Local change ${changeId} does not exist in active or archive paths.`);
+    }
     if (claimClass === 'unclaimed'
-      && !fs.statSync(path.join(worktreeRoot, 'openspec', 'changes', changeId), { throwIfNoEntry: false })?.isDirectory()) {
+      && !activeChangeExists) {
       throw new Error(`Local change ${changeId} does not exist.`);
     }
     return claimClass;
   }
 
-  const initial = classifyTruth(readTruth());
+  const initialTruth = readTruth();
+  const initial = classifyTruth(initialTruth);
   if (initial === 'current') {
     emit('current_claim', expected);
   } else if (initial !== 'unclaimed') {
-    throw new Error(`Issue #${issueNumber} has ${initial} Claim truth.`);
+    throw new Error(`Issue #${issueNumber} has ${initial} Claim truth: ${summarizeIssueClaim(initialTruth.issue, initialTruth.comments, initialTruth.branch)}`);
   } else {
     const recoverFailedWrite = (result, action) => {
       if (result.status === 0) return;
-      const recovered = classifyTruth(readTruth());
+      const recoveredTruth = readTruth();
+      const recovered = classifyTruth(recoveredTruth);
       if (recovered === 'current') {
         emit('current_claim', expected);
         process.exit(0);
       }
       const detail = String(result.stderr || result.stdout || '').trim();
-      throw new Error(`${action} failed; complete Claim reread is ${recovered}.${detail ? ` ${detail}` : ''}`);
+      const facts = summarizeIssueClaim(recoveredTruth.issue, recoveredTruth.comments, recoveredTruth.branch);
+      throw new Error(`${action} failed; complete Claim reread is ${recovered}: ${facts}.${detail ? ` ${detail}` : ''}`);
     };
 
     const baseRef = json('gh', ['api', `repos/${repo}/git/ref/heads/${baseBranch}`]);
@@ -178,8 +163,12 @@ try {
     recoverFailedWrite(attempt('gh', ['issue', 'comment', String(issueNumber), '--body', comment]), 'Claim comment write');
     recoverFailedWrite(attempt(statusHelper, [String(issueNumber), 'claimed']), 'Claim status write');
 
-    const final = classifyTruth(readTruth());
-    if (final !== 'current') throw new Error(`Claim verification failed: complete Claim truth is ${final}.`);
+    const finalTruth = readTruth();
+    const final = classifyTruth(finalTruth);
+    if (final !== 'current') {
+      const facts = summarizeIssueClaim(finalTruth.issue, finalTruth.comments, finalTruth.branch);
+      throw new Error(`Claim verification failed: complete Claim truth is ${final}: ${facts}.`);
+    }
     emit('claimed', expected);
   }
 } catch (error) {

@@ -40,8 +40,9 @@ const save = () => fs.writeFileSync(stateFile, JSON.stringify(state));
 fs.appendFileSync(callsFile, args.join(' ') + '\\n');
 if (args[0] === 'repo' && args[1] === 'view') return console.log(JSON.stringify({ nameWithOwner: 'acme/repo' }));
 if (args[0] === 'api' && args[1] === 'user') return console.log(JSON.stringify({ login: 'alice' }));
+if (args[0] === 'api' && args[1] === 'rate_limit') return console.log(JSON.stringify({ remaining: 5000, reset: 0 }));
 if (args[0] === 'api' && String(args[1]).includes('/issues?')) return console.log(JSON.stringify(state.issues));
-if (args[0] === 'api' && args[1] === 'graphql') return console.log(JSON.stringify({ data: { repository: { issue: { blockedBy: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } } } } } }));
+if (args[0] === 'api' && args[1] === 'graphql') return console.log(JSON.stringify({ data: { repository: { candidate0: { number: 17, blockedBy: { nodes: [], pageInfo: { hasNextPage: false } } } } } }));
 if (args[0] === 'api' && String(args[1]).includes('/comments?per_page=100')) {
   const number = Number(args[1].split('/').at(-2));
   return console.log(JSON.stringify(number === 17 ? state.comments : []));
@@ -136,6 +137,7 @@ assert.equal(JSON.parse(current.stdout).result, 'current_claim');
 const archivedCurrentState = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
 archivedCurrentState.issues.find((issue) => issue.number === 17).labels = [{ name: 'status:in-review' }];
 fs.writeFileSync(stateFile, JSON.stringify(archivedCurrentState));
+fs.mkdirSync(path.join(root, 'openspec/changes/archive/demo-change'), { recursive: true });
 fs.rmSync(path.join(root, 'openspec/changes/demo-change'), { recursive: true });
 const archivedCurrentExplicit = run(['--issue', '17']);
 assert.equal(archivedCurrentExplicit.status, 0, archivedCurrentExplicit.stderr);
