@@ -147,6 +147,30 @@ buddy_verify_active_claim_resume 31 issue-31-test issue-31-test integration alic
 }
 
 {
+  const issue = {
+    number: 32,
+    title: "A title that must not replace the proposal identity",
+    labels: [{ name: "status:ready" }, { name: "type:change" }],
+    body: "<!-- openspec-buddy change_id: proposed-change -->\n\n## Goal\n\nKeep the proposed identity.\n",
+  };
+  const built = runNode(builder, issue);
+  assert.equal(built.metadata.change_id, "proposed-change");
+  assert.equal(built.metadata.claim_branch, "proposed-change");
+  assert.equal((built.updatedBody.match(/change_id:/g) || []).length, 1);
+  assert.doesNotMatch(built.updatedBody, /<!-- openspec-buddy change_id:/);
+  assert.match(built.updatedBody, /Keep the proposed identity/);
+}
+
+{
+  const result = spawnSync(process.execPath, [builder], {
+    input: `${JSON.stringify({ number: 33, title: "Do not derive", body: "<!-- openspec-buddy change_id: -->\n" })}\n`,
+    encoding: "utf8",
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /marker must not be empty/);
+}
+
+{
   const claimScript = fs.readFileSync(claimIssue, "utf8");
   const claimChangeScript = fs.readFileSync(claimChange, "utf8");
   assert.match(claimScript, /buddy_write_minimal_claim_lock .*\$tmp_dir\/adopted-body\.md/);

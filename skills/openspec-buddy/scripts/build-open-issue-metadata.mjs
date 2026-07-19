@@ -72,7 +72,19 @@ if (!issueNumber) {
   throw new Error("Issue number is required to build OpenSpec Buddy metadata.");
 }
 
-const changeId = deriveChangeId(issueNumber, issue.title);
+const body = issue.body || "";
+const markerMatches = [...body.matchAll(/<!--[ \t]*openspec-buddy[ \t]+change_id[ \t]*:[ \t]*([^\r\n]*?)[ \t]*-->/gi)];
+if (markerMatches.length > 1) {
+  throw new Error("Issue contains more than one lightweight change_id marker.");
+}
+const markedChangeId = markerMatches[0]?.[1]?.trim() || "";
+if (markerMatches.length === 1 && !markedChangeId) {
+  throw new Error("Lightweight change_id marker must not be empty.");
+}
+if (markedChangeId && !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(markedChangeId)) {
+  throw new Error("Lightweight change_id marker must contain a kebab-case change id.");
+}
+const changeId = markedChangeId || deriveChangeId(issueNumber, issue.title);
 const baseBranch = process.env.OPENSPEC_BUDDY_BASE_BRANCH || issue.base_branch || "";
 const metadata = {
   change_id: changeId,
@@ -88,12 +100,12 @@ const metadata = {
   area: cleanMetadataValue(labelValue(labels, "area"), "general"),
 };
 
-const body = issue.body || "";
 if (/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/.test(body) || /<!--\s*openspec-buddy\s*\r?\n/.test(body)) {
   throw new Error("Issue already contains OpenSpec Buddy metadata.");
 }
 
 const block = metadataBlock(metadata);
-const updatedBody = `${block}\n${body.replace(/^\s+/, "")}`;
+const humanBody = body.replace(/<!--[ \t]*openspec-buddy[ \t]+change_id[ \t]*:[ \t]*[^\r\n]*?[ \t]*-->/gi, "").replace(/^\s+/, "");
+const updatedBody = `${block}\n${humanBody}`;
 
 process.stdout.write(`${JSON.stringify({ metadata, metadataBlock: block, updatedBody }, null, 2)}\n`);

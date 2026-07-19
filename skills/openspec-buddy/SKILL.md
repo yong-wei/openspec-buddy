@@ -43,7 +43,8 @@ The driver owns deterministic helper execution for the current phase. It
 returns only when the phase has a result, a blocker, or an agent-owned handoff.
 If it reports `BLOCKED`, fix only that blocker. If it reports `HANDOFF`, do
 only the requested agent work. After agent-owned work or external state changes,
-run the driver again.
+run the driver again, except for propose registration: the propose HANDOFF is
+the complete model-owned workflow and ends after its single live read-back.
 
 ## Core Invariant
 
@@ -67,6 +68,19 @@ Classify the uncertainty, then invoke the read-only manual Explore phase:
 The driver returns exactly one matching optional method or its native fallback.
 Explore does not mutate repository or GitHub state and is not a Buddy Auto mode.
 
+## Propose Entry
+
+After the required first driver call identifies propose work, invoke the
+lightweight propose handoff explicitly:
+
+```bash
+<openspec-buddy-skill-dir>/scripts/buddy-driver.mjs --mode propose --change <change_id>
+```
+
+Add `--no-issue` only for an intentionally local-only change. The propose
+handoff is model-owned and completes after the single GitHub read-back described
+in `references/core-lifecycle.md`; do not rerun it as a state machine.
+
 ## Required Configuration
 
 默认 `openspec-buddy init` 只生成 Auto lite 所需的 base branch。Manual Buddy 的
@@ -82,9 +96,10 @@ openspec-buddy init --full
 <openspec-buddy-skill-dir>/scripts/check-config.sh
 ```
 
-Default GitHub-backed flows require `OPENSPEC_BUDDY_BASE_BRANCH`,
+Claim, review, and achievement flows require `OPENSPEC_BUDDY_BASE_BRANCH`,
 `OPENSPEC_BUDDY_RELEASE_BRANCH`, `OPENSPEC_BUDDY_PROJECT_OWNER`,
 `OPENSPEC_BUDDY_PROJECT_NUMBER`, and `OPENSPEC_BUDDY_PROJECT_TITLE`.
+Default propose only requires `OPENSPEC_BUDDY_BASE_BRANCH`.
 `propose --no-issue` only requires `OPENSPEC_BUDDY_BASE_BRANCH`.
 
 ## Auto Entry
@@ -108,9 +123,9 @@ Default GitHub-backed flows require `OPENSPEC_BUDDY_BASE_BRANCH`,
 
 - Do not start implementation before the claim lock has been written and
   re-read from GitHub truth.
-- Do not create GitHub issue bodies ad hoc; for propose, first create
-  `openspec/changes/<change_id>/.buddy/issue.md` and validate it with
-  `validate-issue-body.mjs`.
+- For propose, keep exactly one stable `change_id` mapping between the local
+  OpenSpec change and its GitHub Issue. Use native GitHub `blockedBy` for real
+  dependencies; do not duplicate dependency state in Buddy metadata.
 - Do not manually infer review clearance from `gh pr view --comments`.
 - Do not check Acceptance Checklist items from the implementation thread;
   independent review decides approved AC ids.
@@ -118,10 +133,9 @@ Default GitHub-backed flows require `OPENSPEC_BUDDY_BASE_BRANCH`,
   an explicitly targeted Local-only change with no mapped Issue. Auto 的
   Local-only 默认仍走 PR，只有用户明确选择 `--change <change_id> --no-pr`
   时才直接集成。
-- Except for the documented Explore entry, do not use driver options in normal
-  operation. Options such as `--dry-run`, `--mode`, `--issue`, `--pr`, and
-  `--change` are compatibility and diagnostic controls for exceptional recovery
-  only.
+- Use the documented Explore and propose driver invocations in normal operation.
+  Other options such as `--dry-run`, `--issue`, and `--pr` remain compatibility
+  and diagnostic controls for exceptional recovery.
 
 ## Final Report
 

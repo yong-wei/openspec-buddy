@@ -140,12 +140,6 @@ function repoState() {
   };
 }
 
-function proposeBaseSha() {
-  const headSha = run('git', ['rev-parse', 'HEAD'], { optional: true });
-  if (!headSha) throw new Error('Unable to resolve proposal base SHA from HEAD.');
-  return headSha;
-}
-
 function inferMode(opts) {
   if (opts.mode) return opts.mode;
   if (opts.noIssue || opts.change) return 'propose';
@@ -185,30 +179,15 @@ function describeNext(opts) {
     commands.push([path.join(scriptDir, 'claim-issue.sh'), ...(opts.issue ? [opts.issue] : [])]);
     notes.push('Claim uses the minimal lock and post-write GitHub truth verification before branch, Project, or Development-link mutations.');
   } else if (mode === 'propose') {
-    commands.push([path.join(scriptDir, 'check-config.sh'), opts.noIssue ? 'local' : 'core']);
-    if (opts.change) {
-      commands.push([
-        path.join(scriptDir, 'validate-triage.mjs'),
-        `openspec/changes/${opts.change}/.buddy/triage.json`,
-        '--issue',
-        'local',
-        '--change-id',
-        opts.change,
-        '--base-sha',
-        proposeBaseSha(),
-      ]);
-      commands.push([path.join(scriptDir, 'validate-issue-body.mjs'), `openspec/changes/${opts.change}/.buddy/issue.md`]);
-      commands.push([path.join(scriptDir, 'validate-proposal-shape.mjs'), `openspec/changes/${opts.change}/.buddy/proposal-review.yaml`]);
-      commands.push([
-        path.join(scriptDir, 'validate-testing-strategy.mjs'),
-        `openspec/changes/${opts.change}/design.md`,
-        `openspec/changes/${opts.change}/.buddy/issue.md`,
-      ]);
+    commands.push([path.join(scriptDir, 'check-config.sh'), 'local']);
+    notes.push('Create and validate the local OpenSpec change, then commit and push it to the configured base branch.');
+    if (opts.noIssue) {
+      notes.push('Keep this change local-only. Do not create GitHub coordination state.');
     } else {
-      notes.push('Pass --change <change_id> to get the exact issue-body validation command.');
+      notes.push('Create one open GitHub Issue containing exactly one openspec-buddy change_id marker and labels type:change plus status:ready.');
+      notes.push('Record only real dependencies with native GitHub blockedBy relationships, then read the Issue and relationships back once.');
     }
-    notes.push('Create openspec/changes/<change_id>/.buddy/issue.md before any GitHub issue mutation.');
-    notes.push('Run an independent proposal review before creating or updating the GitHub Issue.');
+    notes.push('Propose does not claim the Issue or start implementation.');
   } else if (mode === 'apply') {
     commands.push([path.join(scriptDir, 'sync-base-branch.sh')]);
     if (opts.issue) commands.push([path.join(scriptDir, 'claim-change.sh'), opts.issue]);
@@ -246,37 +225,6 @@ function runDriver(opts) {
     });
     if (result.status !== 0) {
       const output = compactOutput(result);
-      if (mode === 'propose' && command[0] === path.join(scriptDir, 'validate-triage.mjs') && /triage\.json not found/.test(output)) {
-        emitHandoff({
-          mode,
-          commands: [command],
-          notes: [output, 'Collect bounded evidence and record agent-owned triage judgment before proposal validation or any GitHub Issue mutation.'],
-          fields,
-        });
-        return;
-      }
-      if (mode === 'propose' && command[0] === path.join(scriptDir, 'validate-proposal-shape.mjs') && /proposal-review\.yaml not found/.test(output)) {
-        emitHandoff({
-          mode,
-          commands: [command],
-          notes: [output, 'Create the proposal-review manifest before any GitHub Issue mutation.'],
-          fields,
-        });
-        return;
-      }
-      if (
-        mode === 'propose'
-        && command[0] === path.join(scriptDir, 'validate-testing-strategy.mjs')
-        && /(?:design\.md not found|Testing Strategy section missing)/.test(output)
-      ) {
-        emitHandoff({
-          mode,
-          commands: [command],
-          notes: [output, 'Create design.md with an explicit Testing Strategy section before any GitHub Issue mutation.'],
-          fields,
-        });
-        return;
-      }
       emitBlocked({
         mode,
         command,
@@ -285,30 +233,10 @@ function runDriver(opts) {
       });
       process.exit(result.status ?? 1);
     }
-    if (mode === 'propose' && command[0] === path.join(scriptDir, 'validate-triage.mjs')) {
-      let disposition = '';
-      try {
-        disposition = JSON.parse(result.stdout).disposition || '';
-      } catch {
-        emitBlocked({ mode, command, reason: 'validate-triage.mjs returned invalid JSON', output: compactOutput(result) });
-        process.exit(1);
-      }
-      if (disposition !== 'executable') {
-        const transitions = {
-          'series-parent': 'Use the existing tracking-parent and executable-child flow; do not create a second status system.',
-          'needs-human': 'Map the result to status:needs-human and wait for human input.',
-          blocked: 'Map the result to status:blocked with the recorded dependency or conflict evidence.',
-          close: 'Close or abandon the proposal with the explicit triage reason; do not create a duplicate change or Issue.',
-        };
-        emitHandoff({
-          mode,
-          commands: [],
-          notes: [transitions[disposition] || `Consume triage disposition ${disposition} through the existing Buddy status flow.`],
-          fields: [...fields, ['triage_disposition', disposition]],
-        });
-        return;
-      }
-    }
+  }
+  if (mode === 'propose') {
+    emitHandoff({ mode, commands: [], notes, fields });
+    return;
   }
   emitDone({ mode, commands, state });
 }

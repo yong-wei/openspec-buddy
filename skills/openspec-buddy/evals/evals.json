@@ -10,7 +10,7 @@
     {
       "id": 1,
       "prompt": "openspec-buddy propose：为竞技场排行榜筛选重构注册一个新的 change，要求使用 GitHub Issue 协调。",
-      "expected_output": "生成或确认 change_id，先检查 OPENSPEC_BUDDY_* 环境变量，默认调用 openspec-propose 创建本地 OpenSpec change，确认本地路径为 openspec/changes/<change_id>；使用 YAML front matter issue 模板，设置 claim_branch 等于 change_id 且 base_branch 等于配置的 Buddy base branch；issue body 必须包含编号 Acceptance Checklist（AC-1 等）和 task-to-AC 绑定，每个 task 写明 Acceptance、Evidence、Reviewer Check；创建或更新 GitHub Issue 前必须运行 validate-issue-body.mjs 校验 metadata、Acceptance Checklist、task-to-AC 绑定和 task 验收字段；propose 后要求独立审查变更是否单一、边界是否清晰、task 是否可验收、是否应拆分；AC 不在 propose 阶段勾选，后续只能由独立审查根据 evidence 批准勾选；GitHub Issue 默认包含完整协作标签和协调状态，包括 status:ready、type:change、area、series、risk、mode、必要时的 level 和 coupling 标签、父子关系、blockedBy/blocking 依赖关系、GitHub Project membership 与 Project Status Todo；通过 verify-issue-relationships.sh 批量验证父子和依赖关系，避免主流程手写 GraphQL；说明不会 claim 或开始实现。",
+      "expected_output": "生成或确认 change_id，至少检查 OPENSPEC_BUDDY_BASE_BRANCH，调用 openspec-propose 创建并验证 openspec/changes/<change_id>；用模型判断范围、测试和验收，不要求 triage、proposal-review、Testing Strategy、task-to-AC 或独立提案审核工件；审核后先提交并推送到基础分支，再搜索 open 和 closed Issue，保证 change_id 映射唯一；Issue body 恰好包含一个 <!-- openspec-buddy change_id: <change_id> --> 标记，只要求 type:change 与 status:ready 标签；真实依赖只写 GitHub 原生 blockedBy，不在 metadata 中双写；创建后读取 Issue 和依赖关系确认一次；不使用 Project 或完整标签矩阵，也不会 claim 或开始实现。",
       "files": []
     },
     {

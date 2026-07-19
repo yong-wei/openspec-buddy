@@ -8,7 +8,7 @@
 这两个技能不替代 OpenSpec 自身的设计和实现技能。推荐配合方式是：
 
 1. 对已有 GitHub issue，先用 `openspec-buddy claim [issue]` 建立最小 claim lock，再通过 `.buddy/triage.json` 记录问题真实性、重复实现、spec/active change 冲突、信息充分性和执行 disposition；不指定 issue 时会选择最小编号的可领取开放 issue。已安装的研究类方法技能可以辅助收集证据，未安装时使用 Buddy 原生仓库与 GitHub 检查，工件和门禁不变。
-2. 对还没有 issue 的新变更，用 `openspec-buddy propose` 默认创建本地 OpenSpec change 并登记 GitHub Issue；`.buddy/triage.json` 先完成真实性与重复检查，proposal review 通过 `.buddy/proposal-review.yaml` 明确记录纵向切片、series children、依赖完整性和宽范围迁移策略，并通过 `design.md` 的 `## Testing Strategy` 确定公共测试 seam 与每项 AC 的证据映射，三项合同都在 Issue 变更前校验。该 issue 会带上协作标签、父子/依赖关系和 GitHub Project `Todo` 状态。若明确希望单人本地推进，不登记 GitHub，可使用 `openspec-buddy propose --no-issue`，此时只创建 `openspec/changes/<change_id>`，不创建或更新 GitHub Issue。
+2. 对还没有 issue 的新变更，用 `openspec-buddy propose` 创建并验证本地 OpenSpec change，审核后先提交、推送到配置的基础分支，再登记 GitHub Issue。默认登记只要求唯一 `change_id` 标记、`type:change`、`status:ready` 和真实存在的 GitHub 原生 `blockedBy` 关系；范围、测试和验收由执行模型结合 OpenSpec 工件判断，不再由额外 manifest 和格式 validator 阻断。若明确希望单人本地推进，不登记 GitHub，可使用 `openspec-buddy propose --no-issue`。
 3. 用 `openspec-buddy apply` 在已 claim 的 GitHub Issue 上完成代码、测试和 spec 同步。
 4. 用 `openspec-buddy achieve` 在 PR 合并后同步 GitHub Issue、GitHub Project 和 OpenSpec 归档记录。
 5. 需要自动处理一项或连续处理全部 Available Issue 时，使用 `openspec-buddy-auto` 的公开入口。无参数为 lite；`--issue <number>` 和 `--change <change_id>` 是单目标。Local-only 默认仍创建 PR，只有明确的 `--change <change_id> --no-pr` 才走 fast-forward 直接集成。原 full 用户改用 `scripts/buddy-auto.mjs full`。
