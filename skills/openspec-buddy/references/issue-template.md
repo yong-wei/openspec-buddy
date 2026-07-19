@@ -28,8 +28,11 @@ type:change
 status:ready
 ```
 
-The marker must appear exactly once. Search open and closed Issues for the same
-marker before creating a new Issue. Extra labels and sections are optional.
+The marker must appear exactly once. Before creating a new Issue, inspect open
+and closed Issue bodies for the same mapping in every supported form:
+lightweight marker, legacy hidden metadata, and YAML front matter. Treat
+duplicate sources, conflicting IDs, or multiple mapped Issues as a conflict.
+Extra labels and sections are optional.
 
 Use GitHub native `blockedBy` relationships for real dependencies. Do not copy
 parent or dependency edges into the Issue body. A tracking parent may be used

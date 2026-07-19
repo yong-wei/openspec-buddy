@@ -82,8 +82,12 @@ Buddy owns only coordination identity and dependencies.
    comment linking the existing mapping, and report the conflict. Then stop;
    propose does not claim the Issue or start implementation.
 
-Before creating an Issue, search existing open and closed Issues for the exact
-`change_id` mapping. Reuse a unique existing Issue and stop on duplicates.
+Before creating an Issue, inspect the bodies of existing open and closed Issues
+for the exact `change_id` mapping. Recognize all formats accepted by Auto lite:
+the lightweight single-line marker, legacy hidden metadata, and YAML front
+matter. Reuse a unique existing Issue; stop on conflicting IDs, duplicate
+mapping sources, or multiple Issues for the same change. Apply the same parsing
+rules to the post-create uniqueness check.
 Use ordinary engineering judgment for scope, duplication, testing, and
 acceptance. `.buddy/triage.json`, `.buddy/proposal-review.yaml`, a prescribed
 Testing Strategy schema, task-to-AC mapping, Project membership, and independent

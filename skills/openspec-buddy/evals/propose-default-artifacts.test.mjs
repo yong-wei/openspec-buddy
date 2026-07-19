@@ -18,6 +18,8 @@ assert.match(lifecycle, /contains exactly[\s\S]*one mapping marker/i);
 assert.match(lifecycle, /`type:change` and `status:ready`/i);
 assert.match(lifecycle, /native `blockedBy` relationship/i);
 assert.match(lifecycle, /concurrent duplicate[\s\S]*close the newly created Issue/i);
+assert.match(lifecycle, /lightweight single-line marker[\s\S]*legacy hidden metadata[\s\S]*YAML front[\s\S]*matter/i);
+assert.match(template, /lightweight marker, legacy hidden metadata, and YAML front matter/i);
 assert.match(lifecycle, /not default propose gates/i);
 assert.match(template, /<!-- openspec-buddy change_id: example-change-id -->/);
 assert.doesNotMatch(driver, /validate-(?:triage|issue-body|proposal-shape|testing-strategy)\.mjs/);
