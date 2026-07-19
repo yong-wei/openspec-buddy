@@ -75,6 +75,16 @@ Lite 的 Review Request 固定为：
 @codex review 中文回复，即使没有重大问题也必须给出显式回复
 ```
 
+Lite 每次检查 Review Window 时使用一次性只读快照读取全部 Review 来源：
+
+```bash
+$HOME/.agents/skills/openspec-buddy-auto/scripts/read-review-evidence.mjs --pr <pr-number-or-url>
+```
+
+快照同时包含当前 head、顶层评论及 reactions、Pull Reviews、inline review
+comments 和 review threads。脚本只提供来源与原始证据；等待、评阅接受、清场
+判断和重试仍由主模型完成。
+
 Lite 不读取 `OPENSPEC_BUDDY_PR_REVIEW_REQUEST`。需要 manual Buddy 的完整
 GitHub Project 协调或现有 Auto full controller 时，运行：
 

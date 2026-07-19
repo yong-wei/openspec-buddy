@@ -23,7 +23,10 @@ for (const args of [
   assert.match(result.stdout, /^HANDOFF$/m);
   assert.match(result.stdout, /check-config\.sh local/);
   assert.doesNotMatch(result.stdout, /validate-(?:triage|issue-body|proposal-shape|testing-strategy)/);
-  assert.doesNotMatch(result.stdout, /Project|independent proposal review/i);
+  const requiredAction = result.stdout.split('\n').find((line) => line.startsWith('required_action:')) || '';
+  const commands = result.stdout.split('\n').find((line) => line.startsWith('commands:')) || '';
+  assert.doesNotMatch(requiredAction, /Project|independent proposal review/i);
+  assert.doesNotMatch(commands, /(?:add-to-project|set-project-status|project-coordination)/i);
 }
 
 {
