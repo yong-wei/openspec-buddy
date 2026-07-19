@@ -7,7 +7,7 @@ import { applyReviewTruthToLane, classifyProbe } from './review-truth.mjs';
 import { writeLaneState } from './lane-state.mjs';
 
 const autoScriptDir = path.dirname(fileURLToPath(import.meta.url));
-const defaultCoreScriptDir = path.resolve(autoScriptDir, '../../openspec-buddy/scripts');
+const defaultCoreScriptDir = path.resolve(autoScriptDir, '../../../openspec-buddy/scripts');
 
 function defaultRun(command, args, options = {}) {
   return spawnSync(command, args, {

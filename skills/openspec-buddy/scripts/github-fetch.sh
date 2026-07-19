@@ -758,7 +758,9 @@ buddy_graphql_api() {
   if ! buddy_graphql_guard; then
     return 1
   fi
-  buddy_metrics_event "$(buddy_cache_dir)" github graphql managed_request '{"surface":"graphql"}'
+  if [[ "${OPENSPEC_BUDDY_GRAPHQL_METRICS:-1}" != "0" ]]; then
+    buddy_metrics_event "$(buddy_cache_dir)" github graphql managed_request '{"surface":"graphql"}'
+  fi
   gh api graphql "$@"
 }
 

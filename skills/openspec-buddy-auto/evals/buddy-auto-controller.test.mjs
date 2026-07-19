@@ -5,15 +5,15 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { signReceipt } from '../scripts/receipt-truth.mjs';
+import { signReceipt } from '../scripts/full/receipt-truth.mjs';
 
 const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../../..');
-const controllerModule = await import(pathToFileURL(path.join(repoRoot, 'skills/openspec-buddy-auto/scripts/controller-state.mjs')).href);
-const laneStateModule = await import(pathToFileURL(path.join(repoRoot, 'skills/openspec-buddy-auto/scripts/lane-state.mjs')).href);
-const reconcilerModule = await import(pathToFileURL(path.join(repoRoot, 'skills/openspec-buddy-auto/scripts/controller-reconciler.mjs')).href);
-const helper = path.join(repoRoot, 'skills/openspec-buddy-auto/scripts/buddy-auto.mjs');
-const singleDriverHelper = path.join(repoRoot, 'skills/openspec-buddy-auto/scripts/buddy-auto-driver.mjs');
-const laneDriverHelper = path.join(repoRoot, 'skills/openspec-buddy-auto/scripts/buddy-auto-lane-driver.mjs');
+const controllerModule = await import(pathToFileURL(path.join(repoRoot, 'skills/openspec-buddy-auto/scripts/full/controller-state.mjs')).href);
+const laneStateModule = await import(pathToFileURL(path.join(repoRoot, 'skills/openspec-buddy-auto/scripts/full/lane-state.mjs')).href);
+const reconcilerModule = await import(pathToFileURL(path.join(repoRoot, 'skills/openspec-buddy-auto/scripts/full/controller-reconciler.mjs')).href);
+const helper = path.join(repoRoot, 'skills/openspec-buddy-auto/scripts/full/buddy-auto.mjs');
+const singleDriverHelper = path.join(repoRoot, 'skills/openspec-buddy-auto/scripts/full/buddy-auto-driver.mjs');
+const laneDriverHelper = path.join(repoRoot, 'skills/openspec-buddy-auto/scripts/full/buddy-auto-lane-driver.mjs');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'buddy-auto-controller-'));
 
 function makeExecutable(file, body) {

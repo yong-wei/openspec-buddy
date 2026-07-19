@@ -1,0 +1,3 @@
+# Let the model judge review clearance in lightweight mode
+
+For PR delivery, the default lightweight Buddy Auto mode relies on the GPT-5.6 main model to determine whether an explicit Codex Clearance Comment applies to the latest submitted revision. It does not use the persisted receipts, cache-backed controller state, or verifier framework retained by full mode; quota exhaustion, service failure, ambiguity, and clearance for an older revision all block automation. This trades machine-enforced proof for lower execution overhead while preserving the non-negotiable requirement that an explicit current-revision clearance must exist before PR merge; explicit Direct Integration Delivery has no PR review surface and instead requires Local Review.

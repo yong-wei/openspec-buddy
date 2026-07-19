@@ -23,7 +23,7 @@ import { applyReviewTruthToLane, classifyProbe, laneReviewTruth, mergeReviewTrut
 import { runLaneAction } from './lane-action-runner.mjs';
 
 const autoScriptDir = path.dirname(fileURLToPath(import.meta.url));
-const defaultCoreScriptDir = path.resolve(autoScriptDir, '../../openspec-buddy/scripts');
+const defaultCoreScriptDir = path.resolve(autoScriptDir, '../../../openspec-buddy/scripts');
 const coreScriptDir = process.env.OPENSPEC_BUDDY_CORE_SCRIPT_DIR || defaultCoreScriptDir;
 const singleDriver = process.env.OPENSPEC_BUDDY_AUTO_SINGLE_DRIVER || path.join(autoScriptDir, 'buddy-auto-driver.mjs');
 const laneSwitchGate = path.join(autoScriptDir, 'lane-switch-gate.mjs');
@@ -606,7 +606,7 @@ function recoverUnauthorizedMergeLanes(state) {
   if (!controllerChildMode()) {
     emitBlocked([
       ['stage', 'unauthorized-merge-recovery'],
-      ['reason', 'Unauthorized merge recovery is controller-owned; rerun through buddy-auto.mjs.'],
+      ['reason', 'Unauthorized merge recovery is controller-owned; rerun through buddy-auto.mjs full.'],
     ]);
     return true;
   }
@@ -2510,7 +2510,7 @@ function main() {
   if (!controllerChildMode()) {
     emitBlocked([
       ['stage', 'controller-owned'],
-      ['reason', 'Buddy Auto child drivers are internal. Run buddy-auto.mjs instead.'],
+      ['reason', 'Buddy Auto child drivers are internal. Run buddy-auto.mjs full instead.'],
     ]);
     return;
   }

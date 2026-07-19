@@ -69,7 +69,14 @@ Explore does not mutate repository or GitHub state and is not a Buddy Auto mode.
 
 ## Required Configuration
 
-Before normal GitHub-backed commands, the driver will direct you to:
+默认 `openspec-buddy init` 只生成 Auto lite 所需的 base branch。Manual Buddy 的
+GitHub/Project 协调需要先运行：
+
+```bash
+openspec-buddy init --full
+```
+
+随后 driver 会要求检查：
 
 ```bash
 <openspec-buddy-skill-dir>/scripts/check-config.sh
@@ -79,6 +86,12 @@ Default GitHub-backed flows require `OPENSPEC_BUDDY_BASE_BRANCH`,
 `OPENSPEC_BUDDY_RELEASE_BRANCH`, `OPENSPEC_BUDDY_PROJECT_OWNER`,
 `OPENSPEC_BUDDY_PROJECT_NUMBER`, and `OPENSPEC_BUDDY_PROJECT_TITLE`.
 `propose --no-issue` only requires `OPENSPEC_BUDDY_BASE_BRANCH`.
+
+## Auto Entry
+
+需要自动执行时调用 `openspec-buddy-auto` 技能的公开
+`scripts/buddy-auto.mjs`。无参数默认为 lite；现有 controller 工作流必须显式调用
+`scripts/buddy-auto.mjs full`。Manual Buddy 不直接调用 Auto 的 lite 或 full 内部脚本。
 
 ## References
 
@@ -102,7 +115,9 @@ Default GitHub-backed flows require `OPENSPEC_BUDDY_BASE_BRANCH`,
 - Do not check Acceptance Checklist items from the implementation thread;
   independent review decides approved AC ids.
 - Do not treat `--no-pr` as valid for issue-backed changes. It only applies to
-  explicitly local-only `--no-issue` changes.
+  an explicitly targeted Local-only change with no mapped Issue. Auto 的
+  Local-only 默认仍走 PR，只有用户明确选择 `--change <change_id> --no-pr`
+  时才直接集成。
 - Except for the documented Explore entry, do not use driver options in normal
   operation. Options such as `--dry-run`, `--mode`, `--issue`, `--pr`, and
   `--change` are compatibility and diagnostic controls for exceptional recovery

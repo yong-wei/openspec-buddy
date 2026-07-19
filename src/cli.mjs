@@ -9,8 +9,9 @@ const currentFile = fileURLToPath(import.meta.url);
 const packageRoot = path.resolve(path.dirname(currentFile), "..");
 const skillNames = ["openspec-buddy", "openspec-buddy-auto"];
 
-const configKeys = [
-  "OPENSPEC_BUDDY_BASE_BRANCH",
+const liteConfigKeys = ["OPENSPEC_BUDDY_BASE_BRANCH"];
+const fullConfigKeys = [
+  ...liteConfigKeys,
   "OPENSPEC_BUDDY_RELEASE_BRANCH",
   "OPENSPEC_BUDDY_PROJECT_OWNER",
   "OPENSPEC_BUDDY_PROJECT_NUMBER",
@@ -77,7 +78,7 @@ export function renderConfigFile(values) {
     "# This file is project-local and should normally stay out of git.",
   ];
 
-  for (const key of configKeys) {
+  for (const key of fullConfigKeys) {
     const value = values[key];
     if (value === undefined || value === null || value === "") {
       continue;
@@ -88,9 +89,9 @@ export function renderConfigFile(values) {
   return `${lines.join("\n")}\n`;
 }
 
-export function writeConfigFile(filePath, values, { force = false } = {}) {
-  const missing = configKeys
-    .slice(0, 5)
+export function writeConfigFile(filePath, values, { force = false, full = false } = {}) {
+  const requiredKeys = full ? fullConfigKeys.slice(0, 5) : liteConfigKeys;
+  const missing = requiredKeys
     .filter((key) => values[key] === undefined || values[key] === null || values[key] === "");
   if (missing.length > 0) {
     throw new Error(`Missing required configuration: ${missing.join(", ")}`);
@@ -145,9 +146,10 @@ async function runInit(args) {
   const { flags } = parseArgs(args);
   const filePath = path.resolve(String(flags.file ?? ".env.openspec-buddy"));
   const force = Boolean(flags.force);
-  const values = await collectConfigValues(flags);
+  const full = Boolean(flags.full);
+  const values = await collectConfigValues(flags, { full });
 
-  writeConfigFile(filePath, values, { force });
+  writeConfigFile(filePath, values, { force, full });
   process.stdout.write(`wrote: ${filePath}\n`);
 }
 
@@ -172,7 +174,7 @@ function runDoctor(args) {
   process.stdout.write(`OpenSpec Buddy skills are installed in ${targetRoot}\n`);
 }
 
-async function collectConfigValues(flags) {
+async function collectConfigValues(flags, { full }) {
   const defaults = {
     OPENSPEC_BUDDY_BASE_BRANCH: String(flags["base-branch"] ?? currentGitBranch() ?? "integration"),
     OPENSPEC_BUDDY_RELEASE_BRANCH: String(flags["release-branch"] ?? "main"),
@@ -182,9 +184,10 @@ async function collectConfigValues(flags) {
     OPENSPEC_BUDDY_PR_REVIEW_REQUEST: String(flags["review-request"] ?? flags["pr-review-request"] ?? ""),
   };
 
-  const missingRequired = configKeys.slice(0, 5).filter((key) => defaults[key] === "");
+  const requiredKeys = full ? fullConfigKeys.slice(0, 5) : liteConfigKeys;
+  const missingRequired = requiredKeys.filter((key) => defaults[key] === "");
   if (missingRequired.length === 0 && (flags.yes || !process.stdin.isTTY)) {
-    return defaults;
+    return full ? defaults : { OPENSPEC_BUDDY_BASE_BRANCH: defaults.OPENSPEC_BUDDY_BASE_BRANCH };
   }
   if (!process.stdin.isTTY) {
     throw new Error(`Missing required configuration in non-interactive mode: ${missingRequired.join(", ")}`);
@@ -192,8 +195,12 @@ async function collectConfigValues(flags) {
 
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   try {
+    const baseBranch = await ask(rl, "Buddy base branch", defaults.OPENSPEC_BUDDY_BASE_BRANCH);
+    if (!full) {
+      return { OPENSPEC_BUDDY_BASE_BRANCH: baseBranch };
+    }
     return {
-      OPENSPEC_BUDDY_BASE_BRANCH: await ask(rl, "Buddy base branch", defaults.OPENSPEC_BUDDY_BASE_BRANCH),
+      OPENSPEC_BUDDY_BASE_BRANCH: baseBranch,
       OPENSPEC_BUDDY_RELEASE_BRANCH: await ask(rl, "Release branch", defaults.OPENSPEC_BUDDY_RELEASE_BRANCH),
       OPENSPEC_BUDDY_PROJECT_OWNER: await ask(rl, "GitHub Project owner", defaults.OPENSPEC_BUDDY_PROJECT_OWNER),
       OPENSPEC_BUDDY_PROJECT_NUMBER: await ask(rl, "GitHub Project number", defaults.OPENSPEC_BUDDY_PROJECT_NUMBER),
@@ -306,7 +313,7 @@ function helpText() {
 
 Usage:
   openspec-buddy install [--target agents|codex|project] [--mode copy|symlink] [--force]
-  openspec-buddy init [--file .env.openspec-buddy] [--force]
+  openspec-buddy init [--full] [--file .env.openspec-buddy] [--force]
   openspec-buddy doctor [--target agents|codex|project]
   openspec-buddy version
 
@@ -319,5 +326,6 @@ Examples:
   openspec-buddy install --target agents --force
   openspec-buddy install --target project --mode copy
   openspec-buddy init
+  openspec-buddy init --full
 `;
 }

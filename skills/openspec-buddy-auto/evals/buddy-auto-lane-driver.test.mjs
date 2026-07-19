@@ -4,10 +4,10 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { signReceipt } from '../scripts/receipt-truth.mjs';
+import { signReceipt } from '../scripts/full/receipt-truth.mjs';
 
 const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../../..');
-const helper = path.join(repoRoot, 'skills/openspec-buddy-auto/scripts/buddy-auto-lane-driver.mjs');
+const helper = path.join(repoRoot, 'skills/openspec-buddy-auto/scripts/full/buddy-auto-lane-driver.mjs');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'buddy-auto-lanes-'));
 
 function makeExecutable(file, body) {

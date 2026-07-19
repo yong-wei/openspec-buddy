@@ -8,7 +8,7 @@ import { readControllerState } from './controller-state.mjs';
 import { signReceipt, validSignedReceipt } from './receipt-truth.mjs';
 
 const autoScriptDir = path.dirname(fileURLToPath(import.meta.url));
-const defaultCoreScriptDir = path.resolve(autoScriptDir, '../../openspec-buddy/scripts');
+const defaultCoreScriptDir = path.resolve(autoScriptDir, '../../../openspec-buddy/scripts');
 const coreScriptDir = process.env.OPENSPEC_BUDDY_CORE_SCRIPT_DIR || defaultCoreScriptDir;
 
 const stages = new Set([
@@ -165,7 +165,7 @@ function directRunBlockedByController() {
   } catch {
     // Child drivers are controller-owned even before a state file exists.
   }
-  return 'Buddy Auto child drivers are internal. Run buddy-auto.mjs instead.';
+  return 'Buddy Auto child drivers are internal. Run buddy-auto.mjs full instead.';
 }
 
 function outputBlock(title, entries = []) {
@@ -562,7 +562,7 @@ function postMergeAuthorizationValid(opts, state) {
 function recoverUnauthorizedMerge(opts, state) {
   if (!truthy(process.env.OPENSPEC_BUDDY_AUTO_UNAUTHORIZED_MERGE_RECOVERY)) return { attempted: false };
   if (!controllerChildMode()) {
-    return { attempted: true, ok: false, reason: 'Unauthorized merge recovery is controller-owned; rerun through buddy-auto.mjs.' };
+    return { attempted: true, ok: false, reason: 'Unauthorized merge recovery is controller-owned; rerun through buddy-auto.mjs full.' };
   }
   const reason = String(process.env.OPENSPEC_BUDDY_AUTO_RECOVERY_REASON || '').trim();
   if (!reason) {

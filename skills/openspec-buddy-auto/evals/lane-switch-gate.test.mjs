@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../../..');
-const helper = path.join(repoRoot, 'skills/openspec-buddy-auto/scripts/lane-switch-gate.mjs');
+const helper = path.join(repoRoot, 'skills/openspec-buddy-auto/scripts/full/lane-switch-gate.mjs');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'buddy-lane-switch-'));
 const binDir = path.join(tmp, 'bin');
 const coreDir = path.join(tmp, 'core');

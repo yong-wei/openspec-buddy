@@ -1,0 +1,174 @@
+#!/usr/bin/env node
+import { execFileSync, spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import {
+  buildIdentity,
+  branchExistsFromRefResult,
+  classifyIssueClaim,
+  localDeliveryExists,
+  parseChangeMapping,
+  summarizeIssueClaim,
+} from './contracts.mjs';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const statusHelper = process.env.OPENSPEC_BUDDY_LITE_STATUS_HELPER || path.join(here, 'set-issue-status.sh');
+const loadConfig = path.resolve(here, '../../../openspec-buddy/scripts/load-config.sh');
+
+function command(file, args, options = {}) {
+  return execFileSync(file, args, {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    ...options,
+  }).trim();
+}
+
+function json(file, args) {
+  const output = command(file, args);
+  return output ? JSON.parse(output) : null;
+}
+
+function attempt(file, args) {
+  return spawnSync(file, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+}
+
+function readProjectBaseBranch(worktreeRoot) {
+  return command('bash', [
+    '-c',
+    'source "$1"; openspec_buddy_require_local_only_config; printf "%s" "$OPENSPEC_BUDDY_BASE_BRANCH"',
+    'buddy-lite-load-config',
+    loadConfig,
+  ], {
+    env: { ...process.env, OPENSPEC_BUDDY_REPO_ROOT: worktreeRoot },
+  });
+}
+
+function readBranch(repo, branch) {
+  const result = attempt('gh', ['api', `repos/${repo}/git/ref/heads/${branch}`]);
+  return branchExistsFromRefResult(result, branch);
+}
+
+function emit(result, expected) {
+  process.stdout.write(`${JSON.stringify({
+    mode: 'lite',
+    result,
+    issue: expected.issue,
+    change_id: expected.changeId,
+    branch: expected.changeId,
+  })}\n`);
+}
+
+try {
+  const issueNumber = Number(process.argv[2]);
+  const changeId = String(process.argv[3] || '');
+  if (!Number.isInteger(issueNumber) || issueNumber < 1 || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(changeId)) {
+    throw new Error('Usage: claim-issue.mjs <issue-number> <change-id>');
+  }
+
+  const repo = json('gh', ['repo', 'view', '--json', 'nameWithOwner'])?.nameWithOwner;
+  const viewer = json('gh', ['api', 'user'])?.login;
+  if (!repo || !viewer) throw new Error('Could not resolve GitHub repository and viewer.');
+  let worktree = '';
+  try {
+    worktree = command('git', ['config', '--worktree', 'buddy.worktreeAlias']);
+  } catch {
+    // The shared identity contract supplies the canonical-path fallback.
+  }
+  const worktreeRoot = fs.realpathSync(command('git', ['rev-parse', '--show-toplevel']));
+  const identity = buildIdentity(viewer, worktree, worktreeRoot);
+  const baseBranch = readProjectBaseBranch(worktreeRoot);
+  if (!baseBranch || !/^[A-Za-z0-9](?:[A-Za-z0-9._/-]*[A-Za-z0-9])?$/.test(baseBranch) || baseBranch.includes('..')) {
+    throw new Error('A valid configured base branch is required for Lite Claim.');
+  }
+  const expected = { issue: issueNumber, changeId, ...identity };
+
+  function readTruth() {
+    const issue = json('gh', ['api', `repos/${repo}/issues/${issueNumber}`]);
+    const commentsResponse = json('gh', ['api', `repos/${repo}/issues/${issueNumber}/comments?per_page=100`, '--paginate', '--slurp']) || [];
+    const comments = Array.isArray(commentsResponse[0]) ? commentsResponse.flat() : commentsResponse;
+    return { issue, comments, branch: readBranch(repo, changeId) };
+  }
+
+  function classifyTruth(truth) {
+    if (String(truth.issue?.state || '').toUpperCase() !== 'OPEN') {
+      throw new Error(`Issue #${issueNumber} must remain open throughout Claim.`);
+    }
+    const mapping = parseChangeMapping(truth.issue?.body || '');
+    if (mapping.conflict || mapping.changeId !== changeId || mapping.sources.length !== 1) {
+      throw new Error(`Issue #${issueNumber} mapping must uniquely remain ${changeId}; observed ${mapping.changeId || 'none'}.`);
+    }
+    const claimClass = classifyIssueClaim(truth.issue, truth.comments, identity, {
+      branchExists: truth.branch,
+      issue: issueNumber,
+      changeId,
+      branch: changeId,
+    });
+    const activeChangeExists = fs.statSync(
+      path.join(worktreeRoot, 'openspec', 'changes', changeId),
+      { throwIfNoEntry: false },
+    )?.isDirectory();
+    if (claimClass === 'current' && !localDeliveryExists(worktreeRoot, changeId)) {
+      throw new Error(`Local change ${changeId} does not exist in active or dated archive paths.`);
+    }
+    if (claimClass === 'unclaimed'
+      && !activeChangeExists) {
+      throw new Error(`Local change ${changeId} does not exist.`);
+    }
+    return claimClass;
+  }
+
+  const initialTruth = readTruth();
+  const initial = classifyTruth(initialTruth);
+  if (initial === 'current') {
+    emit('current_claim', expected);
+  } else if (initial !== 'unclaimed') {
+    throw new Error(`Issue #${issueNumber} has ${initial} Claim truth: ${summarizeIssueClaim(initialTruth.issue, initialTruth.comments, initialTruth.branch)}`);
+  } else {
+    const recoverFailedWrite = (result, action) => {
+      if (result.status === 0) return;
+      const recoveredTruth = readTruth();
+      const recovered = classifyTruth(recoveredTruth);
+      if (recovered === 'current') {
+        emit('current_claim', expected);
+        process.exit(0);
+      }
+      const detail = String(result.stderr || result.stdout || '').trim();
+      const facts = summarizeIssueClaim(recoveredTruth.issue, recoveredTruth.comments, recoveredTruth.branch);
+      throw new Error(`${action} failed; complete Claim reread is ${recovered}: ${facts}.${detail ? ` ${detail}` : ''}`);
+    };
+
+    const baseRef = json('gh', ['api', `repos/${repo}/git/ref/heads/${baseBranch}`]);
+    const baseSha = String(baseRef?.object?.sha || '');
+    if (!/^[0-9a-f]{40}$/i.test(baseSha)) throw new Error(`Could not resolve remote base branch ${baseBranch} SHA.`);
+    recoverFailedWrite(attempt('gh', [
+      'api', '--method', 'POST', `repos/${repo}/git/refs`,
+      '-f', `ref=refs/heads/${changeId}`,
+      '-f', `sha=${baseSha}`,
+    ]), 'Claim branch creation');
+    recoverFailedWrite(attempt('gh', ['issue', 'edit', String(issueNumber), '--add-assignee', viewer]), 'Claim assignee write');
+    const comment = [
+      'OpenSpec Buddy Claim',
+      '',
+      `issue: ${issueNumber}`,
+      `change_id: ${changeId}`,
+      `branch: ${changeId}`,
+      `agent: ${identity.agent}`,
+      `worktree_alias: ${identity.worktree}`,
+    ].join('\n');
+    recoverFailedWrite(attempt('gh', ['issue', 'comment', String(issueNumber), '--body', comment]), 'Claim comment write');
+    recoverFailedWrite(attempt(statusHelper, [String(issueNumber), 'claimed']), 'Claim status write');
+
+    const finalTruth = readTruth();
+    const final = classifyTruth(finalTruth);
+    if (final !== 'current') {
+      const facts = summarizeIssueClaim(finalTruth.issue, finalTruth.comments, finalTruth.branch);
+      throw new Error(`Claim verification failed: complete Claim truth is ${final}: ${facts}.`);
+    }
+    emit('claimed', expected);
+  }
+} catch (error) {
+  process.stderr.write(`${error.message}\n`);
+  process.exitCode = 1;
+}

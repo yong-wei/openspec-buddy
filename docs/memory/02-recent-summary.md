@@ -40,6 +40,7 @@
 - `v0.23.1` 发布线补齐 review-wait cache-refresh eval 的负载容错：首次外层预算耗尽时清理专属缓存和后代进程，再以双倍预算重试一次；首次运行前也清空缓存，避免旧缓存掩盖刷新回归。
 - `v0.24.0` 发布线为 proposal `design.md` 增加 `## Testing Strategy` 确定性合同：行为型及中高风险变更必须预先确定公共测试 seam，每个 Acceptance Checklist AC 必须映射到自动证据或带不可自动化原因的人工检查；Apply 与 Auto 只消费已批准 seam，Matt TDD 是否可用不改变 Buddy 状态、回执、工件或门禁。
 - `v0.25.0` 发布线为 claim/propose 增加证据绑定的真实性、重复实现、spec/active change 冲突与 readiness triage 合同；普通和预备 Issue 均先取得最小 claim lock，再按现有 Buddy 状态机推进。series parent 只有在已关联的可执行子 Issue 全部为开放 `type:change + status:ready` 后才能转换 tracking；失败清理、终态 Release 与 stale recovery 保持远端状态和 claim 真源一致。
+- `v0.26.0` 将 Auto 无参数默认切换为面向 GPT-5.6 主模型的 lite：确定性脚本只负责 Available Issue 选择、排他 Claim 和人工可见状态，实施、Local Review、同 PR archive、最新 head Codex 清场、合并与 Issue 收尾由主模型依据实时事实完成。原 controller、lane、cache、receipt 与恢复状态保留在显式 `scripts/buddy-auto.mjs full`，既有 full 状态无需迁移。`openspec-buddy init` 默认只写 base branch，完整配置改用 `init --full`。
 
 ## 当前警惕点
 

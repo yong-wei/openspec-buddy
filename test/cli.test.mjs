@@ -49,7 +49,7 @@ test("installSkills can install development symlinks", () => {
   assert.equal(fs.readlinkSync(linkPath), path.join(sourceRoot, "openspec-buddy"));
 });
 
-test("writeConfigFile writes basic project configuration and refuses overwrite", () => {
+test("writeConfigFile writes full project configuration and refuses overwrite", () => {
   const root = tmpDir();
   const envFile = path.join(root, ".env.openspec-buddy");
   const values = {
@@ -61,13 +61,13 @@ test("writeConfigFile writes basic project configuration and refuses overwrite",
     OPENSPEC_BUDDY_PR_REVIEW_REQUEST: "@codex review",
   };
 
-  writeConfigFile(envFile, values, { force: false });
+  writeConfigFile(envFile, values, { force: false, full: true });
 
   const text = fs.readFileSync(envFile, "utf8");
   assert.match(text, /OPENSPEC_BUDDY_BASE_BRANCH=integration/);
   assert.match(text, /OPENSPEC_BUDDY_PROJECT_TITLE="OpenSpec Work"/);
   assert.match(text, /OPENSPEC_BUDDY_PR_REVIEW_REQUEST="@codex review"/);
-  assert.throws(() => writeConfigFile(envFile, values, { force: false }), /already exists/);
+  assert.throws(() => writeConfigFile(envFile, values, { force: false, full: true }), /already exists/);
 });
 
 test("renderConfigFile omits blank optional values", () => {
