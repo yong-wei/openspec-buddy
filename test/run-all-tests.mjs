@@ -72,6 +72,7 @@ const commands = [
 
   node('skills/openspec-buddy-auto/evals/lane-state.test.mjs'),
   node('skills/openspec-buddy-auto/evals/review-truth.test.mjs'),
+  node('skills/openspec-buddy-auto/evals/read-review-evidence.test.mjs'),
   node('skills/openspec-buddy-auto/evals/lane-action-runner.test.mjs'),
   node('skills/openspec-buddy-auto/evals/lane-switch-gate.test.mjs'),
   node('skills/openspec-buddy-auto/evals/buddy-auto-controller-fast.test.mjs'),

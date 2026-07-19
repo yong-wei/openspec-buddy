@@ -66,6 +66,18 @@ Issue-backed 与 Local-only 默认都走 PR。Local-only 默认 PR 不执行 Cla
 
 每个 Review Window 的等待节奏固定为 300 秒后首次检查、此后每 60 秒检查一次、从请求起累计 900 秒结束。检查实时 latest head、Codex 回复与 review threads，不用本地状态代替远端评论顺序。
 
+每次检查只运行一次只读快照命令：
+
+```bash
+<openspec-buddy-auto-skill-dir>/scripts/read-review-evidence.mjs --pr <pr-number-or-url>
+```
+
+该命令同时返回当前 head、顶层 Issue/PR comments 及 reactions、Pull
+Reviews、inline review comments 和 GraphQL review threads，并为每条记录保留
+来源与原始内容。模型依据快照自主判断并决定是否继续等待；不得自行拼接单渠道
+查询来替代快照。该命令不判断清场、不等待、不重试、不请求 review，也不写入
+缓存或远端状态。任何来源读取不完整时停止，不得使用部分结果。
+
 首个窗口完全没有 Codex 响应时，在边界处最后重读一次远端事实；仍无响应才发布 one Timeout Retry，并在顶层评论明确标识它是同一 head 唯一一次超时复审。第二个窗口再次 timeout 时立即停止，Issue 保持 `status:in-review`，等待用户显式恢复。
 
 quota exhausted 或 service failure 出现时立即停止。服务不可用不触发也不消耗 Timeout Retry；用户恢复后先重读全部远端 review 真相，再为当前 head 发布带恢复原因的 Review Request。
