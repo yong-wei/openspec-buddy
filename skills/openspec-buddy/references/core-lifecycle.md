@@ -58,83 +58,43 @@ source issue a `type:series-parent` tracking record.
 Use propose to create a local OpenSpec change and, by default, the matching
 GitHub issue.
 
-A local proposal is triage-first. Collect bounded repository evidence and
-validate `.buddy/triage.json` before proposal validation and before any GitHub
-Issue mutation. This ordering avoids creating a duplicate issue or change when
-the requested behavior is already complete, superseded, blocked, or not yet
-specified well enough to execute.
+Default propose is deliberately lightweight. The model owns proposal quality;
+Buddy owns only coordination identity and dependencies.
 
-Matt skills for grilling or research are an optional method for producing a
-triage judgment. When they are not installed, use the Buddy-native fallback:
-inspect the issue, specs, active and archived changes, bounded matching code
-paths, and the current Git base, then record the agent-owned judgment in the
-same triage contract. Provider availability must not change Buddy state,
-artifacts, status mapping, or lifecycle gates.
+1. Create one OpenSpec change for each independently deliverable outcome and
+   run the repository's normal OpenSpec validation.
+2. Commit and push the reviewed proposal artifacts to the configured base
+   branch so other worktrees can see them.
+3. Create one open GitHub Issue per executable change. The body contains exactly
+   one mapping marker:
 
-Required local artifact:
+   ```markdown
+   <!-- openspec-buddy change_id: example-change -->
+   ```
 
-```text
-openspec/changes/<change_id>/.buddy/issue.md
-```
+4. Add only the required labels `type:change` and `status:ready`. Additional
+   labels are optional and must never block registration.
+5. When a change truly depends on another Issue, record the dependency with
+   GitHub's native `blockedBy` relationship. Do not mirror it in issue metadata.
+6. Read the Issue and expected dependency edges back once, then repeat the
+   open-and-closed Issue search to confirm the mapping is still globally unique.
+   If a concurrent duplicate exists, close the newly created Issue with a
+   comment linking the existing mapping, and report the conflict. Then stop;
+   propose does not claim the Issue or start implementation.
 
-This file is the exact GitHub issue body. Validate it before any GitHub issue
-mutation:
+Before creating an Issue, inspect the bodies of existing open and closed Issues
+for the exact `change_id` mapping. Recognize all formats accepted by Auto lite:
+the lightweight single-line marker, legacy hidden metadata, and YAML front
+matter. Reuse a unique existing Issue; stop on conflicting IDs, duplicate
+mapping sources, or multiple Issues for the same change. Apply the same parsing
+rules to the post-create uniqueness check.
+Use ordinary engineering judgment for scope, duplication, testing, and
+acceptance. `.buddy/triage.json`, `.buddy/proposal-review.yaml`, a prescribed
+Testing Strategy schema, task-to-AC mapping, Project membership, and independent
+proposal review are not default propose gates.
 
-```bash
-<openspec-buddy-skill-dir>/scripts/validate-issue-body.mjs openspec/changes/<change_id>/.buddy/issue.md
-```
-
-Proposal review decisions belong in the local manifest at
-`openspec/changes/<change_id>/.buddy/proposal-review.yaml`. Record:
-
-- `split_status`: `single-change` or `series-required`
-- `vertical_slice_status`: `valid` or `invalid`
-- `blocking_edges_status`: `valid` or `incomplete`
-- `wide_refactor_strategy`: `none` or `expand-migrate-contract`
-- `children`: the child change IDs, or `[]` for a single change
-
-A child is valid only when it is independently claimable, testable, reviewable,
-and deliverable as one PR. This test applies to executable outcomes, not to
-every layer of their implementation: database, API, UI, and test steps may
-remain tasks in the same change when they together deliver one vertical slice.
-
-Broad mechanical migrations are the exception to ordinary vertical slicing.
-Set `wide_refactor_strategy: expand-migrate-contract` when expansion,
-migration, and contraction must be coordinated across a wide surface. Do not
-invent pseudo-slices that cannot pass independently merely to reduce diff size.
-
-The issue body must include a Buddy Acceptance Checklist and task-to-AC mapping:
-
-- `## Acceptance Checklist`
-- unchecked sequential `AC-1`, `AC-2`, ...
-- `Evidence:` for every AC
-- `## Tasks`
-- every task has `Covers: AC-*`, `Acceptance:`, `Evidence:`, and
-  `Reviewer Check:`
-- every referenced AC exists
-- every AC is covered by at least one task
-
-The change design must also declare its testing contract in one
-`## Testing Strategy` section. Behavioral, `medium-risk`, and `high-risk`
-changes require `Seam status: required`. Documentation and mechanical changes
-may use `not-applicable`, but `Public seam` must then name an explicit
-verification method and `Rationale` must explain why a public seam does not
-apply. For `Seam status: required`, `Rationale` must give a substantive
-explanation of why the selected seam is sufficient for the public behavior and
-AC coverage; a label or restatement of the seam is not enough.
-
-`Public behavior` names the observable outcome. `Public seam` names the highest
-public interface at which that outcome can be verified, rather than an internal
-helper. `Existing seam reused` identifies the established test boundary when
-one exists. Every issue AC must appear exactly once across `AC coverage` and
-`Manual-only acceptance`; use `none` only when the entire map is empty. A
-manual-only entry must state why automation is not applicable, then a literal
-`|`, then the manual evidence check: `AC-N: automation rationale | manual
-evidence check`. Both sides of `|` must be substantive. Multiple AC entries in
-either map remain semicolon-separated.
-
-Implementation threads may propose `Proposed satisfied: AC-...` with evidence,
-but only an independent reviewer may approve which checklist items are checked.
+The Issue may summarize the goal, scope, acceptance, and proposal commit. Do
+not copy the complete OpenSpec task structure into the Issue.
 
 Use `--no-issue` only for intentionally local-only changes. That path creates
 no GitHub issue, Project item, Development link, or claim branch.
@@ -147,12 +107,6 @@ Use apply only after claim ownership is clear. Before editing files:
 <openspec-buddy-skill-dir>/scripts/sync-base-branch.sh
 <openspec-buddy-skill-dir>/scripts/mark-in-progress.sh <issue-number>
 ```
-
-Apply consumes the already approved public seam from the change's Testing
-Strategy. It must not restart product-level seam selection or ask the user to
-choose another seam. If implementation evidence shows the approved contract is
-invalid, stop and return to proposal/design work instead of silently replacing
-it.
 
 Matt TDD is an optional provider that changes the implementation method only.
 When it is unavailable, the Buddy-native fallback is red-before-green,

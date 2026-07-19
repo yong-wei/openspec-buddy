@@ -1,6 +1,10 @@
 # OpenSpec Buddy Issue Relationships
 
-GitHub Issue relationships are the cross-agent scheduling truth. Issue metadata keeps an auditable mirror, but native GitHub relationships decide whether a change can be claimed.
+GitHub native relationships are the cross-agent scheduling truth. Default
+lightweight propose writes only native relationships and never mirrors them in
+Buddy metadata. Legacy full metadata may retain an auditable mirror for
+compatibility, but native GitHub relationships decide whether a change can be
+claimed.
 
 ## Series Parent
 
@@ -64,10 +68,10 @@ When change A depends on change B:
 
 This records A as `marked as blocked by` B. GitHub also shows B as `marking as blocking` A.
 
-Native GitHub `blockedBy` is authoritative for dependency scheduling. The
-`depends_on`, `blocked_by`, and `blocking` Buddy metadata fields are an
-auditable mirror; disagreement must be repaired rather than resolved in favor
-of metadata.
+Native GitHub `blockedBy` is authoritative for dependency scheduling. Legacy
+`depends_on`, `blocked_by`, and `blocking` fields are read-only compatibility
+data in the default flow; do not create or update those mirrors during
+lightweight propose.
 
 Do not claim issue A while its `blockedBy` relationship contains any open, unarchived issue.
 

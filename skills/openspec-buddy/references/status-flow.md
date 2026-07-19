@@ -1,6 +1,9 @@
 # OpenSpec Buddy Status Flow
 
-Use labels as the agent-facing state record. Mirror every label transition to the GitHub Project `Status` field through `set-status-label.sh`.
+Default lightweight propose creates `status:ready` directly and does not require
+a Project. The remaining transitions belong to legacy/full coordination: use
+labels as the agent-facing state record and mirror them to a configured GitHub
+Project through `set-status-label.sh`.
 
 ## Status Labels
 
@@ -75,7 +78,8 @@ where a PR was merged before the OpenSpec archive landed.
 
 | Action | From | To | Required proof |
 | --- | --- | --- |
-| propose | none/backlog | ready | local OpenSpec change, issue front matter, coordination labels, relationship links, and Project `Todo` created |
+| default lightweight propose | none | ready | pushed local OpenSpec change, lightweight `change_id` mapping, required labels, and native `blockedBy` links confirmed |
+| legacy/full propose | none/backlog | ready | issue front matter, coordination labels, relationship links, and configured Project `Todo` created |
 | claim prepared change | ready | claimed | assignee and claim comment confirmed |
 | claim open issue | open/backlog/ready | claimed | branch lock, hidden metadata, assignee, status, and Project sync confirmed |
 | decompose complex claim | claimed | tracking parent + ready children | child issues exist and are linked |

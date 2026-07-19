@@ -1,6 +1,8 @@
 # OpenSpec Buddy Project Coordination
 
-`openspec-buddy propose` must add each newly created issue to the coordination Project.
+These rules apply only when a configured legacy/full workflow uses a GitHub
+Project. Default lightweight `openspec-buddy propose` does not require Project
+configuration and does not add its Issue to a Project.
 
 ## Project Configuration
 

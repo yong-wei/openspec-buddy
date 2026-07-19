@@ -147,13 +147,53 @@ buddy_verify_active_claim_resume 31 issue-31-test issue-31-test integration alic
 }
 
 {
+  const issue = {
+    number: 32,
+    title: "A title that must not replace the proposal identity",
+    labels: [{ name: "status:ready" }, { name: "type:change" }],
+    body: "<!-- openspec-buddy change_id: proposed-change -->\n\n## Goal\n\nKeep the proposed identity.\n",
+  };
+  const built = runNode(builder, issue);
+  assert.equal(built.metadata.change_id, "proposed-change");
+  assert.equal(built.metadata.claim_branch, "proposed-change");
+  assert.equal((built.updatedBody.match(/change_id:/g) || []).length, 1);
+  assert.doesNotMatch(built.updatedBody, /<!-- openspec-buddy change_id:/);
+  assert.match(built.updatedBody, /Keep the proposed identity/);
+}
+
+for (const mode of ["stacked", "fixed-branch"]) {
+  const issue = {
+    number: 32,
+    title: "Optional labels do not redefine lightweight identity",
+    labels: [{ name: "status:ready" }, { name: "type:change" }, { name: `mode:${mode}` }],
+    body: "<!-- openspec-buddy change_id: proposed-change -->\n",
+  };
+  const built = runNode(builder, issue);
+  assert.equal(built.metadata.execution_mode, "isolated");
+  const parsed = spawnSync(process.execPath, [parser, "-"], { input: built.updatedBody, encoding: "utf8" });
+  assert.equal(parsed.status, 0, parsed.stderr || parsed.stdout);
+}
+
+{
+  const result = spawnSync(process.execPath, [builder], {
+    input: `${JSON.stringify({ number: 33, title: "Do not derive", body: "<!-- openspec-buddy change_id: -->\n" })}\n`,
+    encoding: "utf8",
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /marker must not be empty/);
+}
+
+{
   const claimScript = fs.readFileSync(claimIssue, "utf8");
   const claimChangeScript = fs.readFileSync(claimChange, "utf8");
   assert.match(claimScript, /buddy_write_minimal_claim_lock .*\$tmp_dir\/adopted-body\.md/);
   const minimalLock = claimScript.indexOf('buddy_write_minimal_claim_lock "$issue_number"');
+  const finalIssueReread = claimScript.indexOf('issue-before-lock.json');
   const verifiedLock = claimScript.indexOf('buddy_verify_claim_lock_rest "$issue_number"', minimalLock);
   const liveTruthRead = claimScript.indexOf('run_claim_triage_gate "$issue_number" "$change_id" "$base_branch"', verifiedLock);
   const developmentMutation = claimScript.indexOf('gh issue develop "$issue_number"', liveTruthRead);
+  assert.ok(finalIssueReread >= 0 && finalIssueReread < minimalLock, 'claim must re-read Issue body and updatedAt before overwriting metadata');
+  assert.match(claimScript, /original\.updatedAt !== current\.updatedAt[\s\S]*original\.body[\s\S]*current\.body/);
   assert.ok(minimalLock >= 0 && minimalLock < verifiedLock, 'ordinary issue must write and verify the minimal claim lock first');
   assert.ok(verifiedLock < liveTruthRead, 'ordinary issue must reread live truth for triage only after lock verification');
   assert.ok(liveTruthRead < developmentMutation, 'triage must interrupt before Development or other peripheral mutation');

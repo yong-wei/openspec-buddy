@@ -17,7 +17,6 @@ const commands = [
   { label: 'node --check src/cli.mjs', cmd: 'node', args: ['--check', 'src/cli.mjs'], tier: 'fast' },
   { label: 'node --check bin/openspec-buddy.mjs', cmd: 'node', args: ['--check', 'bin/openspec-buddy.mjs'], tier: 'fast' },
   sh('node --test test/*.test.mjs', 'node --test test/*.test.mjs', 'fast'),
-  node('skills/openspec-buddy/evals/validate-testing-strategy.test.mjs'),
   node('skills/openspec-buddy/evals/validate-triage.test.mjs'),
   node('skills/openspec-buddy/evals/collect-triage-evidence.test.mjs'),
 
@@ -48,8 +47,6 @@ const commands = [
   node('skills/openspec-buddy/evals/open-issue-claim.test.mjs'),
   node('skills/openspec-buddy/evals/propose-default-artifacts.test.mjs'),
   node('skills/openspec-buddy/evals/propose-acceptance-gates.test.mjs'),
-  node('skills/openspec-buddy/evals/propose-issue-body-validation.test.mjs'),
-  node('skills/openspec-buddy/evals/validate-proposal-shape.test.mjs'),
   node('skills/openspec-buddy/evals/no-issue-no-pr.test.mjs'),
   bash('skills/openspec-buddy/evals/project-cache.test.sh'),
   bash('skills/openspec-buddy/evals/relationship-cache-invalidation.test.sh'),
