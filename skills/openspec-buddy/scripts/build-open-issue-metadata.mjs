@@ -91,7 +91,7 @@ const metadata = {
   claim_branch: changeId,
   series: cleanMetadataValue(labelValue(labels, "series"), `issue-${issueNumber}`),
   coupling_group: cleanMetadataValue(labelValue(labels, "coupling"), "none"),
-  execution_mode: cleanMetadataValue(labelValue(labels, "mode"), "isolated"),
+  execution_mode: markedChangeId ? "isolated" : cleanMetadataValue(labelValue(labels, "mode"), "isolated"),
   base_branch: baseBranch,
   required_branch: "",
   depends_on: [],

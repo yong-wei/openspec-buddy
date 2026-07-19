@@ -161,6 +161,19 @@ buddy_verify_active_claim_resume 31 issue-31-test issue-31-test integration alic
   assert.match(built.updatedBody, /Keep the proposed identity/);
 }
 
+for (const mode of ["stacked", "fixed-branch"]) {
+  const issue = {
+    number: 32,
+    title: "Optional labels do not redefine lightweight identity",
+    labels: [{ name: "status:ready" }, { name: "type:change" }, { name: `mode:${mode}` }],
+    body: "<!-- openspec-buddy change_id: proposed-change -->\n",
+  };
+  const built = runNode(builder, issue);
+  assert.equal(built.metadata.execution_mode, "isolated");
+  const parsed = spawnSync(process.execPath, [parser, "-"], { input: built.updatedBody, encoding: "utf8" });
+  assert.equal(parsed.status, 0, parsed.stderr || parsed.stdout);
+}
+
 {
   const result = spawnSync(process.execPath, [builder], {
     input: `${JSON.stringify({ number: 33, title: "Do not derive", body: "<!-- openspec-buddy change_id: -->\n" })}\n`,
