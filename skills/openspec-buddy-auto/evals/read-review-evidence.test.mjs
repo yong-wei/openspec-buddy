@@ -20,7 +20,12 @@ printf '%s\\n' "$*" >> "$GH_LOG"
 if [[ "$1 $2" == "repo view" ]]; then
   printf '%s\\n' '{"nameWithOwner":"owner/repo"}'
 elif [[ "$1" == "api" && "$2" == repos/*/pulls/* ]]; then
-  printf '%s\\n' '{"state":"open","html_url":"https://example.test/pr/27","head":{"sha":"head-27","ref":"change-27"}}'
+  pr_reads="$(grep -c "api $2" "$GH_LOG" || true)"
+  if [[ "\${FAKE_HEAD_CHANGED:-0}" == "1" && "$pr_reads" -gt 1 ]]; then
+    printf '%s\\n' '{"state":"open","html_url":"https://example.test/pr/27","head":{"sha":"new-head","ref":"change-27"}}'
+  else
+    printf '%s\\n' '{"state":"open","html_url":"https://example.test/pr/27","head":{"sha":"head-27","ref":"change-27"}}'
+  fi
 elif [[ "$1" == "api" && "$2" == repos/*/commits/head-27 ]]; then
   printf '%s\\n' '{"sha":"head-27","commit":{"committer":{"date":"2026-07-19T09:59:00Z"}}}'
 elif [[ "$*" == *"/issues/"*"/comments?per_page=100"* ]]; then
@@ -70,6 +75,7 @@ for (const expected of [
 ]) {
   assert.match(calls, new RegExp(expected.replace(/[?]/g, '\\?')));
 }
+assert.equal((calls.match(/api repos\/owner\/repo\/pulls\/27/g) || []).length, 2);
 
 const truncated = spawnSync(process.execPath, [helper, '--pr', '27'], {
   encoding: 'utf8',
@@ -77,6 +83,14 @@ const truncated = spawnSync(process.execPath, [helper, '--pr', '27'], {
 });
 assert.notEqual(truncated.status, 0);
 assert.match(truncated.stderr, /more than 100 review threads/i);
+
+fs.writeFileSync(log, '');
+const changedHead = spawnSync(process.execPath, [helper, '--pr', '27'], {
+  encoding: 'utf8',
+  env: { ...env, FAKE_HEAD_CHANGED: '1' },
+});
+assert.notEqual(changedHead.status, 0);
+assert.match(changedHead.stderr, /head changed while review evidence was being read/i);
 
 fs.writeFileSync(log, '');
 const crossRepo = spawnSync(process.execPath, [helper, '--pr', 'https://github.com/other/project/pull/44'], {

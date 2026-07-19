@@ -103,6 +103,11 @@ try {
     '-F', `number=${prNumber}`,
   ]);
   const threads = ensureCompleteThreads(threadsPayload);
+  const finalPr = runGh(['api', `${base}/pulls/${prNumber}`]);
+  const finalHeadSha = finalPr?.head?.sha || '';
+  if (!finalHeadSha || finalHeadSha !== headSha) {
+    throw new Error(`PR #${prNumber} head changed while review evidence was being read; retry the snapshot.`);
+  }
 
   const output = {
     schemaVersion: 1,
