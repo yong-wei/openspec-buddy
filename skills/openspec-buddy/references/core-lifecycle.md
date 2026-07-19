@@ -76,8 +76,11 @@ Buddy owns only coordination identity and dependencies.
    labels are optional and must never block registration.
 5. When a change truly depends on another Issue, record the dependency with
    GitHub's native `blockedBy` relationship. Do not mirror it in issue metadata.
-6. Read the Issue and expected dependency edges back once. Then stop; propose
-   does not claim the Issue or start implementation.
+6. Read the Issue and expected dependency edges back once, then repeat the
+   open-and-closed Issue search to confirm the mapping is still globally unique.
+   If a concurrent duplicate exists, close the newly created Issue with a
+   comment linking the existing mapping, and report the conflict. Then stop;
+   propose does not claim the Issue or start implementation.
 
 Before creating an Issue, search existing open and closed Issues for the exact
 `change_id` mapping. Reuse a unique existing Issue and stop on duplicates.

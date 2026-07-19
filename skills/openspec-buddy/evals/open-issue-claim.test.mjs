@@ -175,9 +175,12 @@ buddy_verify_active_claim_resume 31 issue-31-test issue-31-test integration alic
   const claimChangeScript = fs.readFileSync(claimChange, "utf8");
   assert.match(claimScript, /buddy_write_minimal_claim_lock .*\$tmp_dir\/adopted-body\.md/);
   const minimalLock = claimScript.indexOf('buddy_write_minimal_claim_lock "$issue_number"');
+  const finalIssueReread = claimScript.indexOf('issue-before-lock.json');
   const verifiedLock = claimScript.indexOf('buddy_verify_claim_lock_rest "$issue_number"', minimalLock);
   const liveTruthRead = claimScript.indexOf('run_claim_triage_gate "$issue_number" "$change_id" "$base_branch"', verifiedLock);
   const developmentMutation = claimScript.indexOf('gh issue develop "$issue_number"', liveTruthRead);
+  assert.ok(finalIssueReread >= 0 && finalIssueReread < minimalLock, 'claim must re-read Issue body and updatedAt before overwriting metadata');
+  assert.match(claimScript, /original\.updatedAt !== current\.updatedAt[\s\S]*original\.body[\s\S]*current\.body/);
   assert.ok(minimalLock >= 0 && minimalLock < verifiedLock, 'ordinary issue must write and verify the minimal claim lock first');
   assert.ok(verifiedLock < liveTruthRead, 'ordinary issue must reread live truth for triage only after lock verification');
   assert.ok(liveTruthRead < developmentMutation, 'triage must interrupt before Development or other peripheral mutation');

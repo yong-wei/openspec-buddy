@@ -282,7 +282,7 @@ issue_file="$tmp_dir/issue.json"
 body_file="$tmp_dir/body.md"
 metadata_file="$tmp_dir/metadata.json"
 
-gh issue view "$issue_number" --json id,number,title,labels,assignees,body,url,state > "$issue_file"
+gh issue view "$issue_number" --json id,number,title,labels,assignees,body,url,state,updatedAt > "$issue_file"
 issue_number="$(node -e 'const fs=require("fs"); const issue=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(String(issue.number));' "$issue_file")"
 node -e 'const fs=require("fs"); const issue=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(issue.body || "");' "$issue_file" > "$body_file"
 
@@ -370,6 +370,16 @@ claim_id="$(uuidgen 2>/dev/null || node -e 'console.log(crypto.randomUUID())')"
 lease_until="$(node -e 'const hours=Number(process.env.OPENSPEC_BUDDY_CLAIM_TTL_HOURS); console.log(new Date(Date.now()+hours*3600*1000).toISOString())')"
 
 buddy_preflight_claim_truth_check "$issue_number" "$change_id" "$claim_branch" "$viewer" "$repo_nwo" "$tmp_dir/preflight-before-lock"
+gh issue view "$issue_number" --json body,updatedAt > "$tmp_dir/issue-before-lock.json"
+node -e '
+const fs = require("node:fs");
+const original = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+const current = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (original.updatedAt !== current.updatedAt || (original.body || "") !== (current.body || "")) {
+  console.error("Issue changed while claim metadata was being prepared; rerun claim against current Issue truth.");
+  process.exit(1);
+}
+' "$issue_file" "$tmp_dir/issue-before-lock.json"
 claim_lock_written=1
 buddy_write_minimal_claim_lock "$issue_number" "$change_id" "$claim_branch" "$base_branch" "$base_sha" "$viewer" "$claim_id" "$lease_until" "$issue_file" "$tmp_dir/adopted-body.md" true
 buddy_verify_claim_lock_rest "$issue_number" "$change_id" "$viewer" "$claim_id" "$lease_until" "$repo_nwo" "$tmp_dir/verify-lock" "$claim_branch"

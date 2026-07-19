@@ -34,6 +34,12 @@ for (const args of [
   assert.match(result.stdout, /does not claim/i);
 }
 
+for (const invalid of ['Bad/ID', 'UPPER', 'ends-']) {
+  const result = run(['--dry-run', '--mode', 'propose', '--change', invalid]);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /kebab-case OpenSpec change id/);
+}
+
 {
   const result = run(['--dry-run', '--mode', 'propose', '--change', 'local-change', '--no-issue']);
   assert.match(result.stdout, /Keep this change local-only/i);

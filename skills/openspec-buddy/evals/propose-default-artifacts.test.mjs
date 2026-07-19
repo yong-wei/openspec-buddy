@@ -17,6 +17,7 @@ assert.match(lifecycle, /commit and push[\s\S]*configured base[\s\S]*branch[\s\S
 assert.match(lifecycle, /contains exactly[\s\S]*one mapping marker/i);
 assert.match(lifecycle, /`type:change` and `status:ready`/i);
 assert.match(lifecycle, /native `blockedBy` relationship/i);
+assert.match(lifecycle, /concurrent duplicate[\s\S]*close the newly created Issue/i);
 assert.match(lifecycle, /not default propose gates/i);
 assert.match(template, /<!-- openspec-buddy change_id: example-change-id -->/);
 assert.doesNotMatch(driver, /validate-(?:triage|issue-body|proposal-shape|testing-strategy)\.mjs/);

@@ -179,6 +179,9 @@ function describeNext(opts) {
     commands.push([path.join(scriptDir, 'claim-issue.sh'), ...(opts.issue ? [opts.issue] : [])]);
     notes.push('Claim uses the minimal lock and post-write GitHub truth verification before branch, Project, or Development-link mutations.');
   } else if (mode === 'propose') {
+    if (opts.change && !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(opts.change)) {
+      throw new Error('--change must be a kebab-case OpenSpec change id.');
+    }
     commands.push([path.join(scriptDir, 'check-config.sh'), 'local']);
     notes.push('Create and validate the local OpenSpec change, then commit and push it to the configured base branch.');
     if (opts.noIssue) {
