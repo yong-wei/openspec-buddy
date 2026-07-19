@@ -275,6 +275,14 @@ for (const [name, body] of [
   assert.match(result.stderr, /Usage:/i);
 }
 
+for (const invalidChange of ['..', '../demo', 'Demo', 'demo_change', '-demo', 'demo-']) {
+  const fixture = makeFixture(`invalid-change-${invalidChange.replaceAll('/', '-')}`, { issues: [] });
+  const result = runSelector(fixture, ['--change', invalidChange]);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /valid change id/i);
+  assert.equal(fs.readFileSync(path.join(fixture.root, 'calls.log'), 'utf8'), '', 'invalid change must stop before GitHub reads');
+}
+
 {
   const fixture = makeFixture('local-only', { issues: [] });
   addChange(fixture.root, 'local-change');

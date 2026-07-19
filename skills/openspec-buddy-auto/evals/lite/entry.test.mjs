@@ -111,6 +111,10 @@ const missingChangeValue = run(['--change', '--no-pr']);
 assert.notEqual(missingChangeValue.status, 0);
 assert.match(missingChangeValue.stderr, /--change requires a value/i);
 
+const invalidChangeValue = run(['--change', '..', '--no-pr']);
+assert.notEqual(invalidChangeValue.status, 0);
+assert.match(invalidChangeValue.stderr, /valid change id/i);
+
 const issueNoPr = run(['--issue', '17', '--no-pr']);
 assert.notEqual(issueNoPr.status, 0);
 assert.match(issueNoPr.stderr, /--no-pr.*local-only/i);

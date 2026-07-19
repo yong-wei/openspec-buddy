@@ -53,7 +53,10 @@ function parseOptions(argv) {
     if (!Number.isInteger(issue) || issue < 1) fail('--issue requires a positive integer.');
     return { issue, change: '' };
   }
-  if (argv[0] === '--change' && argv[1]) return { issue: null, change: argv[1] };
+  if (argv[0] === '--change') {
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(argv[1])) fail('--change requires a valid change id.');
+    return { issue: null, change: argv[1] };
+  }
   fail('Usage: select-available-issue.mjs [--issue NUMBER | --change CHANGE_ID]');
 }
 
