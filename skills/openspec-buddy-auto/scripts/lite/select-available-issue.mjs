@@ -9,6 +9,7 @@ import {
   buildIdentity,
   branchExistsFromRefResult,
   classifyIssueClaim,
+  isValidChangeId,
   localDeliveryExists,
   parseChangeMapping,
   summarizeIssueClaim,
@@ -54,7 +55,7 @@ function parseOptions(argv) {
     return { issue, change: '' };
   }
   if (argv[0] === '--change') {
-    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(argv[1])) fail('--change requires a valid change id.');
+    if (!isValidChangeId(argv[1])) fail('--change requires a valid change id.');
     return { issue: null, change: argv[1] };
   }
   fail('Usage: select-available-issue.mjs [--issue NUMBER | --change CHANGE_ID]');
@@ -135,6 +136,8 @@ function resultFor(issue, changeId) {
 
 function mappingFor(issue) {
   const mapping = parseChangeMapping(issue.body);
+  if (mapping.invalid) fail(`Ready issue #${issue.number} has invalid change mapping.`);
+  if (mapping.duplicate) fail(`Ready issue #${issue.number} has duplicate change mapping.`);
   if (mapping.conflict) fail(`Ready issue #${issue.number} has conflicting change mapping.`);
   if (!mapping.changeId) fail(`Ready issue #${issue.number} is missing change mapping.`);
   return mapping.changeId;
@@ -201,11 +204,11 @@ try {
   const openMappings = new Map();
   const closedMappings = new Map();
   const allMappings = new Map();
-  const conflictingMappings = [];
+  const problemMappings = [];
   for (const issue of issues) {
     const mapping = parseChangeMapping(issue.body);
-    if (mapping.conflict) conflictingMappings.push({ issue, mapping });
-    if (!mapping.changeId || mapping.conflict) continue;
+    if (mapping.conflict || mapping.duplicate || mapping.invalid) problemMappings.push({ issue, mapping });
+    if (!mapping.changeId || mapping.conflict || mapping.duplicate || mapping.invalid) continue;
     allMappings.set(mapping.changeId, [...(allMappings.get(mapping.changeId) || []), issue]);
     const target = String(issue.state || '').toUpperCase() === 'OPEN' ? openMappings : closedMappings;
     target.set(mapping.changeId, [...(target.get(mapping.changeId) || []), issue]);
@@ -213,8 +216,10 @@ try {
   const context = { repo, identity, allMappings, worktreeRoot: realWorktree };
 
   if (options.change) {
-    const conflict = conflictingMappings.find(({ mapping }) => mapping.sources.some((source) => source.changeId === options.change));
-    if (conflict) fail(`Issue #${conflict.issue.number} has conflicting change mapping for ${options.change}.`);
+    const problem = problemMappings.find(({ mapping }) => mapping.sources.some((source) => source.changeId === options.change));
+    if (problem?.mapping.invalid) fail(`Issue #${problem.issue.number} has invalid change mapping for ${options.change}.`);
+    if (problem?.mapping.duplicate) fail(`Issue #${problem.issue.number} has duplicate change mapping for ${options.change}.`);
+    if (problem?.mapping.conflict) fail(`Issue #${problem.issue.number} has conflicting change mapping for ${options.change}.`);
     const allMapped = allMappings.get(options.change) || [];
     if (allMapped.length > 1) fail(`Change ${options.change} has duplicate issue mappings.`);
     const mapped = openMappings.get(options.change) || [];
@@ -265,6 +270,14 @@ try {
     }
     if (selectedLocalMissing) {
       fail(`Local change ${selected.change_id} does not exist in active or dated archive paths.`);
+    }
+    if (selected) {
+      const checked = withBlockers(
+        { result: selected },
+        { number: selected.issue },
+        blockersByIssue(repo, [selected.issue]),
+      );
+      if (checked.blocked) fail(checked.blocked);
     }
 
     let firstBlocked = '';

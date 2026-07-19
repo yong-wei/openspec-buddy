@@ -8,6 +8,12 @@ export const ACTIVE_CLAIM_STATUSES = Object.freeze([
   'status:in-review',
 ]);
 
+const CHANGE_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+export function isValidChangeId(value) {
+  return CHANGE_ID_PATTERN.test(String(value || ''));
+}
+
 export function localDeliveryExists(worktreeRoot, changeId) {
   if (fs.statSync(path.join(worktreeRoot, 'openspec', 'changes', changeId), { throwIfNoEntry: false })?.isDirectory()) {
     return true;
@@ -29,30 +35,40 @@ function scalar(value) {
 }
 
 function field(block, name) {
-  const match = String(block || '').match(new RegExp(`^\\s*${name}\\s*:\\s*(.*?)\\s*$`, 'm'));
+  const match = String(block || '').match(new RegExp(`^[ \\t]*${name}[ \\t]*:[ \\t]*(.*?)[ \\t]*$`, 'm'));
   return match ? scalar(match[1]) : '';
+}
+
+function fieldValues(block, name) {
+  return [...String(block || '').matchAll(new RegExp(`^[ \\t]*${name}[ \\t]*:[ \\t]*(.*?)[ \\t]*$`, 'gm'))]
+    .map((match) => scalar(match[1]));
 }
 
 export function parseChangeMapping(markdown) {
   const body = String(markdown || '');
   const found = [];
-  for (const marker of body.matchAll(/<!--\s*openspec-buddy\s+change_id\s*:\s*([a-z0-9]+(?:-[a-z0-9]+)*)\s*-->/gi)) {
-    found.push({ source: 'marker', changeId: marker[1] });
+  for (const marker of body.matchAll(/<!--[ \t]*openspec-buddy[ \t]+change_id[ \t]*:[ \t]*([^\r\n]*?)[ \t]*-->/gi)) {
+    found.push({ source: 'marker', changeId: scalar(marker[1]) });
   }
 
   for (const hidden of body.matchAll(/<!--\s*openspec-buddy\s*\r?\n([\s\S]*?)\r?\n\s*-->/gi)) {
-    const hiddenChange = field(hidden[1], 'change_id');
-    if (hiddenChange) found.push({ source: 'hidden', changeId: hiddenChange });
+    for (const changeId of fieldValues(hidden[1], 'change_id')) {
+      found.push({ source: 'hidden', changeId });
+    }
   }
 
   const frontMatter = body.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
-  const frontChange = frontMatter ? field(frontMatter[1], 'change_id') : '';
-  if (frontChange) found.push({ source: 'front-matter', changeId: frontChange });
+  for (const changeId of frontMatter ? fieldValues(frontMatter[1], 'change_id') : []) {
+    found.push({ source: 'front-matter', changeId });
+  }
 
+  const invalid = found.filter((entry) => !isValidChangeId(entry.changeId));
   const changeIds = [...new Set(found.map((entry) => entry.changeId))];
   return {
-    changeId: changeIds.length === 1 ? changeIds[0] : null,
+    changeId: invalid.length === 0 && found.length === 1 ? changeIds[0] : null,
     conflict: changeIds.length > 1,
+    duplicate: found.length > 1 && changeIds.length === 1,
+    invalid: invalid.length > 0,
     sources: found,
   };
 }

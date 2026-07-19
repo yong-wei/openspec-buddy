@@ -56,7 +56,24 @@ assert.deepEqual(hashedIdentity, {
 
 assert.equal(parseChangeMapping('<!-- openspec-buddy change_id: marker-change -->').changeId, 'marker-change');
 assert.equal(parseChangeMapping('<!-- openspec-buddy\nchange_id: hidden-change\n-->').changeId, 'hidden-change');
+assert.equal(parseChangeMapping('<!-- openspec-buddy\nchange_id: hidden-change\nseries: alpha\nrisk: low\n-->').changeId, 'hidden-change');
 assert.equal(parseChangeMapping('---\nchange_id: front-change\n---\nBody').changeId, 'front-change');
+for (const body of [
+  '<!-- openspec-buddy change_id: ../marker -->',
+  '<!-- openspec-buddy change_id: bad value -->',
+  '<!-- openspec-buddy\nchange_id: Hidden_Change\n-->',
+  '---\nchange_id: ../front\n---\nBody',
+  '---\nchange_id: valid-change\n---\n<!-- openspec-buddy change_id: bad value -->',
+  '---\nchange_id:\n---\n<!-- openspec-buddy change_id: valid-change -->',
+  '<!-- openspec-buddy\nchange_id: valid-change\nchange_id: bad value\n-->',
+  '<!-- openspec-buddy\nchange_id:\nchange_id: valid-change\n-->',
+  '---\nchange_id: valid-change\nchange_id: bad value\n---\nBody',
+  '---\nchange_id:\nchange_id: valid-change\n---\nBody',
+]) {
+  const mapping = parseChangeMapping(body);
+  assert.equal(mapping.changeId, null);
+  assert.equal(mapping.invalid, true);
+}
 assert.equal(
   parseChangeMapping('---\nchange_id: one\n---\n<!-- openspec-buddy change_id: two -->').conflict,
   true,
@@ -69,6 +86,15 @@ assert.equal(
   parseChangeMapping('<!-- openspec-buddy\nchange_id: one\n-->\n<!-- openspec-buddy\nchange_id: two\n-->').conflict,
   true,
 );
+for (const body of [
+  '<!-- openspec-buddy change_id: same -->\n<!-- openspec-buddy change_id: same -->',
+  '<!-- openspec-buddy\nchange_id: same\nchange_id: same\n-->',
+  '---\nchange_id: same\nchange_id: same\n---\nBody',
+]) {
+  const mapping = parseChangeMapping(body);
+  assert.equal(mapping.changeId, null);
+  assert.equal(mapping.duplicate, true);
+}
 
 const claim = parseLiteClaimComment(`OpenSpec Buddy Claim
 
@@ -305,6 +331,46 @@ for (const invalidChange of ['..', '../demo', 'Demo', 'demo_change', '-demo', 'd
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /blocked by open issue #7/i);
   assert.equal(result.stdout, '');
+}
+
+{
+  const current = 'OpenSpec Buddy Claim\nissue: 11\nstate: active\nagent: @codex\nchange_id: blocked-current\nbranch: blocked-current\nworktree_alias: dev1';
+  const fixture = makeFixture('blocked-current', {
+    issues: [issue(11, 'blocked-current', { status: 'status:claimed', assignees: ['codex'] })],
+    comments: { 11: [{ body: current }] },
+    branches: ['blocked-current'],
+    blockedBy: { 11: [{ number: 7, state: 'OPEN' }] },
+  });
+  addChange(fixture.root, 'blocked-current');
+  const result = runSelector(fixture);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /blocked by open issue #7/i);
+  assert.equal(graphqlCalls(fixture).length, 1);
+}
+
+{
+  const current = 'OpenSpec Buddy Claim\nissue: 11\nstate: active\nagent: @codex\nchange_id: closed-blocker-current\nbranch: closed-blocker-current\nworktree_alias: dev1';
+  const fixture = makeFixture('closed-blocker-current', {
+    issues: [issue(11, 'closed-blocker-current', { status: 'status:claimed', assignees: ['codex'] })],
+    comments: { 11: [{ body: current }] },
+    branches: ['closed-blocker-current'],
+    blockedBy: { 11: [{ number: 7, state: 'CLOSED' }] },
+  });
+  addChange(fixture.root, 'closed-blocker-current');
+  const result = runSelector(fixture);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).issue, 11);
+  assert.equal(graphqlCalls(fixture).length, 1);
+}
+
+for (const [name, body] of [
+  ['invalid-hidden-mapping', '<!-- openspec-buddy\nchange_id: ../demo\n-->'],
+  ['invalid-front-mapping', '---\nchange_id: Demo_Change\n---\nBody'],
+]) {
+  const fixture = makeFixture(name, { issues: [issue(11, '', { body })] });
+  const result = runSelector(fixture, ['--issue', '11']);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /invalid change mapping/i);
 }
 
 {
