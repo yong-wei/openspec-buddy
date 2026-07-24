@@ -17,11 +17,17 @@ import {
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const githubFetch = path.resolve(here, '../../../openspec-buddy/scripts/github-fetch.sh');
+const ISSUE_BATCH_SIZE = 50;
+const ISSUE_MAX_BUFFER = 16 * 1024 * 1024;
+const ACTIVE_SELECTION_STATUSES = Object.freeze(['status:ready', ...ACTIVE_CLAIM_STATUSES]);
+const ISSUE_PROJECTION = '[.[] | {number,title,state,html_url,url,body,labels,assignees,pull_request}]';
+const SINGLE_ISSUE_PROJECTION = '{number,title,state,html_url,url,body,labels,assignees,pull_request}';
 
 function run(command, args, options = {}) {
   return execFileSync(command, args, {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
+    maxBuffer: ISSUE_MAX_BUFFER,
     ...options,
   }).trim();
 }
@@ -71,6 +77,75 @@ function isReady(issue) {
 
 function localChangeExists(worktreeRoot, changeId) {
   return fs.statSync(path.join(worktreeRoot, 'openspec', 'changes', changeId), { throwIfNoEntry: false })?.isDirectory() === true;
+}
+
+function issuePage(repo, { state = 'all', label = '', page = 1 } = {}) {
+  const params = new URLSearchParams({
+    state,
+    sort: 'created',
+    direction: 'asc',
+    per_page: String(ISSUE_BATCH_SIZE),
+    page: String(page),
+  });
+  if (label) params.set('labels', label);
+  return ghJson([
+    'api',
+    `repos/${repo}/issues?${params}`,
+    '--jq',
+    ISSUE_PROJECTION,
+  ]) || [];
+}
+
+function activeSelectionIssues(repo) {
+  const byNumber = new Map();
+  for (const status of ACTIVE_SELECTION_STATUSES) {
+    const firstPage = issuePage(repo, { state: 'open', label: status });
+    if (firstPage.length === ISSUE_BATCH_SIZE
+      && issuePage(repo, { state: 'open', label: status, page: 2 }).length > 0) {
+      fail(`Could not safely select from more than ${ISSUE_BATCH_SIZE} open Buddy issues.`);
+    }
+    for (const issue of firstPage) {
+      if (!issue.pull_request) byNumber.set(Number(issue.number), issue);
+    }
+  }
+  if (byNumber.size > ISSUE_BATCH_SIZE) {
+    fail(`Could not safely select from more than ${ISSUE_BATCH_SIZE} open Buddy issues.`);
+  }
+  return [...byNumber.values()].sort((left, right) => Number(left.number) - Number(right.number));
+}
+
+function targetIssue(repo, number) {
+  const issue = ghJson([
+    'api',
+    `repos/${repo}/issues/${number}`,
+    '--jq',
+    SINGLE_ISSUE_PROJECTION,
+  ]);
+  return issue?.pull_request ? null : issue;
+}
+
+function issuesForChange(repo, changeId) {
+  const matching = [];
+  for (let page = 1; ; page += 1) {
+    const response = issuePage(repo, { page });
+    for (const issue of response) {
+      if (issue.pull_request) continue;
+      const mapping = parseChangeMapping(issue.body);
+      if (mapping.changeId === changeId
+        || mapping.sources.some((source) => source.changeId === changeId)) {
+        matching.push(issue);
+      }
+    }
+    if (response.length < ISSUE_BATCH_SIZE) return matching;
+  }
+}
+
+function issuesForTarget(repo, number) {
+  const issue = targetIssue(repo, number);
+  if (!issue) return [];
+  const mapping = parseChangeMapping(issue.body);
+  if (!mapping.changeId || mapping.invalid || mapping.duplicate || mapping.conflict) return [issue];
+  return issuesForChange(repo, mapping.changeId);
 }
 
 function commentsFor(repo, number) {
@@ -198,9 +273,11 @@ try {
   }
   const realWorktree = fs.realpathSync(run('git', ['rev-parse', '--show-toplevel']));
   const identity = buildIdentity(viewer, worktree, realWorktree);
-  const issueResponse = ghJson(['api', `repos/${repo}/issues?state=all&per_page=100`, '--paginate', '--slurp']) || [];
-  const issues = (Array.isArray(issueResponse[0]) ? issueResponse.flat() : issueResponse)
-    .filter((issue) => !issue.pull_request);
+  const issues = options.change
+    ? issuesForChange(repo, options.change)
+    : options.issue !== null
+      ? issuesForTarget(repo, options.issue)
+      : activeSelectionIssues(repo);
   const openMappings = new Map();
   const closedMappings = new Map();
   const allMappings = new Map();

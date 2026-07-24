@@ -173,7 +173,24 @@ const issues = JSON.parse(fs.readFileSync(path.join(root, 'issues.json')));
 if (args[0] === 'api' && args[1] === 'user') return console.log(JSON.stringify({ login: 'codex' }));
 if (args[0] === 'api' && args[1] === 'rate_limit') return console.log(JSON.stringify({ remaining: 5000, reset: 0 }));
 if (args[0] === 'repo' && args[1] === 'view') return console.log(JSON.stringify({ nameWithOwner: 'acme/repo' }));
-if (args[0] === 'api' && String(args[1]).includes('/issues?')) return console.log(JSON.stringify(issues));
+if (args[0] === 'api' && String(args[1]).includes('/issues?')) {
+  const url = new URL('https://api.github.test/' + args[1]);
+  const state = url.searchParams.get('state');
+  const label = url.searchParams.get('labels');
+  const perPage = Number(url.searchParams.get('per_page') || 30);
+  const page = Number(url.searchParams.get('page') || 1);
+  const filtered = issues
+    .filter((item) => !state || state === 'all' || String(item.state).toLowerCase() === state)
+    .filter((item) => !label || item.labels.some((entry) => entry.name === label))
+    .sort((left, right) => Number(left.number) - Number(right.number));
+  return console.log(JSON.stringify(filtered.slice((page - 1) * perPage, page * perPage)));
+}
+if (args[0] === 'api' && /\\/issues\\/\\d+$/.test(String(args[1]))) {
+  const number = Number(args[1].split('/').at(-1));
+  const found = issues.find((item) => Number(item.number) === number);
+  if (!found) { console.error('HTTP 404: Not Found'); process.exit(1); }
+  return console.log(JSON.stringify(found));
+}
 if (args[0] === 'api' && String(args[1]).endsWith('/comments?per_page=100')) {
   const number = args[1].split('/').at(-2);
   const comments = JSON.parse(fs.readFileSync(path.join(root, 'comments.json')));
@@ -239,6 +256,12 @@ function graphqlCalls(fixture) {
     .filter((args) => args[0] === 'api' && args[1] === 'graphql');
 }
 
+function issueReadCalls(fixture) {
+  return fs.readFileSync(path.join(fixture.root, 'calls.log'), 'utf8')
+    .trim().split('\n').filter(Boolean).map(JSON.parse)
+    .filter((args) => args[0] === 'api' && String(args[1]).includes('/issues'));
+}
+
 for (const [name, body] of [
   ['prefix-array', [{ ref: 'refs/heads/claimed-more', object: { sha: '1'.repeat(40) } }]],
   ['mismatching-object', { ref: 'refs/heads/other', object: { sha: '2'.repeat(40) } }],
@@ -283,6 +306,13 @@ for (const [name, body] of [
   const calls = graphqlCalls(fixture);
   assert.equal(calls.length, 1, 'all ready candidates must share one blockedBy query');
   assert.match(calls[0].find((value) => value.startsWith('query=')), /issue\(number:11\).*issue\(number:22\)/);
+  const reads = issueReadCalls(fixture).filter((args) => String(args[1]).includes('/issues?'));
+  assert.equal(reads.length, 4, 'untargeted selection must issue one bounded query per active Buddy status');
+  for (const args of reads) {
+    assert.match(args[1], /state=open/);
+    assert.match(args[1], /per_page=50/);
+    assert.doesNotMatch(args.join(' '), /--paginate/);
+  }
 }
 
 {
@@ -292,6 +322,20 @@ for (const [name, body] of [
   const result = runSelector(fixture, ['--issue', '22']);
   assert.equal(result.status, 0, result.stderr);
   assert.equal(JSON.parse(result.stdout).issue, 22);
+  const reads = issueReadCalls(fixture);
+  assert.ok(reads.some((args) => String(args[1]).endsWith('/issues/22')));
+  assert.ok(reads.filter((args) => String(args[1]).includes('/issues?'))
+    .every((args) => /per_page=50/.test(args[1]) && !args.includes('--paginate')));
+}
+
+{
+  const fixture = makeFixture('candidate-limit', {
+    issues: Array.from({ length: 51 }, (_, index) => issue(index + 1, `change-${index + 1}`)),
+  });
+  const result = runSelector(fixture);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /more than 50 open Buddy issues/i);
+  assert.ok(issueReadCalls(fixture).every((args) => !args.includes('--paginate')));
 }
 
 {
@@ -319,6 +363,20 @@ for (const invalidChange of ['..', '../demo', 'Demo', 'demo_change', '-demo', 'd
   assert.deepEqual(JSON.parse(result.stdout), {
     mode: 'lite', result: 'local_only', change_id: 'local-change',
   });
+}
+
+{
+  const filler = Array.from({ length: 50 }, (_, index) => issue(index + 1, '', { body: 'No mapping' }));
+  const fixture = makeFixture('target-change-bounded-pages', {
+    issues: [...filler, issue(51, 'paged-change')],
+  });
+  addChange(fixture.root, 'paged-change');
+  const result = runSelector(fixture, ['--change', 'paged-change']);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).issue, 51);
+  const reads = issueReadCalls(fixture).filter((args) => String(args[1]).includes('/issues?'));
+  assert.equal(reads.length, 2);
+  assert.ok(reads.every((args) => /per_page=50/.test(args[1]) && !args.includes('--paginate')));
 }
 
 {
@@ -501,6 +559,16 @@ for (const [name, body] of [
   const result = runSelector(fixture, ['--change', 'duplicate']);
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /duplicate.*mapping/i);
+}
+
+{
+  const fixture = makeFixture('target-issue-duplicate', {
+    issues: [issue(11, 'duplicate-target'), issue(12, 'duplicate-target', { state: 'closed' })],
+  });
+  addChange(fixture.root, 'duplicate-target');
+  const result = runSelector(fixture, ['--issue', '11']);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /duplicate issue mappings/i);
 }
 
 {
