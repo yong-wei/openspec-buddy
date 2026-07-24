@@ -339,6 +339,23 @@ for (const [name, body] of [
 }
 
 {
+  const pullRequests = Array.from(
+    { length: 50 },
+    (_, index) => issue(index + 2, `pull-${index + 2}`, { pullRequest: true }),
+  );
+  const fixture = makeFixture('pull-request-noise', {
+    issues: [issue(1, 'available'), ...pullRequests],
+  });
+  addChange(fixture.root, 'available');
+  const result = runSelector(fixture);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).issue, 1);
+  const readyReads = issueReadCalls(fixture)
+    .filter((args) => String(args[1]).includes('labels=status%3Aready'));
+  assert.equal(readyReads.length, 2, 'PR-only overflow must not count against the Issue candidate limit');
+}
+
+{
   const fixture = makeFixture('invalid-usage', { issues: [] });
   const result = runSelector(fixture, ['--unknown', 'value']);
   assert.notEqual(result.status, 0);

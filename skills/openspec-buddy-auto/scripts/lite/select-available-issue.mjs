@@ -99,17 +99,16 @@ function issuePage(repo, { state = 'all', label = '', page = 1 } = {}) {
 function activeSelectionIssues(repo) {
   const byNumber = new Map();
   for (const status of ACTIVE_SELECTION_STATUSES) {
-    const firstPage = issuePage(repo, { state: 'open', label: status });
-    if (firstPage.length === ISSUE_BATCH_SIZE
-      && issuePage(repo, { state: 'open', label: status, page: 2 }).length > 0) {
-      fail(`Could not safely select from more than ${ISSUE_BATCH_SIZE} open Buddy issues.`);
+    for (let page = 1; ; page += 1) {
+      const response = issuePage(repo, { state: 'open', label: status, page });
+      for (const issue of response) {
+        if (!issue.pull_request) byNumber.set(Number(issue.number), issue);
+        if (byNumber.size > ISSUE_BATCH_SIZE) {
+          fail(`Could not safely select from more than ${ISSUE_BATCH_SIZE} open Buddy issues.`);
+        }
+      }
+      if (response.length < ISSUE_BATCH_SIZE) break;
     }
-    for (const issue of firstPage) {
-      if (!issue.pull_request) byNumber.set(Number(issue.number), issue);
-    }
-  }
-  if (byNumber.size > ISSUE_BATCH_SIZE) {
-    fail(`Could not safely select from more than ${ISSUE_BATCH_SIZE} open Buddy issues.`);
   }
   return [...byNumber.values()].sort((left, right) => Number(left.number) - Number(right.number));
 }
