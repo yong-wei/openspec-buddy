@@ -11,7 +11,7 @@
 2. 对还没有 issue 的新变更，用 `openspec-buddy propose` 创建并验证本地 OpenSpec change，审核后先提交、推送到配置的基础分支，再登记 GitHub Issue。默认登记只要求唯一 `change_id` 标记、`type:change`、`status:ready` 和真实存在的 GitHub 原生 `blockedBy` 关系；范围、测试和验收由执行模型结合 OpenSpec 工件判断，不再由额外 manifest 和格式 validator 阻断。若明确希望单人本地推进，不登记 GitHub，可使用 `openspec-buddy propose --no-issue`。
 3. 用 `openspec-buddy apply` 在已 claim 的 GitHub Issue 上完成代码、测试和 spec 同步。
 4. 用 `openspec-buddy achieve` 在 PR 合并后同步 GitHub Issue、GitHub Project 和 OpenSpec 归档记录。
-5. 需要自动处理一项或连续处理全部 Available Issue 时，使用 `openspec-buddy-auto` 的公开入口。无参数为 lite；`--issue <number>` 和 `--change <change_id>` 是单目标。Local-only 默认仍创建 PR，只有明确的 `--change <change_id> --no-pr` 才走 fast-forward 直接集成。原 full 用户改用 `scripts/buddy-auto.mjs full`。
+5. 需要自动处理一项或连续处理全部 Available Issue 时，使用 `openspec-buddy-auto` 的公开入口。无参数为 lite，并将开放 Buddy Issue 候选集合限制为 50 个；`--issue <number>` 和 `--change <change_id>` 是单目标。Local-only 默认仍创建 PR，只有明确的 `--change <change_id> --no-pr` 才走 fast-forward 直接集成。原 full 用户改用 `scripts/buddy-auto.mjs full`。
 
 核心约束是：一个可执行协调变更对应一个 GitHub Issue、一个 `change_id`、一个声明分支、一个 OpenSpec change 和一个 PR。复杂开放 issue 会先被 claim，再拆分成多个可独立执行的子 issue；只有子 issue 已关联并全部处于 `status:ready` 后，原 issue 才转换为跟踪父 issue。GitHub 负责跨分支、跨代理、跨工作树的协作状态；OpenSpec 仍然是需求、任务和 spec 的本地事实源。
 

@@ -43,6 +43,7 @@
 - `v0.26.0` 将 Auto 无参数默认切换为面向 GPT-5.6 主模型的 lite：确定性脚本只负责 Available Issue 选择、排他 Claim 和人工可见状态，实施、Local Review、同 PR archive、最新 head Codex 清场、合并与 Issue 收尾由主模型依据实时事实完成。原 controller、lane、cache、receipt 与恢复状态保留在显式 `scripts/buddy-auto.mjs full`，既有 full 状态无需迁移。`openspec-buddy init` 默认只写 base branch，完整配置改用 `init --full`。
 - 当前开发线将 manual `propose` 恢复为轻量协调入口：默认只保留已推送的本地 change、唯一 `change_id` Issue 标记、`type:change`/`status:ready` 与原生 `blockedBy`；triage、proposal-review、Testing Strategy、task-to-AC、Project、标签矩阵和独立提案审核不再是默认硬闸门。claim 阶段的 triage 与历史完整 metadata 读取保持兼容。
 - Lite review 等待使用一次性只读 evidence snapshot 同时读取顶层评论及 reactions、Pull Reviews、inline review comments 与 GraphQL review threads。脚本只保证观察完整并输出来源和原文；等待、评阅接受、清场判断与重试仍由主模型完成。
+- `v0.27.1` 将 Auto lite 无目标选择改为按 Buddy 活跃状态读取开放 Issue，实际候选上限为 50；显式目标和历史映射使用有界分页，Pull Request 不计入 Issue 上限，避免仓库历史增长触发 Node 子进程缓冲区溢出。
 
 ## 当前警惕点
 
