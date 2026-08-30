@@ -1,7 +1,8 @@
 ---
 name: openspec-buddy-auto
 description: Use when the user asks GPT-5.6 to process GitHub Issue-backed or explicitly targeted Local-only OpenSpec changes through implementation, review, delivery, archive, and completion.
-compatibility: Requires openspec CLI, GitHub CLI, OpenSpec Buddy, and foreground access to live PR review facts.
+metadata:
+  compatibility: Requires openspec CLI, GitHub CLI, OpenSpec Buddy, and foreground access to live PR review facts.
 ---
 
 # OpenSpec Buddy Auto
@@ -85,6 +86,11 @@ quota exhausted 或 service failure 出现时立即停止。服务不可用不�
 ## Feedback 与复审
 
 Codex feedback 必须处理并复审，回复或 resolve thread 本身不构成 Clearance Comment。
+
+- 收到 feedback 后，先按违反的不变量/共同根因聚类，明确受影响的状态机、权威边界、读写与校验路径。
+- 同轮多个同源 finding，或相同失败类别再次复现时，不得继续逐点增加条件分支；必须重新推导不变量，并审计完整相关状态机、权威边界、读写与校验路径。
+- 一次修复必须覆盖完整影响面，并为每个已报告触发场景及同类 sibling 路径补充回归证据。
+- 若根治需要扩展当前 OpenSpec 范围、公共 API 或数据模型，立即停止并请求用户授权；复审次数不作为停止条件。
 
 - feedback 需要代码变化：修改后运行相关测试和 Local Review，提交并推送形成 new head，再为新 head 发布 Review Request。
 - no code change feedback：在原 thread 回复无需代码修改的证据，resolve 该 thread，并在请求中说明不修改原因，再为 same head 发布 Review Request。

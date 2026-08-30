@@ -73,6 +73,21 @@ assert.doesNotMatch(selectionReference,
   'the full selection reference must not instruct the agent to invoke controller-owned helpers');
 
 const noPr = section('## Local-only `--no-pr`', '## Full Mode');
+const feedback = section('## Feedback 与复审', '## 合并门禁');
+
+assert.match(feedback,
+  /feedback 后[\s\S]{0,180}按违反的不变量\/共同根因聚类/i,
+  'feedback must first be clustered by violated invariant or common root cause');
+assert.match(feedback,
+  /同轮多个同源 finding[\s\S]{0,180}相同失败类别再次复现[\s\S]{0,220}(?:不得|禁止)继续逐点增加条件分支[\s\S]{0,220}(?:重新推导|重推)不变量[\s\S]{0,240}审计完整相关状态机[\s\S]{0,180}权威边界[\s\S]{0,160}读写与校验路径/i,
+  'recurring same-root feedback must trigger invariant-level rethinking and a complete path audit');
+assert.match(feedback,
+  /一次修复[\s\S]{0,120}完整影响面[\s\S]{0,180}(?:已报告触发场景|触发场景)[\s\S]{0,160}同类 sibling 路径[\s\S]{0,160}回归证据/i,
+  'one fix must cover the full impact surface and regression evidence for reported and sibling paths');
+assert.match(feedback,
+  /根治需要扩展当前 OpenSpec 范围、公共 API 或数据模型[\s\S]{0,120}立即停止并请求用户授权[\s\S]{0,100}复审次数不作为停止条件/i,
+  'scope expansion must stop for authorization and review count must not be an arbitrary stop condition');
+
 assert.match(noPr,
   /实现分支上完成[\s\S]{0,180}相关测试[\s\S]{0,180}Local Review[\s\S]{0,220}(?:commit|提交)[\s\S]{0,180}(?:push|推送)/i,
   'no-PR work, tests, Local Review, commit, and push must be bound to the implementation branch');

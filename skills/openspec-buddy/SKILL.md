@@ -1,7 +1,8 @@
 ---
 name: openspec-buddy
 description: Use when the user explicitly invokes openspec-buddy explore, claim, propose, apply, or achieve for OpenSpec changes coordinated through GitHub Issues across branches, agents, or worktrees.
-compatibility: Requires openspec CLI and GitHub CLI.
+metadata:
+  compatibility: Requires openspec CLI and GitHub CLI.
 ---
 
 # OpenSpec Buddy
