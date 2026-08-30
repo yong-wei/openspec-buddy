@@ -44,6 +44,7 @@
 - 当前开发线将 manual `propose` 恢复为轻量协调入口：默认只保留已推送的本地 change、唯一 `change_id` Issue 标记、`type:change`/`status:ready` 与原生 `blockedBy`；triage、proposal-review、Testing Strategy、task-to-AC、Project、标签矩阵和独立提案审核不再是默认硬闸门。claim 阶段的 triage 与历史完整 metadata 读取保持兼容。
 - Lite review 等待使用一次性只读 evidence snapshot 同时读取顶层评论及 reactions、Pull Reviews、inline review comments 与 GraphQL review threads。脚本只保证观察完整并输出来源和原文；等待、评阅接受、清场判断与重试仍由主模型完成。
 - `v0.27.1` 将 Auto lite 无目标选择改为按 Buddy 活跃状态读取开放 Issue，实际候选上限为 50；显式目标和历史映射使用有界分页，Pull Request 不计入 Issue 上限，避免仓库历史增长触发 Node 子进程缓冲区溢出。
+- `v0.28.0` 将 Lite Review feedback 改为不变量优先处理：同轮多个同源 finding 或相同失败类别复现时，先重推共同不变量并审计完整状态机、权威边界、读写和校验路径，再实施覆盖完整影响面的修复；两个发布技能的兼容性声明迁移到受通用校验器支持的 `metadata.compatibility`。
 
 ## 当前警惕点
 

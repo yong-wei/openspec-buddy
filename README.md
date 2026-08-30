@@ -85,6 +85,11 @@ $HOME/.agents/skills/openspec-buddy-auto/scripts/read-review-evidence.mjs --pr <
 comments 和 review threads。脚本只提供来源与原始证据；等待、评阅接受、清场
 判断和重试仍由主模型完成。
 
+收到 Review feedback 后，Lite 先按违反的不变量或共同根因聚类。同轮多个同源
+finding，或同一失败类别再次出现时，必须重新推导不变量并审计完整状态机、
+权威边界、读写和校验路径，不得继续逐点增加条件分支。根因修复需要扩大当前
+OpenSpec 范围、公共 API 或数据模型时，停止并请求用户授权。
+
 Lite 不读取 `OPENSPEC_BUDDY_PR_REVIEW_REQUEST`。需要 manual Buddy 的完整
 GitHub Project 协调或现有 Auto full controller 时，运行：
 
