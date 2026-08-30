@@ -71,6 +71,7 @@ const commands = [
   node('skills/openspec-buddy/evals/verify-review-clear.test.mjs'),
 
   node('skills/openspec-buddy-auto/evals/lane-state.test.mjs'),
+  node('skills/openspec-buddy-auto/evals/lite/skill-contract.test.mjs'),
   node('skills/openspec-buddy-auto/evals/review-truth.test.mjs'),
   node('skills/openspec-buddy-auto/evals/read-review-evidence.test.mjs'),
   node('skills/openspec-buddy-auto/evals/lane-action-runner.test.mjs'),

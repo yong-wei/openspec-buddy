@@ -30,6 +30,12 @@
       "prompt": "显式使用 openspec-buddy-auto full 继续现有 controller 状态。",
       "expected_output": "只调用公开 scripts/buddy-auto.mjs full，并把既有 OPENSPEC_BUDDY_AUTO_* 输入或恢复参数置于 full 之后；不得直接调用 scripts/full 内部模块。等待 controller 返回 DONE、HANDOFF 或 BLOCKED，按 interrupt 完成被授权工作后再次运行同一公开 full 命令。",
       "files": []
+    },
+    {
+      "id": 6,
+      "prompt": "Codex review 对同一个 Lite PR 返回三个 findings：合并闸门从缓存读取旧 review request、顶层评论与 review thread 使用不同权威、复审后仍接受旧 head 的 Clearance Comment。请处理这些 feedback。",
+      "expected_output": "先把三个 findings 按“当前 head/request/response/thread 必须绑定同一远端权威”不变量聚类，识别共同根因；同源问题不得逐点增加条件分支，必须审计完整的状态机、权威边界、读写和校验路径并实施一次根因级修复。为原触发场景及同类 sibling 路径补充回归证据后再提交、推送和复审；若根治需要扩展当前 OpenSpec 范围、公共 API 或数据模型，停止并请求授权。",
+      "files": []
     }
   ]
 }
