@@ -235,7 +235,7 @@ lease_until="$(node -e 'const fs=require("node:fs"); const data=JSON.parse(fs.re
 base_sha="$(node -e 'const fs=require("node:fs"); const data=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(data.base_sha || "");' "$active_file")"
 claim_alias="$(node -e 'const fs=require("node:fs"); const data=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(data.worktree_alias || "");' "$active_file")"
 claim_path_hash="$(node -e 'const fs=require("node:fs"); const data=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(data.worktree_path_hash || "");' "$active_file")"
-claim_agent="$(node -e 'const fs=require("node:fs"); const data=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(String(data.agent || "").replace(/^@/, ""));' "$active_file")"
+claim_actor="$(node -e 'const fs=require("node:fs"); const data=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(String(data.comment_user_login || ""));' "$active_file")"
 
 if [[ "$force_release" != "1" ]]; then
   if [[ -z "$claim_alias" || -z "$claim_path_hash" ]]; then
@@ -263,7 +263,7 @@ fi
 
 buddy_release_claim_lock "$issue_number" "$change_id" "$claim_branch" "$viewer" "$claim_id" "$lease_until" "$reason"
 
-restore_ready_status "${claim_agent:-$viewer}"
+restore_ready_status "${claim_actor:-$viewer}"
 clear_current_lane "$claim_branch"
 
 if [[ "$delete_branch" == "1" && -n "$claim_branch" && -n "$base_sha" ]]; then

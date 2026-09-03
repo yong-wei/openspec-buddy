@@ -71,7 +71,7 @@ if (args[0] === 'issue' && args[1] === 'edit') {
 }
 if (args[0] === 'issue' && args[1] === 'comment') {
   if (state.failWrite === 'comment') process.exit(1);
-  state.comments.push({ body: args[args.indexOf('--body') + 1] }); save(); return;
+  state.comments.push({ body: args[args.indexOf('--body') + 1], user: { login: 'alice' } }); save(); return;
 }
 console.error('unexpected gh call: ' + args.join(' '));
 process.exit(90);
@@ -95,6 +95,7 @@ function run(item, env = {}) {
       ...process.env,
       PATH: `${item.bin}:${path.dirname(process.execPath)}:/usr/bin:/bin`,
       OPENSPEC_BUDDY_BASE_BRANCH: 'integration',
+      OPENSPEC_BUDDY_AGENT: 'codex/gpt-5.6-sol',
       OPENSPEC_BUDDY_ENV_FILE: '',
       OPENSPEC_BUDDY_LITE_STATUS_HELPER: path.join(item.bin, 'status-stub'),
       ...env,
@@ -115,6 +116,12 @@ assert.notEqual(missingConfigResult.status, 0);
 assert.match(missingConfigResult.stderr, /Missing OpenSpec Buddy configuration.*OPENSPEC_BUDDY_BASE_BRANCH/s);
 assert.doesNotMatch(fs.readFileSync(missingConfig.log, 'utf8'), /api --method POST/);
 
+const missingAgent = fixture('missing-agent');
+const missingAgentResult = run(missingAgent, { OPENSPEC_BUDDY_AGENT: '' });
+assert.notEqual(missingAgentResult.status, 0);
+assert.match(missingAgentResult.stderr, /OPENSPEC_BUDDY_AGENT.*harness\/model/);
+assert.doesNotMatch(fs.readFileSync(missingAgent.log, 'utf8'), /api --method POST|issue edit|issue comment|^status /m);
+
 const item = fixture('success');
 const claimed = run(item);
 assert.equal(claimed.status, 0, claimed.stderr);
@@ -126,7 +133,7 @@ assert.ok(calls.indexOf('issue edit') < calls.indexOf('issue comment'));
 assert.ok(calls.indexOf('issue comment') < calls.indexOf('status 17 claimed'));
 const comment = JSON.parse(fs.readFileSync(item.state)).comments[0].body;
 assert.match(comment, /issue: 17/);
-assert.match(comment, /agent: codex\/alice/);
+assert.match(comment, /agent: codex\/gpt-5\.6-sol/);
 assert.match(comment, /worktree_alias: dev1/);
 assert.doesNotMatch(comment, /head:|claim_id|\/Users\//);
 
@@ -197,7 +204,7 @@ fs.writeFileSync(foreign.state, JSON.stringify({
   ...JSON.parse(fs.readFileSync(foreign.state, 'utf8')),
   labels: ['status:claimed'],
   assignees: ['bob'],
-  comments: [{ body: 'OpenSpec Buddy Claim\nissue: 17\nchange_id: demo-change\nbranch: demo-change\nagent: codex/bob\nworktree_alias: dev2' }],
+  comments: [{ body: 'OpenSpec Buddy Claim\nissue: 17\nchange_id: demo-change\nbranch: demo-change\nagent: codex/bob\nworktree_alias: dev2', user: { login: 'bob' } }],
   branch: true,
   failWrite: '',
 }));

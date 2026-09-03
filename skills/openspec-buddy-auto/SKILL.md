@@ -30,6 +30,8 @@ OpenSpec Buddy Auto 默认采用 Lightweight Mode（lite）。GPT-5.6 主模型�
 
 入口返回单个无持久状态的工作上下文：`claimed`、`current_claim`、`local_only` 或 `exhausted`。它不执行实现、review、merge 或 Issue 收尾。
 
+每次 Claim 前必须把本次实际运行环境写入 `OPENSPEC_BUDDY_AGENT`，格式为 `harness/model`，例如 `codex/gpt-5.6-sol`、`zcode/glm-5.3` 或 `grok/grok-4.6`。Claim comment 的 `agent` 只记录该运行环境；GitHub 评论作者与 assignee 才是认领者真源。
+
 无目标执行只查询带 Buddy 活跃状态的开放 Issue，将候选集合限制为 50 个，并选择编号最小的 Available Issue；超过上限时停止，不在不完整候选集上认领。Issue 必须开放、仅带 `status:ready`、显式映射到存在的本地 OpenSpec change，且没有开放的 GitHub 原生 `blockedBy` 关系；本地 change 缺失时立即停止，不跳到其他 Issue。选择不读取 Project、series、risk、mode、coupling、`depends_on` 或 Buddy cache。
 
 `--issue` 与 `--change` 都是单目标。`--change` 恰好映射一个开放 Issue 时仍走 Issue-backed 协调；只有完全没有映射 Issue 才是 Local-only。多个映射、仅有 closed 映射、外部 Claim 或部分 Claim 均停止，不接管、不修复、不回滚。Local-only 必须提醒用户该 change 未登记 Issue。

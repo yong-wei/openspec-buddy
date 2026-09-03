@@ -3,6 +3,7 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 check_config="$script_dir/../scripts/check-config.sh"
+load_config="$script_dir/../scripts/load-config.sh"
 parse_issue_metadata="$script_dir/../scripts/parse-issue-metadata.mjs"
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
@@ -57,6 +58,26 @@ override_output="$(
 )"
 
 assert_contains "$override_output" "base_branch=external-base"
+
+agent_output="$(
+  env -i \
+    PATH="$PATH" \
+    HOME="$HOME" \
+    OPENSPEC_BUDDY_ENV_FILE="$env_file" \
+    OPENSPEC_BUDDY_AGENT="zcode/glm 5.3" \
+    bash -c 'source "$1"; openspec_buddy_agent_identity' _ "$load_config"
+)"
+[[ "$agent_output" == "zcode/glm 5.3" ]]
+
+if env -i \
+  PATH="$PATH" \
+  HOME="$HOME" \
+  OPENSPEC_BUDDY_ENV_FILE="$env_file" \
+  OPENSPEC_BUDDY_AGENT="alice" \
+  bash -c 'source "$1"; openspec_buddy_agent_identity' _ "$load_config" >/dev/null 2>&1; then
+  echo "agent identity without harness/model separator must fail" >&2
+  exit 1
+fi
 
 issue_body="$tmp_dir/issue.md"
 cat >"$issue_body" <<'ISSUE'

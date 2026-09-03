@@ -73,26 +73,29 @@ export function parseChangeMapping(markdown) {
   };
 }
 
-export function parseLiteClaimComment(body) {
+export function parseLiteClaimComment(body, actor = '') {
   const text = String(body || '');
   if (!/^OpenSpec Buddy Claim\s*$/m.test(text)) return null;
-  const agent = field(text, 'agent').replace(/^@/, '');
+  const agent = field(text, 'agent');
+  const legacyViewer = agent.startsWith('@')
+    ? agent.slice(1)
+    : agent.startsWith('codex/') ? agent.slice('codex/'.length) : '';
   return {
     issue: Number(field(text, 'issue')) || null,
-    agent: agent.startsWith('codex/') ? agent : `codex/${agent}`,
-    viewer: agent.replace(/^codex\//, ''),
+    agent,
+    viewer: String(actor || '').trim() || legacyViewer,
     changeId: field(text, 'change_id'),
     branch: field(text, 'branch'),
     worktree: field(text, 'worktree_alias'),
   };
 }
 
-export function buildIdentity(viewer, worktreeAlias = '', realWorktree = '') {
+export function buildIdentity(viewer, worktreeAlias = '', realWorktree = '', agent = process.env.OPENSPEC_BUDDY_AGENT) {
   const normalizedViewer = String(viewer || '').trim().replace(/^@/, '').replace(/^codex\//, '');
   const alias = String(worktreeAlias || '').trim();
   const real = String(realWorktree || '').trim();
   return {
-    agent: `codex/${normalizedViewer}`,
+    agent: String(agent || '').trim(),
     viewer: normalizedViewer,
     worktree: alias || (real ? `worktree-${createHash('sha256').update(real).digest('hex').slice(0, 12)}` : ''),
   };
@@ -118,7 +121,8 @@ function activeClaimsFrom(comments) {
   const active = [];
   for (const comment of comments || []) {
     const body = comment?.body ?? comment;
-    const claim = parseLiteClaimComment(body);
+    const actor = comment?.user?.login || comment?.author?.login || '';
+    const claim = parseLiteClaimComment(body, actor);
     if (claim) active.push(claim);
   }
   return active;
@@ -153,7 +157,7 @@ export function classifyIssueClaim(issue, comments, identity, expected = {}) {
     && claim.viewer === assignees[0]
     && Boolean(claim.agent && claim.worktree);
   if (complete) {
-    return claim.agent === identity?.agent && claim.worktree === identity?.worktree ? 'current' : 'foreign';
+    return claim.viewer === identity?.viewer && claim.worktree === identity?.worktree ? 'current' : 'foreign';
   }
   return 'partial';
 }

@@ -69,6 +69,16 @@ openspec-buddy init
 OPENSPEC_BUDDY_BASE_BRANCH=integration
 ```
 
+执行 Claim 时还需按本次实际运行环境设置代理标识：
+
+```bash
+export OPENSPEC_BUDDY_AGENT="codex/gpt-5.6-sol"
+```
+
+格式为 `harness/model`；例如也可使用 `zcode/glm-5.3` 或
+`grok/grok-4.6`。该值写入 Claim comment 的 `agent` 字段用于运行环境
+归因；认领者身份以 GitHub 评论作者和 assignee 为准。
+
 Lite 的 Review Request 固定为：
 
 ```text

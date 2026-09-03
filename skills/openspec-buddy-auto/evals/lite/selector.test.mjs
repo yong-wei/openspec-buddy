@@ -47,9 +47,9 @@ assert.throws(() => branchExistsFromRefResult({
 const here = path.dirname(fileURLToPath(import.meta.url));
 const selector = path.resolve(here, '../../scripts/lite/select-available-issue.mjs');
 
-const hashedIdentity = buildIdentity('codex', '', '/tmp/real-worktree');
+const hashedIdentity = buildIdentity('codex', '', '/tmp/real-worktree', 'codex/gpt-5.6-sol');
 assert.deepEqual(hashedIdentity, {
-  agent: 'codex/codex',
+  agent: 'codex/gpt-5.6-sol',
   viewer: 'codex',
   worktree: `worktree-${createHash('sha256').update('/tmp/real-worktree').digest('hex').slice(0, 12)}`,
 });
@@ -106,6 +106,15 @@ worktree_alias: dev1`);
 assert.equal(claim.issue, 1);
 assert.equal(claim.viewer, 'codex');
 assert.equal(claim.worktree, 'dev1');
+const runtimeClaim = parseLiteClaimComment(`OpenSpec Buddy Claim
+
+issue: 1
+agent: grok/grok-4.6
+change_id: demo-change
+branch: demo-change
+worktree_alias: dev1`, 'alice');
+assert.equal(runtimeClaim.agent, 'grok/grok-4.6');
+assert.equal(runtimeClaim.viewer, 'alice');
 assert.equal(
   classifyIssueClaim({ labels: [{ name: 'status:claimed' }], assignees: [] }, [], buildIdentity('codex', 'dev1')),
   'partial',

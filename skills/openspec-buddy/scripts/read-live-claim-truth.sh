@@ -137,7 +137,7 @@ if (result.issueState !== 'OPEN') {
   } else {
     const activeStatus = new Set(['status:claimed', 'status:in-progress', 'status:in-review']);
     const claimStatus = statusLabels[0] || '';
-    const claimAgent = result.agent.replace(/^@/, '');
+    const claimActor = String(active.comment_user_login || '');
     const assigneeLogins = assigneesOf(issue.assignees);
     const remoteBranchExists = remoteBranch
       .split(/\r?\n/)
@@ -151,18 +151,18 @@ if (result.issueState !== 'OPEN') {
       result.reason = statusLabels.length === 1
         ? `issue-status-not-active:${claimStatus || 'missing'}`
         : 'issue-status-label-invalid';
-    } else if (!assigneeLogins.includes(claimAgent)) {
+    } else if (!claimActor || !assigneeLogins.includes(claimActor)) {
       result.status = 'invalid';
       result.reason = 'claim-assignee-missing';
-    } else if (assigneeLogins.some((login) => login !== claimAgent)) {
+    } else if (assigneeLogins.some((login) => login !== claimActor)) {
       result.status = 'foreign';
-      result.reason = `claim-assignee-mismatch:${assigneeLogins.filter((login) => login !== claimAgent).join(',')}`;
+      result.reason = `claim-assignee-mismatch:${assigneeLogins.filter((login) => login !== claimActor).join(',')}`;
     } else if (boundBranch && !result.coordinationBranch) {
       result.status = 'invalid';
       result.reason = 'claim-missing-coordination-branch';
     } else {
       const mismatches = [];
-      if (claimAgent !== viewer) mismatches.push('agent');
+      if (claimActor !== viewer) mismatches.push('actor');
       if (result.worktreeAlias && result.worktreeAlias !== String(identity.alias || '')) mismatches.push('worktree_alias');
       if (result.worktreePathHash && result.worktreePathHash !== String(identity.path_hash || '')) mismatches.push('worktree_path_hash');
       if (boundBranch && result.coordinationBranch !== boundBranch) mismatches.push('coordination_branch');

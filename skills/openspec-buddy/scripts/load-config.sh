@@ -85,6 +85,17 @@ openspec_buddy_load_project_env() {
 
 openspec_buddy_load_project_env
 
+openspec_buddy_agent_identity() {
+  local value
+  local pattern='^[A-Za-z0-9._-]+/[A-Za-z0-9][A-Za-z0-9._ -]*$'
+  value="$(openspec_buddy_trim "${OPENSPEC_BUDDY_AGENT:-}")"
+  if [[ ! "$value" =~ $pattern ]]; then
+    echo "OPENSPEC_BUDDY_AGENT must identify the current harness and model as harness/model (for example codex/gpt-5.6-sol)." >&2
+    return 2
+  fi
+  printf '%s' "$value"
+}
+
 openspec_buddy_require_var() {
   local name="$1"
   local value="${!name:-}"

@@ -64,6 +64,10 @@ Default lease duration is 12 hours. Override only for a specific run:
 OPENSPEC_BUDDY_CLAIM_TTL_HOURS=12 <openspec-buddy-skill-dir>/scripts/claim-issue.sh <issue-number>
 ```
 
+Set `OPENSPEC_BUDDY_AGENT` for every Claim to the actual `harness/model`, such
+as `codex/gpt-5.6-sol`. This value is attribution only. Ownership checks use
+the GitHub comment author, assignee, claim id, and worktree identity.
+
 Long-running auto workflows should refresh the issue with progress comments after major transitions rather than silently holding a stale branch.
 
 Issue, PR, relationship, and Project read caches remain performance aids. They

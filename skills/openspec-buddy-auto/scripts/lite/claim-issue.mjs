@@ -78,6 +78,9 @@ try {
   }
   const worktreeRoot = fs.realpathSync(command('git', ['rev-parse', '--show-toplevel']));
   const identity = buildIdentity(viewer, worktree, worktreeRoot);
+  if (!/^[A-Za-z0-9._-]+\/[A-Za-z0-9][A-Za-z0-9._ -]*$/.test(identity.agent)) {
+    throw new Error('OPENSPEC_BUDDY_AGENT must identify the current harness and model as harness/model (for example codex/gpt-5.6-sol).');
+  }
   const baseBranch = readProjectBaseBranch(worktreeRoot);
   if (!baseBranch || !/^[A-Za-z0-9](?:[A-Za-z0-9._/-]*[A-Za-z0-9])?$/.test(baseBranch) || baseBranch.includes('..')) {
     throw new Error('A valid configured base branch is required for Lite Claim.');

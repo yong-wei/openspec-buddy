@@ -74,7 +74,7 @@ function runResumeVerifier(overrides = {}, expectedUpdatedAt = "2026-07-14T10:00
   const claim = {
     claim_id: "claim-1",
     state: "active",
-    agent: "@alice",
+    agent: "codex/gpt-5.6-sol",
     change_id: "issue-31-test",
     branch: "issue-31-test",
     base_branch: "integration",
@@ -108,8 +108,9 @@ buddy_verify_active_claim_resume 31 issue-31-test issue-31-test integration alic
   const valid = runResumeVerifier();
   assert.equal(valid.status, 0, valid.stderr);
   assert.equal(JSON.parse(valid.stdout).claim_id, "claim-1");
+  const changedRuntime = runResumeVerifier({ claim: { agent: "grok/grok-4.6" } });
+  assert.equal(changedRuntime.status, 0, changedRuntime.stderr);
   for (const [name, result, diagnostic] of [
-    ["foreign agent", runResumeVerifier({ claim: { agent: "@bob" } }), /another agent/],
     ["expired lease", runResumeVerifier({ claim: { lease_until: "2026-07-14T10:30:00Z" } }), /lease has expired/],
     ["stale base", runResumeVerifier({ baseSha: "def5678" }), /base_sha is stale/],
     ["foreign worktree", runResumeVerifier({ identity: { path_hash: "path-b" } }), /another worktree/],
@@ -186,6 +187,7 @@ for (const mode of ["stacked", "fixed-branch"]) {
 {
   const claimScript = fs.readFileSync(claimIssue, "utf8");
   const claimChangeScript = fs.readFileSync(claimChange, "utf8");
+  const claimLockScript = fs.readFileSync(claimLock, "utf8");
   assert.match(claimScript, /buddy_write_minimal_claim_lock .*\$tmp_dir\/adopted-body\.md/);
   const minimalLock = claimScript.indexOf('buddy_write_minimal_claim_lock "$issue_number"');
   const finalIssueReread = claimScript.indexOf('issue-before-lock.json');
@@ -209,7 +211,12 @@ for (const mode of ["stacked", "fixed-branch"]) {
   assert.match(claimScript, /claim-change\.sh" "\$issue_number" --resume-active/);
   assert.match(claimChangeScript, /--resume-active[\s\S]*buddy_verify_active_claim_resume/);
   assert.match(claimChangeScript, /stale_recovery" != "2"[\s\S]*buddy_write_minimal_claim_lock/);
-  assert.match(fs.readFileSync(path.join(skillDir, "scripts/claim-lock.sh"), "utf8"), /active claim lease has expired; use stale recovery and reacquire/);
+  assert.match(claimLockScript, /active claim lease has expired; use stale recovery and reacquire/);
+  assert.ok(
+    claimLockScript.indexOf('agent_identity="$(openspec_buddy_agent_identity)"')
+      < claimLockScript.indexOf('gh issue edit "$issue_number" --add-assignee "$viewer"'),
+    'manual Claim must validate harness/model before GitHub mutations',
+  );
   assert.doesNotMatch(claimScript, /issue list[\s\S]*--limit/);
   assert.doesNotMatch(claimScript, /gh issue create/);
 }

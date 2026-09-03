@@ -16,6 +16,10 @@ cat > "$scripts/load-config.sh" <<'EOF'
 export OPENSPEC_BUDDY_CLAIM_TTL_HOURS=2
 export OPENSPEC_BUDDY_BASE_BRANCH=integration
 openspec_buddy_require_core_config() { :; }
+openspec_buddy_agent_identity() {
+  [[ "${OPENSPEC_BUDDY_AGENT:-}" == */* ]] || return 2
+  printf '%s' "$OPENSPEC_BUDDY_AGENT"
+}
 EOF
 cat > "$scripts/github-fetch.sh" <<'EOF'
 buddy_cache_dir() { printf '%s\n' "$TEST_ROOT/cache"; }
@@ -162,6 +166,7 @@ EOF
 chmod +x "$tmp/bin/gh"
 
 export TEST_ROOT="$tmp" CALL_LOG="$tmp/calls.log" PATH="$tmp/bin:$PATH"
+export OPENSPEC_BUDDY_AGENT=codex/gpt-5.6-sol
 cd "$tmp"
 git init -q
 git config user.email test@example.com
@@ -172,6 +177,12 @@ git init --bare -q "$tmp/origin.git"
 git remote add origin "$tmp/origin.git"
 git push -q origin integration
 git push -q origin HEAD:issue-31-test
+
+# Invalid runtime attribution stops before any GitHub read or write and cannot
+# trigger the mutation-capable cleanup path.
+: > "$CALL_LOG"
+if OPENSPEC_BUDDY_AGENT=alice "$scripts/claim-issue.sh" 31 >/dev/null 2>&1; then exit 1; fi
+[[ ! -s "$CALL_LOG" ]]
 
 # Fresh ordinary issue: lock and verify precede triage; missing triage preserves lock.
 : > "$CALL_LOG"
@@ -349,6 +360,9 @@ grep -q '^verify-lock$' "$CALL_LOG"
 # mutation when the shared active verifier fails.
 cp "$skill_dir/scripts/claim-change.sh" "$scripts/claim-change.sh"
 chmod +x "$scripts/claim-change.sh"
+printf claimed > "$tmp/mode"; rm -f "$tmp/post-status"; : > "$CALL_LOG"
+if OPENSPEC_BUDDY_AGENT=alice "$scripts/claim-change.sh" 31 --resume-active >/dev/null 2>&1; then exit 1; fi
+[[ ! -s "$CALL_LOG" ]]
 printf claimed > "$tmp/mode"; rm -f "$tmp/post-status"; : > "$CALL_LOG"
 if FAIL_ACTIVE_VERIFY=1 "$scripts/claim-change.sh" 31 --resume-active >/dev/null 2>&1; then exit 1; fi
 ! grep -Eq 'issue develop 31 --name|status-mutation' "$CALL_LOG"

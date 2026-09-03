@@ -100,6 +100,9 @@ openspec-buddy init --full
 Claim, review, and achievement flows require `OPENSPEC_BUDDY_BASE_BRANCH`,
 `OPENSPEC_BUDDY_RELEASE_BRANCH`, `OPENSPEC_BUDDY_PROJECT_OWNER`,
 `OPENSPEC_BUDDY_PROJECT_NUMBER`, and `OPENSPEC_BUDDY_PROJECT_TITLE`.
+Claim additionally requires the current runtime identity in `OPENSPEC_BUDDY_AGENT`
+using `harness/model`, for example `codex/gpt-5.6-sol`. The claim comment author
+and assignee remain the claimant identity; `agent` records only the harness/model.
 Default propose only requires `OPENSPEC_BUDDY_BASE_BRANCH`.
 `propose --no-issue` only requires `OPENSPEC_BUDDY_BASE_BRANCH`.
 

@@ -13,6 +13,7 @@ export OPENSPEC_BUDDY_RELEASE_BRANCH=main
 export OPENSPEC_BUDDY_PROJECT_OWNER=owner
 export OPENSPEC_BUDDY_PROJECT_NUMBER=1
 export OPENSPEC_BUDDY_PROJECT_TITLE=Project
+export OPENSPEC_BUDDY_AGENT=codex/gpt-5.6-sol
 
 git init --bare "$tmp_dir/origin.git" >/dev/null
 git clone "$tmp_dir/origin.git" "$tmp_dir/seed" >/dev/null 2>&1

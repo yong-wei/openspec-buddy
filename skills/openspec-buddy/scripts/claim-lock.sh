@@ -111,7 +111,6 @@ if (String(issue.state || "").toUpperCase() !== "OPEN") fail("issue is not open"
 if (labels.filter((label) => label.startsWith("status:")).length !== 1 || !labels.includes("status:claimed")) fail("issue is not exactly status:claimed");
 if (!assignees.includes(viewer)) fail("current viewer is not the assignee");
 if (!active) fail("no active claim exists");
-if (String(active.agent || "").replace(/^@/, "") !== viewer) fail("active claim belongs to another agent");
 if (active.change_id !== changeId || active.branch !== branch) fail("active claim change or branch does not match");
 if (!active.claim_id || !active.lease_until || !active.base_branch || !active.base_sha) fail("active claim evidence is incomplete");
 if (active.comment_user_login !== viewer) fail("claim comment was not authored by the current claiming actor");
@@ -188,8 +187,8 @@ if (!(Date.parse(active.lease_until) < now)) {
   process.stderr.write("Stale claim recovery rejected: lease has not expired.\n");
   process.exit(33);
 }
-const activeAgent = String(active.agent || "").replace(/^@/, "");
-const otherAssignees = assigneesOf(issue.assignees).filter((login) => login && login !== activeAgent);
+const activeActor = String(active.comment_user_login || "");
+const otherAssignees = assigneesOf(issue.assignees).filter((login) => login && login !== activeActor);
 if (otherAssignees.length > 0) {
   process.stderr.write(`Stale claim recovery rejected: issue has newer assignee(s): ${otherAssignees.join(", ")}\n`);
   process.exit(34);
@@ -423,6 +422,8 @@ buddy_write_minimal_claim_lock() {
   local issue_file="$9"
   local adopted_body_file="${10:-}"
   local adopted_from_open_issue="${11:-false}"
+  local agent_identity
+  agent_identity="$(openspec_buddy_agent_identity)" || return $?
 
   if [[ -n "$adopted_body_file" ]]; then
     gh issue edit "$issue_number" --body-file "$adopted_body_file"
@@ -453,7 +454,7 @@ OpenSpec Buddy Claim
 
 claim_id: $claim_id
 state: active
-agent: @$viewer
+agent: $agent_identity
 change_id: $change_id
 branch: $claim_branch
 base_branch: $base_branch
@@ -485,7 +486,6 @@ OpenSpec Buddy Claim Release
 
 claim_id: $claim_id
 state: released
-agent: @$viewer
 change_id: $change_id
 branch: $claim_branch
 lease_until: $lease_until
@@ -577,8 +577,7 @@ if (!latest) {
   process.stderr.write("Claim verification failed: no active claim comment found.\n");
   process.exit(22);
 }
-const expectedAgent = `@${viewer}`;
-if (latest.claim_id !== claimId || latest.agent !== expectedAgent || latest.change_id !== changeId || latest.lease_until !== leaseUntil) {
+if (latest.claim_id !== claimId || latest.comment_user_login !== viewer || latest.change_id !== changeId || latest.lease_until !== leaseUntil) {
   process.stderr.write("Claim verification failed: latest active claim comment does not belong to this claim.\n");
   process.exit(23);
 }

@@ -139,31 +139,31 @@ cat > "$tmp_dir/issue-foreign-claim.json" <<'JSON'
 JSON
 
 cat > "$tmp_dir/comments-owned.json" <<JSON
-[{"created_at":"2026-07-12T11:00:00Z","body":"OpenSpec Buddy Claim\\n\\nclaim_id: claim-owned\\nstate: active\\nagent: @agent-a\\nchange_id: demo-change\\nbranch: demo-change\\nbase_sha: abc123\\nlease_until: 2026-07-12T13:00:00Z\\nworktree_alias: dev1\\nworktree_path_hash: $path_hash\\ncoordination_branch: dev1"}]
+[{"created_at":"2026-07-12T11:00:00Z","user":{"login":"agent-a"},"body":"OpenSpec Buddy Claim\\n\\nclaim_id: claim-owned\\nstate: active\\nagent: @agent-a\\nchange_id: demo-change\\nbranch: demo-change\\nbase_sha: abc123\\nlease_until: 2026-07-12T13:00:00Z\\nworktree_alias: dev1\\nworktree_path_hash: $path_hash\\ncoordination_branch: dev1"}]
 JSON
 
 cat > "$tmp_dir/comments-foreign.json" <<'JSON'
-[{"created_at":"2026-07-12T11:00:00Z","body":"OpenSpec Buddy Claim\n\nclaim_id: claim-foreign\nstate: active\nagent: @agent-b\nchange_id: demo-change\nbranch: demo-change\nbase_sha: abc123\nlease_until: 2026-07-12T13:00:00Z\nworktree_alias: dev2\nworktree_path_hash: foreign-hash\ncoordination_branch: dev2"}]
+[{"created_at":"2026-07-12T11:00:00Z","user":{"login":"agent-b"},"body":"OpenSpec Buddy Claim\n\nclaim_id: claim-foreign\nstate: active\nagent: @agent-b\nchange_id: demo-change\nbranch: demo-change\nbase_sha: abc123\nlease_until: 2026-07-12T13:00:00Z\nworktree_alias: dev2\nworktree_path_hash: foreign-hash\ncoordination_branch: dev2"}]
 JSON
 
 cat > "$tmp_dir/comments-expired.json" <<JSON
-[{"created_at":"2026-07-12T11:00:00Z","body":"OpenSpec Buddy Claim\\n\\nclaim_id: claim-expired\\nstate: active\\nagent: @agent-a\\nchange_id: demo-change\\nbranch: demo-change\\nlease_until: 2026-07-12T11:59:59Z\\nworktree_alias: dev1\\nworktree_path_hash: $path_hash\\ncoordination_branch: dev1"}]
+[{"created_at":"2026-07-12T11:00:00Z","user":{"login":"agent-a"},"body":"OpenSpec Buddy Claim\\n\\nclaim_id: claim-expired\\nstate: active\\nagent: @agent-a\\nchange_id: demo-change\\nbranch: demo-change\\nlease_until: 2026-07-12T11:59:59Z\\nworktree_alias: dev1\\nworktree_path_hash: $path_hash\\ncoordination_branch: dev1"}]
 JSON
 
 cat > "$tmp_dir/comments-invalid.json" <<JSON
-[{"created_at":"2026-07-12T11:00:00Z","body":"OpenSpec Buddy Claim\\n\\nclaim_id: claim-invalid\\nstate: active\\nagent: @agent-a\\nchange_id: demo-change\\nbranch: demo-change\\nworktree_alias: dev1\\nworktree_path_hash: $path_hash\\ncoordination_branch: dev1"}]
+[{"created_at":"2026-07-12T11:00:00Z","user":{"login":"agent-a"},"body":"OpenSpec Buddy Claim\\n\\nclaim_id: claim-invalid\\nstate: active\\nagent: @agent-a\\nchange_id: demo-change\\nbranch: demo-change\\nworktree_alias: dev1\\nworktree_path_hash: $path_hash\\ncoordination_branch: dev1"}]
 JSON
 
 cat > "$tmp_dir/comments-missing-coordination.json" <<JSON
-[{"created_at":"2026-07-12T11:00:00Z","body":"OpenSpec Buddy Claim\\n\\nclaim_id: claim-missing-coordination\\nstate: active\\nagent: @agent-a\\nchange_id: demo-change\\nbranch: demo-change\\nlease_until: 2026-07-12T13:00:00Z\\nworktree_alias: dev1\\nworktree_path_hash: $path_hash"}]
+[{"created_at":"2026-07-12T11:00:00Z","user":{"login":"agent-a"},"body":"OpenSpec Buddy Claim\\n\\nclaim_id: claim-missing-coordination\\nstate: active\\nagent: @agent-a\\nchange_id: demo-change\\nbranch: demo-change\\nlease_until: 2026-07-12T13:00:00Z\\nworktree_alias: dev1\\nworktree_path_hash: $path_hash"}]
 JSON
 
 cat > "$tmp_dir/comments-missing-base-sha.json" <<JSON
-[{"created_at":"2026-07-12T11:00:00Z","body":"OpenSpec Buddy Claim\\n\\nclaim_id: claim-missing-base-sha\\nstate: active\\nagent: @agent-a\\nchange_id: demo-change\\nbranch: demo-change\\nlease_until: 2026-07-12T13:00:00Z\\nworktree_alias: dev1\\nworktree_path_hash: $path_hash\\ncoordination_branch: dev1"}]
+[{"created_at":"2026-07-12T11:00:00Z","user":{"login":"agent-a"},"body":"OpenSpec Buddy Claim\\n\\nclaim_id: claim-missing-base-sha\\nstate: active\\nagent: @agent-a\\nchange_id: demo-change\\nbranch: demo-change\\nlease_until: 2026-07-12T13:00:00Z\\nworktree_alias: dev1\\nworktree_path_hash: $path_hash\\ncoordination_branch: dev1"}]
 JSON
 
 cat > "$tmp_dir/comments-mismatched-branch.json" <<JSON
-[{"created_at":"2026-07-12T11:00:00Z","body":"OpenSpec Buddy Claim\\n\\nclaim_id: claim-mismatched-branch\\nstate: active\\nagent: @agent-a\\nchange_id: demo-change\\nbranch: other-change\\nbase_sha: abc123\\nlease_until: 2026-07-12T13:00:00Z\\nworktree_alias: dev1\\nworktree_path_hash: $path_hash\\ncoordination_branch: dev1"}]
+[{"created_at":"2026-07-12T11:00:00Z","user":{"login":"agent-a"},"body":"OpenSpec Buddy Claim\\n\\nclaim_id: claim-mismatched-branch\\nstate: active\\nagent: @agent-a\\nchange_id: demo-change\\nbranch: other-change\\nbase_sha: abc123\\nlease_until: 2026-07-12T13:00:00Z\\nworktree_alias: dev1\\nworktree_path_hash: $path_hash\\ncoordination_branch: dev1"}]
 JSON
 
 cat > "$tmp_dir/comments-empty.json" <<'JSON'
