@@ -36,12 +36,6 @@ OpenSpec Buddy Auto 默认采用 Lightweight Mode（lite）。GPT-5.6 主模型�
 
 `--issue` 与 `--change` 都是单目标。`--change` 恰好映射一个开放 Issue 时仍走 Issue-backed 协调；只有完全没有映射 Issue 才是 Local-only。多个映射、仅有 closed 映射、外部 Claim 或部分 Claim 均停止，不接管、不修复、不回滚。Local-only 必须提醒用户该 change 未登记 Issue。
 
-Lite 不处理没有 `change_id` 映射的原始 Issue，因为它不能替代必经的
-OpenSpec Explore 与 proposal adoption。此类 Issue 必须转入 manual
-`openspec-buddy claim` 的 direct-claim handoff：Explore 后在同一 Issue 上
-完成 `propose --issue <number> --change <change_id>`，推送 proposal artifacts
-到 base branch，再以 `apply --resume-active` 开始实现。
-
 ## 实施与 Local Review
 
 取得工作上下文后，GPT-5.6 主模型自主完成 change 中全部任务和相关测试，不受 full controller 生命周期约束。提交前必须检查完整 diff，确认实现完整、没有越出 change 范围、相关测试通过，并完成 Local Review。只有用户已经授权子代理且主模型按风险认为必要时，才增加独立审核；简单变更不强制子代理。
