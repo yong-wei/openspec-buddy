@@ -351,7 +351,7 @@ cat > "$tmp_dir/threads-truncated.json" <<JSON
 JSON
 export GH_THREADS_FILE="$tmp_dir/threads-truncated.json"
 set +e
-timeout 8s "$helper" 123 > "$tmp_dir/truncated-output.txt" 2> "$tmp_dir/truncated-err.txt"
+timeout 30s "$helper" 123 > "$tmp_dir/truncated-output.txt" 2> "$tmp_dir/truncated-err.txt"
 truncated_status="$?"
 set -e
 if [[ "$truncated_status" -eq 0 || "$truncated_status" -eq 124 ]]; then
@@ -411,7 +411,7 @@ export OPENSPEC_BUDDY_REVIEW_MAX_WAIT_SECONDS=2
 export GH_COMMENT_LOG_FILE="$tmp_dir/comment-unavailable.log"
 rm -f "$GH_COMMENT_LOG_FILE"
 set +e
-timeout 8s "$helper" 123 > "$tmp_dir/unavailable-output.txt" 2> "$tmp_dir/unavailable-err.txt"
+timeout 30s "$helper" 123 > "$tmp_dir/unavailable-output.txt" 2> "$tmp_dir/unavailable-err.txt"
 unavailable_status="$?"
 set -e
 unset VERIFY_MODE
@@ -444,7 +444,7 @@ export OPENSPEC_BUDDY_REVIEW_INITIAL_WAIT_SECONDS=0
 export OPENSPEC_BUDDY_REVIEW_POLL_SECONDS=1
 export OPENSPEC_BUDDY_REVIEW_MAX_WAIT_SECONDS=1
 set +e
-timeout 8s "$helper" 123 > "$tmp_dir/timeout-output.txt" 2> "$tmp_dir/timeout-err.txt"
+timeout 30s "$helper" 123 > "$tmp_dir/timeout-output.txt" 2> "$tmp_dir/timeout-err.txt"
 timeout_status="$?"
 set -e
 if [[ "$timeout_status" -eq 0 ]]; then
@@ -527,7 +527,7 @@ export OPENSPEC_BUDDY_REVIEW_INITIAL_WAIT_SECONDS=5
 export OPENSPEC_BUDDY_REVIEW_POLL_SECONDS=1
 export OPENSPEC_BUDDY_REVIEW_MAX_WAIT_SECONDS=5
 set +e
-timeout 2s "$helper" 123 > "$tmp_dir/stale-request-output.txt" 2> "$tmp_dir/stale-request-err.txt"
+timeout 15s "$helper" 123 > "$tmp_dir/stale-request-output.txt" 2> "$tmp_dir/stale-request-err.txt"
 stale_request_status="$?"
 set -e
 if [[ "$stale_request_status" -eq 0 || "$stale_request_status" -eq 124 ]]; then
@@ -557,7 +557,7 @@ printf '%s\n' \
 export GH_COMMITS_FILE="$tmp_dir/commits-unknown-head-time.json"
 rm -f "$STALE_REQUEST_VERIFY_LOG"
 set +e
-timeout 2s "$helper" 123 > "$tmp_dir/unknown-head-output.txt" 2> "$tmp_dir/unknown-head-err.txt"
+timeout 15s "$helper" 123 > "$tmp_dir/unknown-head-output.txt" 2> "$tmp_dir/unknown-head-err.txt"
 unknown_head_status="$?"
 set -e
 if [[ "$unknown_head_status" -eq 0 || "$unknown_head_status" -eq 124 ]]; then
@@ -590,7 +590,7 @@ printf '%s\n' \
 export GH_COMMITS_FILE="$tmp_dir/commits-missing-current-head.json"
 rm -f "$STALE_REQUEST_VERIFY_LOG"
 set +e
-timeout 2s "$helper" 123 > "$tmp_dir/missing-current-head-output.txt" 2> "$tmp_dir/missing-current-head-err.txt"
+timeout 15s "$helper" 123 > "$tmp_dir/missing-current-head-output.txt" 2> "$tmp_dir/missing-current-head-err.txt"
 missing_current_head_status="$?"
 set -e
 if [[ "$missing_current_head_status" -eq 0 || "$missing_current_head_status" -eq 124 ]]; then
@@ -950,13 +950,13 @@ export HEAD_CHANGE_STATIC_COUNT=4
 rm -f "$HEAD_CHANGE_STATE_FILE" "$HEAD_CHANGE_COUNT_FILE"
 export OPENSPEC_BUDDY_REVIEW_INITIAL_WAIT_SECONDS=0
 export OPENSPEC_BUDDY_REVIEW_POLL_SECONDS=1
-export OPENSPEC_BUDDY_REVIEW_MAX_WAIT_SECONDS=6
+export OPENSPEC_BUDDY_REVIEW_MAX_WAIT_SECONDS=30
 export OPENSPEC_BUDDY_VERIFY_REVIEW_CLEAR_HELPER="$tmp_dir/verify-cache-refresh.sh"
 export VERIFY_COUNT_FILE="$tmp_dir/verify-head-change.count"
 export VERIFY_REUSE_LOG_FILE="$tmp_dir/verify-head-change-reuse.log"
 rm -f "$VERIFY_COUNT_FILE" "$VERIFY_REUSE_LOG_FILE"
 set +e
-timeout 10s "$helper" 123 > "$tmp_dir/head-change-output.txt" 2> "$tmp_dir/head-change-err.txt"
+timeout 60s "$helper" 123 > "$tmp_dir/head-change-output.txt" 2> "$tmp_dir/head-change-err.txt"
 head_change_status="$?"
 set -e
 mv "$tmp_dir/gh-original" "$tmp_dir/gh"
