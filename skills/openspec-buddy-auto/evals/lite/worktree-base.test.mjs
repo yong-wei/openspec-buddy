@@ -28,6 +28,8 @@ git(seed, ['commit', '-qm', 'base']);
 git(seed, ['remote', 'add', 'origin', remote]);
 git(seed, ['push', '-q', 'origin', 'integration']);
 execFileSync('git', ['clone', '-q', remote, work]);
+git(work, ['config', 'user.email', 'codex@example.test']);
+git(work, ['config', 'user.name', 'Codex']);
 git(work, ['config', '--local', 'extensions.worktreeConfig', 'true']);
 
 function run(args) {
