@@ -47,6 +47,10 @@ only the requested agent work. After agent-owned work or external state changes,
 run the driver again, except for propose registration: the propose HANDOFF is
 the complete model-owned workflow and ends after its single live read-back.
 
+For a `claim_state: active-direct-claim` handoff, preserve that claim while
+following the returned sequence: OpenSpec Explore, then proposal adoption, then
+`apply --resume-active`. Do not retry normal claim or create a second Issue.
+
 ## Core Invariant
 
 For GitHub-backed work:
@@ -81,6 +85,17 @@ lightweight propose handoff explicitly:
 Add `--no-issue` only for an intentionally local-only change. The propose
 handoff is model-owned and completes after the single GitHub read-back described
 in `references/core-lifecycle.md`; do not rerun it as a state machine.
+
+When a direct-claim handoff supplies an Issue and stable change id, adopt that
+same Issue instead of registering a new one:
+
+```bash
+<openspec-buddy-skill-dir>/scripts/buddy-driver.mjs --mode propose --issue <issue-number> --change <change_id>
+```
+
+The existing Issue remains `status:claimed`; proposal adoption creates and
+validates the local change, commits and pushes it to the configured base branch,
+then verifies the existing mapping and active claim.
 
 ## Required Configuration
 

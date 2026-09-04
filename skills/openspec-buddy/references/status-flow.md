@@ -33,7 +33,8 @@ Backlog -> Ready -> Claimed -> In Progress -> In Review -> Archived
 For an ordinary collaborator issue, `claim` is the first Buddy transition:
 
 ```text
-Open issue -> Claimed on the original issue -> Simple executable change -> In Progress
+Unmapped open issue -> Direct claim on the original issue -> OpenSpec Explore -> Proposal adoption on base -> In Progress
+Mapped open issue -> Claimed on the original issue -> Simple executable change -> In Progress
 Open issue -> Claimed on the original issue -> Complex decomposition -> Tracking parent + Ready child issues
 ```
 
@@ -79,6 +80,8 @@ where a PR was merged before the OpenSpec archive landed.
 | Action | From | To | Required proof |
 | --- | --- | --- |
 | default lightweight propose | none | ready | pushed local OpenSpec change, lightweight `change_id` mapping, required labels, and native `blockedBy` links confirmed |
+| direct claim unmapped issue | open/backlog/ready | claimed | derived stable `change_id`, verified claim and Development branch lock, then mandatory Explore and proposal adoption on the same Issue |
+| direct-claim proposal adoption | claimed | claimed | OpenSpec Explore evidence, pushed local change using the claimed `change_id`, and re-read active claim plus existing Issue mapping |
 | legacy/full propose | none/backlog | ready | issue front matter, coordination labels, relationship links, and configured Project `Todo` created |
 | claim prepared change | ready | claimed | assignee and claim comment confirmed |
 | claim open issue | open/backlog/ready | claimed | branch lock, hidden metadata, assignee, status, and Project sync confirmed |

@@ -30,6 +30,7 @@ lease_until=""
 claim_lock_written=0
 claim_completed=0
 prepared_issue=0
+direct_claim=0
 restore_ready_on_cleanup=1
 triage_terminal_disposition=""
 triage_terminal_reason=""
@@ -239,6 +240,44 @@ run_claim_triage_gate() {
   return "$gate_status"
 }
 
+complete_direct_claim_branch() {
+  local linked_branches
+  if ! gh issue develop --help >/dev/null 2>&1; then
+    echo "gh issue develop is required to create the linked Development branch. Update GitHub CLI before claiming Buddy issues." >&2
+    return 1
+  fi
+  if buddy_claim_branch_exists "$claim_branch"; then
+    linked_branches="$(gh issue develop --list "$issue_number" 2>/dev/null || true)"
+  else
+    gh issue develop "$issue_number" --name "$claim_branch" --base "$base_branch" >/dev/null
+    created_branch_lock="$claim_branch"
+    linked_branches="$(gh issue develop --list "$issue_number" 2>/dev/null || true)"
+  fi
+  if ! git ls-remote --exit-code --heads origin "$claim_branch" >/dev/null 2>&1; then
+    echo "Direct claim did not create remote branch: $claim_branch" >&2
+    return 1
+  fi
+  if [[ "$(buddy_claim_branch_head_sha "$claim_branch")" != "$base_sha" ]]; then
+    echo "Direct claim branch does not match the claimed base SHA." >&2
+    return 1
+  fi
+  if [[ "$linked_branches" != *"$claim_branch"* ]]; then
+    echo "Direct claim branch $claim_branch is missing from the Issue Development branch list." >&2
+    return 1
+  fi
+  buddy_verify_claim_lock_rest "$issue_number" "$change_id" "$viewer" "$claim_id" "$lease_until" "$repo_nwo" "$tmp_dir/verify-after-direct-development-link" "$claim_branch"
+  "$script_dir/verify-claim-worktree.sh" --issue "$issue_number" --allow-coordination-branch >/dev/null
+  created_branch_lock=""
+}
+
+handoff_direct_claim() {
+  complete_direct_claim_branch
+  buddy_worktree_record_claim "$cache_dir" "$issue_number" "$change_id" "$claim_branch" "$claim_id" "$base_branch"
+  claim_completed=1
+  printf 'HANDOFF\nmode: claim\nissue: %s\nchange_id: %s\ndirect_claim: true\nrequired_action: Keep this verified claim active. Use OpenSpec Explore to assess the original Issue feedback, then run Buddy propose with --issue %s --change %s to create and validate the local change, commit and push it to the base branch, and retain this Issue. After proposal read-back, use apply --issue %s --resume-active before implementation.\n' "$issue_number" "$change_id" "$issue_number" "$change_id" "$issue_number"
+  exit 0
+}
+
 cleanup() {
   if [[ -n "$created_branch_lock" && -n "$issue_number" && -n "$change_id" && -n "$claim_branch" && -n "$viewer" && -n "$claim_id" && -n "$lease_until" && -n "$repo_nwo" ]]; then
     buddy_delete_claim_branch_if_owned "$issue_number" "$change_id" "$claim_branch" "$viewer" "$claim_id" "$lease_until" "$repo_nwo" "$tmp_dir/cleanup" || true
@@ -291,6 +330,7 @@ if node "$script_dir/parse-issue-metadata.mjs" "$body_file" > "$metadata_file" 2
   change_id="$(node -e 'const fs=require("fs"); const data=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(data.change_id);' "$metadata_file")"
   claim_branch="$(node -e 'const fs=require("fs"); const data=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(data.claim_branch);' "$metadata_file")"
   base_branch="$(node -e 'const fs=require("fs"); const data=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(data.base_branch);' "$metadata_file")"
+  direct_claim="$(node -e 'const fs=require("fs"); const data=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(data.direct_claim === "true" ? "1" : "0");' "$metadata_file")"
   issue_status="$(node -e '
 const fs=require("fs"); const issue=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));
 const statuses=(issue.labels || []).map((label) => label.name.replace(/^status:\s+/, "status:")).filter((name) => name.startsWith("status:"));
@@ -298,6 +338,14 @@ if (statuses.length !== 1) process.exit(1);
 process.stdout.write(statuses[0].slice("status:".length));
 ' "$issue_file")"
   if [[ "$issue_status" == "claimed" ]]; then
+    if [[ "$direct_claim" == "1" ]]; then
+      active_claim="$(buddy_verify_active_claim_resume "$issue_number" "$change_id" "$claim_branch" "$base_branch" "$viewer" "$repo_nwo" "$tmp_dir/direct-claimed-entry-owner")" || exit 1
+      claim_id="$(node -e 'const value=JSON.parse(process.argv[1]); process.stdout.write(value.claim_id || "");' "$active_claim")"
+      lease_until="$(node -e 'const value=JSON.parse(process.argv[1]); process.stdout.write(value.lease_until || "");' "$active_claim")"
+      base_sha="$(node -e 'const value=JSON.parse(process.argv[1]); process.stdout.write(value.base_sha || "");' "$active_claim")"
+      [[ -n "$claim_id" && -n "$lease_until" && -n "$base_sha" ]] || { echo "Direct claim is missing claim_id, lease_until, or base_sha." >&2; exit 1; }
+      handoff_direct_claim
+    fi
     if ! buddy_verify_active_claim_resume "$issue_number" "$change_id" "$claim_branch" "$base_branch" "$viewer" "$repo_nwo" "$tmp_dir/claimed-entry-owner" >/dev/null; then
       exec "$script_dir/claim-change.sh" "$issue_number"
     fi
@@ -344,7 +392,12 @@ if ! gh issue develop --help >/dev/null 2>&1; then
   exit 1
 fi
 
-node "$script_dir/build-open-issue-metadata.mjs" "$issue_file" > "$tmp_dir/adoption.json"
+adoption_args=()
+if [[ "$(cat "$body_file")" != *"<!-- openspec-buddy change_id:"* ]]; then
+  adoption_args+=(--direct-claim)
+  direct_claim=1
+fi
+node "$script_dir/build-open-issue-metadata.mjs" "${adoption_args[@]}" "$issue_file" > "$tmp_dir/adoption.json"
 node -e '
 const fs = require("fs");
 const data = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
@@ -385,6 +438,10 @@ claim_lock_written=1
 buddy_write_minimal_claim_lock "$issue_number" "$change_id" "$claim_branch" "$base_branch" "$base_sha" "$viewer" "$claim_id" "$lease_until" "$issue_file" "$tmp_dir/adopted-body.md" true
 buddy_verify_claim_lock_rest "$issue_number" "$change_id" "$viewer" "$claim_id" "$lease_until" "$repo_nwo" "$tmp_dir/verify-lock" "$claim_branch"
 "$script_dir/verify-claim-worktree.sh" --issue "$issue_number" --allow-coordination-branch >/dev/null
+if [[ "$direct_claim" == "1" ]]; then
+  handoff_direct_claim
+fi
+
 buddy_worktree_record_claim "$cache_dir" "$issue_number" "$change_id" "$claim_branch" "$claim_id" "$base_branch"
 
 if ! run_claim_triage_gate "$issue_number" "$change_id" "$base_branch" "$claim_branch"; then

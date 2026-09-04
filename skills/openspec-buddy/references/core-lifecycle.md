@@ -43,11 +43,31 @@ GitHub truth, writes only the minimal claim lock, then re-reads GitHub truth.
 Only after the lock belongs to this run and worktree may it create or reuse the
 Development branch, Project fields, and remote claim branch.
 
-An ordinary open issue is claim-first: acquire and verify the minimal claim
-lock, re-read live issue truth, then run triage. Missing triage produces a
-`HANDOFF` while the verified lock remains active; it does not authorize later
-coordination or implementation mutations. The triage judgment must be bound to
-the re-read issue `updatedAt` and inspected base SHA.
+An ordinary open issue that has no existing `change_id` mapping is claim-first:
+acquire and verify the direct claim, including the Development branch lock, and
+return `HANDOFF` before triage or implementation. The lock provides exclusive
+ownership while the agent resolves the issue itself; it is not permission to
+start editing implementation files.
+
+The direct-claim handoff has one required order:
+
+1. Enter OpenSpec Explore and assess the original Issue feedback and repository
+   facts without mutation.
+2. Run Buddy propose with the handoff's `--issue` and `--change`. Use
+   `openspec-propose` to create and validate that exact local change, review it,
+   then commit and push the proposal artifacts to the configured base branch.
+   Retain the claimed source Issue and its mapping; do not create a duplicate
+   Issue or reset it to `status:ready`.
+3. Run Buddy apply with `--resume-active`. Its deterministic resume path first
+   verifies the pushed proposal on the base branch, fast-forwards the unchanged
+   claim branch, and refreshes the same active claim's base SHA; it does not
+   extend the lease or acquire a second claim. Only its final strict ownership
+   check may mark the Issue in progress or permit implementation edits.
+
+For an already mapped claimed issue, missing triage produces a `HANDOFF` while
+the verified lock remains active; it does not authorize later coordination or
+implementation mutations. The triage judgment must be bound to the re-read
+issue `updatedAt` and inspected base SHA.
 
 If the issue is ordinary, claim adopts that same issue by adding hidden Buddy
 metadata. If the issue is too large, decompose it into child issues and make the
@@ -99,12 +119,19 @@ not copy the complete OpenSpec task structure into the Issue.
 Use `--no-issue` only for intentionally local-only changes. That path creates
 no GitHub issue, Project item, Development link, or claim branch.
 
+For an active direct claim, pass both `--issue <number>` and `--change
+<change_id>` instead. The source Issue already holds the stable mapping and
+claim lock: create the local change with the same id, commit and push the
+proposal to the base branch, then verify that Issue and active claim. This is
+proposal adoption, not Issue registration.
+
 ## Apply
 
 Use apply only after claim ownership is clear. Before editing files:
 
 ```bash
 <openspec-buddy-skill-dir>/scripts/sync-base-branch.sh
+<openspec-buddy-skill-dir>/scripts/claim-change.sh <issue-number> --resume-active
 <openspec-buddy-skill-dir>/scripts/mark-in-progress.sh <issue-number>
 ```
 

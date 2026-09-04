@@ -50,6 +50,33 @@ for (const invalid of ['Bad/ID', 'UPPER', 'ends-']) {
 }
 
 {
+  const result = run(['--dry-run', '--mode', 'propose', '--issue', '42', '--change', 'issue-42-direct-claim']);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /claim_state: active-direct-claim/);
+  assert.match(result.stdout, /do not create a second Issue/i);
+  assert.match(result.stdout, /status:claimed/i);
+}
+
+{
+  const result = run(['--dry-run', '--mode', 'apply', '--issue', '42', '--resume-active']);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /claim-change\.sh 42 --resume-active/);
+  assert.match(result.stdout, /active direct claim/i);
+}
+
+{
+  const result = run(['--dry-run', '--mode', 'propose', '--issue', '42']);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /proposal adoption requires --change/);
+}
+
+{
+  const result = run(['--dry-run', '--mode', 'apply', '--resume-active']);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /only valid for apply/);
+}
+
+{
   const result = run(['--dry-run', '--mode', 'claim', '--issue', '123']);
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /claim-issue\.sh 123/);
@@ -73,6 +100,7 @@ for (const invalid of ['Bad/ID', 'UPPER', 'ends-']) {
   const result = run(['--help']);
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /--mode claim\|propose\|explore\|apply\|achieve/);
+  assert.match(result.stdout, /--resume-active/);
 }
 
 console.log('buddy driver tests passed');

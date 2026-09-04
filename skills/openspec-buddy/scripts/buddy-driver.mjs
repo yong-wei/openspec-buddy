@@ -13,6 +13,7 @@ function parseArgs(argv) {
     pr: '',
     change: '',
     exploreQuestion: '',
+    resumeActive: false,
     noIssue: false,
     noPr: false,
     dryRun: false,
@@ -24,6 +25,7 @@ function parseArgs(argv) {
     else if (arg === '--pr') opts.pr = argv[++i] || '';
     else if (arg === '--change') opts.change = argv[++i] || '';
     else if (arg === '--explore-question') opts.exploreQuestion = argv[++i] || '';
+    else if (arg === '--resume-active') opts.resumeActive = true;
     else if (arg === '--no-issue') opts.noIssue = true;
     else if (arg === '--no-pr') opts.noPr = true;
     else if (arg === '--run-next') continue;
@@ -109,6 +111,17 @@ function emitHandoff({ mode, commands, notes, fields = [] }) {
   ]);
 }
 
+function directClaimHandoff(output) {
+  const handoff = output.lastIndexOf('HANDOFF\nmode: claim\n');
+  if (handoff < 0) return null;
+  const fields = Object.fromEntries(output.slice(handoff).split('\n').flatMap((line) => {
+    const separator = line.indexOf(':');
+    return separator > 0 ? [[line.slice(0, separator), line.slice(separator + 1).trim()]] : [];
+  }));
+  if (fields.direct_claim !== 'true' || !/^\d+$/.test(fields.issue || '') || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(fields.change_id || '')) return null;
+  return fields;
+}
+
 const exploreRoutes = {
   intent: { optional: 'grilling', native: 'native-one-question-clarification' },
   facts: { optional: 'research', native: 'native-primary-source-investigation' },
@@ -157,6 +170,9 @@ function describeNext(opts) {
   if (opts.noPr) {
     throw new Error('--no-pr is not a core Buddy option. It is valid only in openspec-buddy-auto for explicit local-only --change runs.');
   }
+  if (opts.resumeActive && (mode !== 'apply' || !opts.issue)) {
+    throw new Error('--resume-active is only valid for apply with an explicitly claimed issue.');
+  }
 
   if (mode === 'context-needed') {
     notes.push('No phase context was inferred. Do not claim or mutate GitHub state until the agent or caller provides a concrete phase context.');
@@ -184,7 +200,12 @@ function describeNext(opts) {
     }
     commands.push([path.join(scriptDir, 'check-config.sh'), 'local']);
     notes.push('Create and validate the local OpenSpec change, then commit and push it to the configured base branch.');
-    if (opts.noIssue) {
+    if (opts.issue) {
+      if (!opts.change) throw new Error('--issue proposal adoption requires --change.');
+      fields.push(['issue', opts.issue], ['change_id', opts.change], ['claim_state', 'active-direct-claim']);
+      notes.push('This is an active direct claim. Bind the proposed local change to this existing Issue, preserve status:claimed and the current claim, and do not create a second Issue.');
+      notes.push('After the push, re-read the Issue mapping and active claim before apply resumes it.');
+    } else if (opts.noIssue) {
       notes.push('Keep this change local-only. Do not create GitHub coordination state.');
     } else {
       notes.push('Create one open GitHub Issue containing exactly one openspec-buddy change_id marker and labels type:change plus status:ready.');
@@ -193,9 +214,11 @@ function describeNext(opts) {
     notes.push('Propose does not claim the Issue or start implementation.');
   } else if (mode === 'apply') {
     commands.push([path.join(scriptDir, 'sync-base-branch.sh')]);
-    if (opts.issue) commands.push([path.join(scriptDir, 'claim-change.sh'), opts.issue]);
+    if (opts.issue) commands.push([path.join(scriptDir, 'claim-change.sh'), opts.issue, ...(opts.resumeActive ? ['--resume-active'] : [])]);
     commands.push([path.join(scriptDir, 'mark-in-progress.sh'), opts.issue || '<issue-number>']);
-    notes.push('Do not edit implementation files until the claim/worktree guard passes and the issue is in progress.');
+    notes.push(opts.resumeActive
+      ? 'Re-verify the active direct claim before marking the issue in progress.'
+      : 'Do not edit implementation files until the claim/worktree guard passes and the issue is in progress.');
   } else if (mode === 'achieve') {
     commands.push([path.join(scriptDir, 'verify-review-clear.sh'), opts.pr || '<pr-number-or-url>']);
     commands.push([path.join(scriptDir, 'mark-achieved.sh'), opts.issue || '<issue-number>', '<archive-path>', opts.pr || '<pr-number-or-url>']);
@@ -219,6 +242,7 @@ function runDriver(opts) {
     emitHandoff({ mode, commands, notes, fields });
     return;
   }
+  const outputs = [];
   for (const command of commands) {
     const result = spawnSync(command[0], command.slice(1), {
       cwd: process.cwd(),
@@ -236,18 +260,38 @@ function runDriver(opts) {
       });
       process.exit(result.status ?? 1);
     }
+    outputs.push(compactOutput(result));
+  }
+  const output = outputs.filter(Boolean).join('\n');
+  const directClaim = mode === 'claim' ? directClaimHandoff(output) : null;
+  if (directClaim) {
+    emitHandoff({
+      mode,
+      commands: [],
+      fields: [
+        ['issue', directClaim.issue],
+        ['change_id', directClaim.change_id],
+        ['claim_state', 'active-direct-claim'],
+      ],
+      notes: [
+        'Keep the verified claim active. Use OpenSpec Explore to assess the original Issue feedback.',
+        `Then run the driver with --mode propose --issue ${directClaim.issue} --change ${directClaim.change_id}; create and validate that local change, commit and push it to the configured base branch, and retain this Issue rather than creating another one.`,
+        `After the proposal read-back, run apply with --issue ${directClaim.issue} --resume-active before implementation.`,
+      ],
+    });
+    return;
   }
   if (mode === 'propose') {
     emitHandoff({ mode, commands: [], notes, fields });
     return;
   }
-  emitDone({ mode, commands, state });
+  emitDone({ mode, commands, state, output });
 }
 
 function main() {
   const opts = parseArgs(process.argv.slice(2));
   if (opts.help) {
-    console.log('Usage: buddy-driver.mjs [--dry-run] [--mode claim|propose|explore|apply|achieve] [--explore-question intent|facts|interaction-state|active-change-design] [--issue N] [--pr PR] [--change ID] [--no-issue]');
+    console.log('Usage: buddy-driver.mjs [--dry-run] [--mode claim|propose|explore|apply|achieve] [--explore-question intent|facts|interaction-state|active-change-design] [--issue N] [--pr PR] [--change ID] [--resume-active] [--no-issue]');
     return;
   }
   if (!fs.existsSync(scriptDir)) throw new Error(`Missing script directory: ${scriptDir}`);

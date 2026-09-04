@@ -149,6 +149,27 @@ buddy_verify_active_claim_resume 31 issue-31-test issue-31-test integration alic
 
 {
   const issue = {
+    number: 34,
+    title: "Explore before proposal adoption",
+    labels: [{ name: "status:ready" }],
+    body: "## Goal\n\nResolve the Issue before creating a change.\n",
+  };
+  const result = spawnSync(process.execPath, [builder, "--direct-claim"], {
+    input: `${JSON.stringify(issue)}\n`,
+    encoding: "utf8",
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const built = JSON.parse(result.stdout);
+  assert.equal(built.metadata.direct_claim, true);
+  assert.match(built.updatedBody, /direct_claim: true/);
+  const parsed = spawnSync(process.execPath, [parser, "-"], { input: built.updatedBody, encoding: "utf8" });
+  assert.equal(parsed.status, 0, parsed.stderr || parsed.stdout);
+  assert.equal(JSON.parse(parsed.stdout).direct_claim, "true");
+}
+
+{
+  const issue = {
     number: 32,
     title: "A title that must not replace the proposal identity",
     labels: [{ name: "status:ready" }, { name: "type:change" }],

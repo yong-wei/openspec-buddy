@@ -29,6 +29,11 @@ area: workflow
 -->
 ```
 
+When the source Issue had no mapping, direct claim adds `direct_claim: true`.
+This is a durable interruption marker, not an executable OpenSpec change: the
+claim remains active while OpenSpec Explore verifies the Issue, then Buddy
+propose creates and pushes the local change with the same `change_id`.
+
 `parse-issue-metadata.mjs` accepts the legacy full forms used by manual claim;
 Buddy Auto lite also accepts the lightweight marker. Never mix mapping forms in
 one body. Do not create a second "Buddy" issue to
@@ -62,6 +67,7 @@ required when default propose uses the lightweight marker.
 | `parent_issue` | Series parent issue number or URL | mirror of GitHub parent relationship |
 | `blocked_by` | Issue numbers or change ids blocking this change | mirror of GitHub `blockedBy`; list |
 | `blocking` | Issue numbers or change ids this change blocks | mirror of GitHub `blocking`; list |
+| `direct_claim` | Unmapped-issue direct-claim interruption | optional; when present, must be `true` |
 
 ## Validation Rules
 

@@ -30,6 +30,7 @@ const commands = [
   bash('skills/openspec-buddy/evals/cache-metrics.test.sh'),
   bash('skills/openspec-buddy/evals/bound-worktree-guard.test.sh'),
   bash('skills/openspec-buddy/evals/claim-race-gate.test.sh'),
+  node('skills/openspec-buddy/evals/direct-claim-refresh.test.mjs'),
   bash('skills/openspec-buddy/evals/claim-worktree-guard.test.sh'),
   bash('skills/openspec-buddy/evals/read-live-claim-truth.test.sh'),
   bash('skills/openspec-buddy/evals/close-completed-series-parent.test.sh'),

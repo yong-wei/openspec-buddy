@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 import fs from "node:fs";
 
-const source = process.argv[2] || "-";
+const args = process.argv.slice(2);
+const directClaim = args.includes("--direct-claim");
+const source = args.find((arg) => arg !== "--direct-claim") || "-";
 const issue = source === "-" ? JSON.parse(fs.readFileSync(0, "utf8")) : JSON.parse(fs.readFileSync(source, "utf8"));
 
 function normalizeLabelName(label) {
@@ -53,7 +55,7 @@ function metadataBlock(metadata) {
   return `<!-- openspec-buddy
 change_id: ${metadata.change_id}
 claim_branch: ${metadata.claim_branch}
-series: ${metadata.series}
+${metadata.direct_claim ? "direct_claim: true\n" : ""}series: ${metadata.series}
 coupling_group: ${metadata.coupling_group}
 execution_mode: ${metadata.execution_mode}
 base_branch: ${metadata.base_branch}
@@ -89,6 +91,7 @@ const baseBranch = process.env.OPENSPEC_BUDDY_BASE_BRANCH || issue.base_branch |
 const metadata = {
   change_id: changeId,
   claim_branch: changeId,
+  direct_claim: directClaim,
   series: cleanMetadataValue(labelValue(labels, "series"), `issue-${issueNumber}`),
   coupling_group: cleanMetadataValue(labelValue(labels, "coupling"), "none"),
   execution_mode: markedChangeId ? "isolated" : cleanMetadataValue(labelValue(labels, "mode"), "isolated"),

@@ -7,6 +7,7 @@ trap 'rm -rf "$tmp"' EXIT
 scripts="$tmp/skills/openspec-buddy/scripts"
 mkdir -p "$scripts" "$tmp/bin" "$tmp/openspec/changes/issue-31-test/.buddy"
 cp "$skill_dir/scripts/claim-issue.sh" "$scripts/claim-issue.sh"
+cp "$skill_dir/scripts/buddy-driver.mjs" "$scripts/buddy-driver.mjs"
 cp "$skill_dir/scripts/parse-issue-metadata.mjs" "$scripts/parse-issue-metadata.mjs"
 cp "$skill_dir/scripts/build-open-issue-metadata.mjs" "$scripts/build-open-issue-metadata.mjs"
 cp "$skill_dir/scripts/select-claim-issue.mjs" "$scripts/select-claim-issue.mjs"
@@ -54,11 +55,20 @@ cat > "$scripts/claim-lock.sh" <<'EOF'
 buddy_repo_nwo() { printf 'owner/repo\n'; }
 buddy_resolve_coupling_group() { printf 'none\n'; }
 buddy_preflight_claim_truth_check() { printf 'preflight\n' >> "$CALL_LOG"; }
-buddy_write_minimal_claim_lock() { printf 'minimal-lock\n' >> "$CALL_LOG"; printf claimed > "$TEST_ROOT/mode"; }
+buddy_write_minimal_claim_lock() {
+  printf 'minimal-lock\n' >> "$CALL_LOG"
+  printf claimed > "$TEST_ROOT/mode"
+  [[ "${DIRECT_STALE_BASE:-0}" != 1 ]] || touch "$TEST_ROOT/direct-refreshed"
+}
 buddy_verify_claim_lock_rest() { printf 'verify-lock\n' >> "$CALL_LOG"; }
 buddy_verify_active_claim_resume() {
   printf 'active-verify%s\n' "${8:+-bound}" >> "$CALL_LOG"
   if [[ "${FAIL_ACTIVE_VERIFY:-0}" == 1 ]]; then return 1; fi
+  if [[ "${DIRECT_STALE_BASE:-0}" == 1 && ! -f "$TEST_ROOT/direct-refreshed" ]]; then
+    [[ "${9:-false}" == true ]] || return 1
+    printf '{"claim_id":"claim-31","lease_until":"2026-07-15T12:00:00Z","base_sha":"%s"}\n' "$(cat "$TEST_ROOT/direct-base-sha")"
+    return 0
+  fi
   printf '{"claim_id":"claim-31","lease_until":"2026-07-15T12:00:00Z","base_sha":"%s"}\n' "$(git rev-parse origin/integration)"
 }
 buddy_release_claim_lock() {
@@ -71,12 +81,19 @@ buddy_release_claim_lock() {
   touch "$TEST_ROOT/released-lock"
 }
 buddy_claim_branch_exists() { return 0; }
+buddy_claim_branch_head_sha() { git ls-remote --heads origin "$1" | awk '{print $1}'; }
+buddy_claim_development_link_exists() { return 0; }
+buddy_refresh_direct_claim_after_propose() { printf 'direct-refresh\n' >> "$CALL_LOG"; touch "$TEST_ROOT/direct-refreshed"; }
+buddy_verify_direct_claim_resume_guards() { printf 'direct-guards\n' >> "$CALL_LOG"; }
+buddy_verify_direct_claim_proposal_base() { printf 'direct-proposal-base\n' >> "$CALL_LOG"; }
 EOF
 
 for helper in verify-bound-worktree.sh sync-base-branch.sh verify-claim-worktree.sh; do
   printf '#!/usr/bin/env bash\nexit 0\n' > "$scripts/$helper"
   chmod +x "$scripts/$helper"
 done
+printf '#!/usr/bin/env bash\nexit 0\n' > "$scripts/check-config.sh"
+chmod +x "$scripts/check-config.sh"
 cat > "$scripts/find-coupling-conflicts.mjs" <<'EOF'
 process.stdout.write("[]\n");
 EOF
@@ -120,10 +137,12 @@ if [[ "$1 $2" == "issue view" ]]; then
     fi
   else
     body='# Test'
+    if [[ -f "$TEST_ROOT/lightweight-body" ]]; then body='<!-- openspec-buddy change_id: issue-31-test -->'; fi
     if [[ "$status" == status:claimed ]]; then
-      body='---
+    body='---
 change_id: issue-31-test
 claim_branch: issue-31-test
+direct_claim: true
 series: test
 coupling_group: none
 execution_mode: isolated
@@ -134,6 +153,7 @@ risk: low
 area: workflow
 ---'
     fi
+    if [[ ! -f "$TEST_ROOT/direct-body" ]]; then body="$(printf '%s\n' "$body" | sed '/^direct_claim: true$/d')"; fi
     node -e 'const labels=[{name:process.argv[1]}]; if (process.argv[3] === "1") labels.push({name:"type:series-parent"}); console.log(JSON.stringify({id:"I",number:31,title:"Test",labels,assignees:[{login:"alice"}],body:process.argv[2],url:"https://example/31",state:"OPEN",updatedAt:"2026-07-14T10:00:00Z"}))' "$status" "$body" "$([[ -f "$TEST_ROOT/series-parent-type" ]] && echo 1 || echo 0)"
   fi
   exit 0
@@ -178,23 +198,59 @@ git remote add origin "$tmp/origin.git"
 git push -q origin integration
 git push -q origin HEAD:issue-31-test
 
+# The driver must promote the script's direct-claim result to a model-owned
+# handoff instead of incorrectly reporting the claim phase as complete.
+: > "$CALL_LOG"
+node "$scripts/buddy-driver.mjs" --mode claim --issue 31 > "$tmp/driver-out"
+grep -q '^HANDOFF$' "$tmp/driver-out"
+grep -q '^claim_state: active-direct-claim$' "$tmp/driver-out"
+grep -q 'Use OpenSpec Explore' "$tmp/driver-out"
+grep -q -- '--mode propose --issue 31 --change issue-31-test' "$tmp/driver-out"
+grep -q -- '--issue 31 --resume-active' "$tmp/driver-out"
+rm -f "$tmp/mode"
+
 # Invalid runtime attribution stops before any GitHub read or write and cannot
 # trigger the mutation-capable cleanup path.
 : > "$CALL_LOG"
 if OPENSPEC_BUDDY_AGENT=alice "$scripts/claim-issue.sh" 31 >/dev/null 2>&1; then exit 1; fi
 [[ ! -s "$CALL_LOG" ]]
 
-# Fresh ordinary issue: lock and verify precede triage; missing triage preserves lock.
+# Fresh unmapped issue: the direct claim establishes the lock and development
+# branch, then hands off to Explore and proposal adoption without triage.
 : > "$CALL_LOG"
 rm -f "$tmp/mode" "$tmp/post-status" "$tmp/openspec/changes/issue-31-test/.buddy/triage.json"
 "$scripts/claim-issue.sh" 31 > "$tmp/out"
 grep -q '^HANDOFF$' "$tmp/out"
+grep -q '^direct_claim: true$' "$tmp/out"
+grep -q '^issue: 31$' "$tmp/out"
+grep -q '^change_id: issue-31-test$' "$tmp/out"
+grep -q 'Use OpenSpec Explore' "$tmp/out"
 node -e '
 const fs=require("fs"); const calls=fs.readFileSync(process.argv[1],"utf8");
-for (const item of ["minimal-lock","verify-lock","active-verify"]) if (!calls.includes(item)) throw new Error(`missing ${item}`);
-if (!(calls.indexOf("minimal-lock") < calls.indexOf("verify-lock") && calls.indexOf("verify-lock") < calls.indexOf("active-verify"))) throw new Error("unsafe order");
-if (calls.includes("claim-change") || calls.includes("release-lock") || calls.includes("status-mutation")) throw new Error("unexpected post-lock mutation");
+for (const item of ["minimal-lock","verify-lock"]) if (!calls.includes(item)) throw new Error(`missing ${item}`);
+if (!(calls.indexOf("minimal-lock") < calls.indexOf("verify-lock"))) throw new Error("unsafe order");
+if (calls.includes("claim-change") || calls.includes("active-verify") || calls.includes("release-lock") || calls.includes("status-mutation")) throw new Error("unexpected direct-claim mutation");
 ' "$CALL_LOG"
+
+# A restarted direct claim is resumed only after live ownership and branch
+# verification; it must return to Explore rather than entering mapped triage.
+printf claimed > "$tmp/mode"; touch "$tmp/direct-body"; : > "$CALL_LOG"
+"$scripts/claim-issue.sh" 31 > "$tmp/out"
+grep -q '^direct_claim: true$' "$tmp/out"
+node -e '
+const fs=require("fs"); const calls=fs.readFileSync(process.argv[1],"utf8");
+if (!calls.includes("active-verify")) throw new Error("missing active direct-claim verification");
+if (calls.includes("claim-change") || calls.includes("release-lock") || calls.includes("status-mutation")) throw new Error("direct claim resumed through the wrong lifecycle");
+' "$CALL_LOG"
+rm -f "$tmp/direct-body"
+
+# A legal lightweight mapping is already associated with its change. It must
+# stay on the prepared-issue path rather than becoming a direct claim.
+printf ready > "$tmp/mode"; touch "$tmp/lightweight-body"; : > "$CALL_LOG"
+"$scripts/claim-issue.sh" 31 > "$tmp/out"
+! grep -q '^direct_claim: true$' "$tmp/out"
+grep -q 'triage_disposition: pending' "$tmp/out"
+rm -f "$tmp/lightweight-body"
 
 # Non-executable disposition: validate owner twice, mutate, then confirm state.
 cat > "$tmp/openspec/changes/issue-31-test/.buddy/triage.json" <<'EOF'
@@ -375,9 +431,33 @@ if OPEN_BLOCKER=1 "$scripts/claim-change.sh" 31 --resume-active >/dev/null 2>&1;
 [[ "$(grep -c '^release-lock$' "$CALL_LOG")" -eq 1 ]]
 grep -q '^status-mutation status:ready$' "$CALL_LOG"
 
+# A post-proposal direct claim retains its established ownership on a transient
+# apply blocker, so a retry keeps the same claim rather than restarting Explore.
+printf claimed > "$tmp/mode"; touch "$tmp/direct-body"; rm -f "$tmp/post-status"; : > "$CALL_LOG"
+if OPEN_BLOCKER=1 "$scripts/claim-change.sh" 31 --resume-active >/dev/null 2>&1; then exit 1; fi
+! grep -q '^release-lock$' "$CALL_LOG"
+! grep -q '^status-mutation status:ready$' "$CALL_LOG"
+rm -f "$tmp/direct-body"
+
 # A successful resume keeps the claim active for implementation.
 printf claimed > "$tmp/mode"; rm -f "$tmp/post-status"; : > "$CALL_LOG"
 "$scripts/claim-change.sh" 31 --resume-active >/dev/null
 ! grep -q '^release-lock$' "$CALL_LOG"
+
+# Proposal adoption advances the configured base after direct claim. Resume
+# refreshes only an unchanged direct claim branch, only after the pushed base
+# contains that change, then continues with the refreshed active claim.
+old_base_sha="$(git rev-parse origin/integration)"
+mkdir -p "$tmp/openspec/changes/issue-31-test"
+printf '# Proposal\n' > "$tmp/openspec/changes/issue-31-test/proposal.md"
+git add openspec/changes/issue-31-test/proposal.md
+git commit -qm direct-claim-proposal
+git push -q origin HEAD:integration
+printf '%s\n' "$old_base_sha" > "$tmp/direct-base-sha"
+printf claimed > "$tmp/mode"; touch "$tmp/direct-body"; rm -f "$tmp/direct-refreshed" "$tmp/post-status"; : > "$CALL_LOG"
+DIRECT_STALE_BASE=1 "$scripts/claim-change.sh" 31 --resume-active >/dev/null
+grep -q '^direct-refresh$' "$CALL_LOG"
+! grep -q '^release-lock$' "$CALL_LOG"
+rm -f "$tmp/direct-body" "$tmp/direct-refreshed"
 
 printf 'triage claim orchestration tests passed\n'

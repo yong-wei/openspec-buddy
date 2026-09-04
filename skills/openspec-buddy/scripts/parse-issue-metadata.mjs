@@ -169,6 +169,10 @@ function validate(data) {
     errors.push("claim_branch must equal change_id.");
   }
 
+  if ("direct_claim" in data && data.direct_claim !== "true") {
+    errors.push("direct_claim must be true when present.");
+  }
+
   const expectedBaseBranch = process.env.OPENSPEC_BUDDY_BASE_BRANCH;
   if (!expectedBaseBranch) {
     errors.push("Missing required environment variable: OPENSPEC_BUDDY_BASE_BRANCH.");

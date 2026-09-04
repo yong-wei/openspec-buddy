@@ -14,7 +14,26 @@ latest OpenSpec Buddy Claim comment records claim_id, branch, base_sha, and leas
 claim_branch == change_id
 ```
 
-The branch lock is created before issue status is changed. If status update or claim comment fails, the claim script removes the just-created remote branch. For ordinary open issues, `claim-issue.sh` writes the hidden metadata block after the branch lock succeeds and before marking the issue claimed.
+The minimal lock writes the hidden metadata, assignee, active claim comment, and
+`status:claimed`, then re-reads remote truth. Only after that verification does
+the helper create and verify the Development branch and remote branch lock. If
+the post-lock branch creation fails, the claim script releases the claim. For
+ordinary open issues, `claim-issue.sh` preserves the original human-readable
+body while adding the hidden metadata.
+
+For an unmapped Issue, direct claim derives one stable provisional `change_id`
+and records `direct_claim: true` in its hidden metadata. It still proves
+ownership with the assignee, active claim comment, Development link, and remote
+branch; its only difference is the mandatory handoff to OpenSpec Explore and
+proposal adoption before triage or implementation. A resumed direct claim must
+re-verify that same ownership proof and return to that handoff. After proposal
+push advances the base branch, `apply --resume-active` alone may refresh it:
+the base must be a descendant of the recorded SHA, the claim branch must still
+be at the recorded SHA (or already at the new base after a retry), the pushed
+base must contain the proposal, and no open PR may exist. The refresh keeps the
+same claim id, lease, and worktree identity, then reruns normal strict claim
+verification. Any other branch head, ownership drift, expired lease, or base
+rewrite stops for recovery.
 
 The local claim receipt and cache are not part of this proof. Before reusing a
 claim after restart, worktree switching, or timeout recovery, query the live

@@ -39,12 +39,14 @@ claim_id=""
 lease_until=""
 claim_lock_written=0
 claim_completed=0
+direct_claim="0"
+preserve_direct_claim=0
 
 cleanup() {
   if [[ -n "$created_branch_lock" && -n "$issue_number" && -n "$change_id" && -n "$claim_branch" && -n "$viewer" && -n "$claim_id" && -n "$lease_until" && -n "$repo_nwo" ]]; then
     buddy_delete_claim_branch_if_owned "$issue_number" "$change_id" "$claim_branch" "$viewer" "$claim_id" "$lease_until" "$repo_nwo" "$tmp_dir/cleanup" || true
   fi
-  if [[ "$claim_lock_written" == "1" && "$claim_completed" != "1" && -n "$issue_number" && -n "$change_id" && -n "$claim_branch" && -n "$viewer" && -n "$claim_id" && -n "$lease_until" ]]; then
+  if [[ "$claim_lock_written" == "1" && "$claim_completed" != "1" && "$preserve_direct_claim" != "1" && -n "$issue_number" && -n "$change_id" && -n "$claim_branch" && -n "$viewer" && -n "$claim_id" && -n "$lease_until" ]]; then
     if buddy_release_claim_lock "$issue_number" "$change_id" "$claim_branch" "$viewer" "$claim_id" "$lease_until" "claim did not complete" >/dev/null 2>&1; then
       "$script_dir/set-status-label.sh" "$issue_number" "status:ready" >/dev/null 2>&1 || echo "BLOCKED: claim was released but issue #$issue_number could not be restored to status:ready." >&2
     fi
@@ -67,6 +69,7 @@ change_id="$(node -e 'const fs=require("fs"); const data=JSON.parse(fs.readFileS
 claim_branch="$(node -e 'const fs=require("fs"); const data=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(data.claim_branch);' "$metadata_file")"
 coupling_group="$(buddy_resolve_coupling_group "$metadata_file" "$issue_file")"
 base_branch="$(node -e 'const fs=require("fs"); const data=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(data.base_branch);' "$metadata_file")"
+direct_claim="$(node -e 'const fs=require("fs"); const data=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(data.direct_claim === "true" ? "1" : "0");' "$metadata_file")"
 
 if [[ "$change_id" != "$claim_branch" ]]; then
   echo "claim_branch must equal change_id." >&2
@@ -119,6 +122,16 @@ repo_name="${repo_nwo#*/}"
 viewer="$(gh api user --jq .login)"
 
 "$script_dir/verify-claim-worktree.sh" --branch "$claim_branch" --allow-coordination-branch >/dev/null
+if [[ "$stale_recovery" == "2" && "$direct_claim" == "1" ]]; then
+  set +e
+  buddy_verify_active_claim_resume "$issue_number" "$change_id" "$claim_branch" "$base_branch" "$viewer" "$repo_nwo" "$tmp_dir/direct-claim-current-base" >/dev/null
+  direct_claim_status=$?
+  set -e
+  if [[ "$direct_claim_status" != "0" ]]; then
+    buddy_refresh_direct_claim_after_propose "$issue_number" "$change_id" "$claim_branch" "$base_branch" "$viewer" "$repo_nwo" "$tmp_dir/direct-claim-refresh" "$issue_file"
+  fi
+  buddy_verify_direct_claim_proposal_base "$change_id" "$base_branch"
+fi
 if [[ "$stale_recovery" == "2" ]]; then
   buddy_verify_active_claim_resume "$issue_number" "$change_id" "$claim_branch" "$base_branch" "$viewer" "$repo_nwo" "$tmp_dir/resume-before-relationships" > "$tmp_dir/resume-active.json"
   claim_id="$(node -e 'const fs=require("node:fs"); const claim=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(claim?.claim_id || "");' "$tmp_dir/resume-active.json")"
@@ -129,6 +142,9 @@ if [[ "$stale_recovery" == "2" ]]; then
   # Take cleanup ownership only after the shared verifier has proved that the
   # lock belongs to this viewer and worktree and supplied its release identity.
   claim_lock_written=1
+  if [[ "$direct_claim" == "1" ]]; then
+    preserve_direct_claim=1
+  fi
 elif [[ "$stale_recovery" == "1" ]]; then
   buddy_stale_claim_recoverable "$issue_number" "$change_id" "$claim_branch" "$repo_nwo" "$tmp_dir/stale-recovery-before-relationships"
 else
@@ -225,6 +241,9 @@ fi
 
 buddy_verify_claim_lock_rest "$issue_number" "$change_id" "$viewer" "$claim_id" "$lease_until" "$repo_nwo" "$tmp_dir/verify-after-development-link" "$claim_branch"
 "$script_dir/verify-claim-worktree.sh" --issue "$issue_number" --allow-coordination-branch >/dev/null
+if [[ "$direct_claim" == "1" && "$stale_recovery" == "2" ]]; then
+  buddy_verify_direct_claim_resume_guards "$issue_number" "$claim_branch" "$base_sha" "$repo_nwo" "$tmp_dir/final-direct-claim-guards"
+fi
 
 created_branch_lock=""
 "$script_dir/set-project-status.sh" "$issue_number" "status:claimed"
