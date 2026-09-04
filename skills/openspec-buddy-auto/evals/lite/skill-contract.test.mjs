@@ -25,8 +25,8 @@ requires(/scripts\/buddy-auto\.mjs[^\n]*default|default[^\n]*scripts\/buddy-auto
   'the public entry must state that no-subcommand execution is lite');
 requires(/scripts\/buddy-auto\.mjs full(?:\s|`)/,
   'full mode must be reached only through the public full subcommand');
-requires(/select-available-issue\.mjs[\s\S]*claim-issue\.mjs[\s\S]*set-issue-status\.sh/,
-  'lite must name exactly the three deterministic coordination scripts');
+requires(/select-available-issue\.mjs[\s\S]*claim-issue\.mjs[\s\S]*set-issue-status\.sh[\s\S]*worktree-base\.sh/,
+  'lite must name exactly the four deterministic coordination scripts');
 requires(/smallest|编号最小/,
   'untargeted selection must choose the smallest available issue');
 requires(/local change[^\n]*(?:missing|does not exist)|本地 change[^\n]*(?:不存在|缺失)/i,

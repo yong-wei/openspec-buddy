@@ -6,9 +6,11 @@ import { fileURLToPath } from 'node:url';
 
 import {
   ACTIVE_CLAIM_STATUSES,
+  TRACKING_LABELS,
   buildIdentity,
   branchExistsFromRefResult,
   classifyIssueClaim,
+  deriveChangeId,
   isValidChangeId,
   localDeliveryExists,
   parseChangeMapping,
@@ -143,7 +145,13 @@ function issuesForTarget(repo, number) {
   const issue = targetIssue(repo, number);
   if (!issue) return [];
   const mapping = parseChangeMapping(issue.body);
-  if (!mapping.changeId || mapping.invalid || mapping.duplicate || mapping.conflict) return [issue];
+  if (mapping.invalid || mapping.duplicate || mapping.conflict) return [issue];
+  if (!mapping.changeId) {
+    const derived = deriveChangeId(issue.number, issue.title);
+    const collisions = issuesForChange(repo, derived)
+      .filter((item) => Number(item.number) !== number);
+    return [issue, ...collisions];
+  }
   return issuesForChange(repo, mapping.changeId);
 }
 
@@ -198,23 +206,24 @@ function blockersByIssue(repo, numbers) {
   return result;
 }
 
-function resultFor(issue, changeId) {
+function resultFor(issue, changeId, { direct = false, currentClaim = false } = {}) {
   return {
     mode: 'lite',
     result: 'issue',
     issue: Number(issue.number),
     change_id: changeId,
     url: issue.html_url || issue.url || '',
+    ...(direct ? { direct_claim: true } : {}),
+    ...(currentClaim ? { current_claim: true } : {}),
   };
 }
 
 function mappingFor(issue) {
   const mapping = parseChangeMapping(issue.body);
-  if (mapping.invalid) fail(`Ready issue #${issue.number} has invalid change mapping.`);
-  if (mapping.duplicate) fail(`Ready issue #${issue.number} has duplicate change mapping.`);
-  if (mapping.conflict) fail(`Ready issue #${issue.number} has conflicting change mapping.`);
-  if (!mapping.changeId) fail(`Ready issue #${issue.number} is missing change mapping.`);
-  return mapping.changeId;
+  if (mapping.invalid) return { changeId: '', problem: `Ready issue #${issue.number} has invalid change mapping.` };
+  if (mapping.duplicate) return { changeId: '', problem: `Ready issue #${issue.number} has duplicate change mapping.` };
+  if (mapping.conflict) return { changeId: '', problem: `Ready issue #${issue.number} has conflicting change mapping.` };
+  return { changeId: mapping.changeId || '', problem: null };
 }
 
 function validateIssue(issue, context, {
@@ -223,9 +232,18 @@ function validateIssue(issue, context, {
   deferCurrentLocalError = false,
 } = {}) {
   if (!issue) fail('Target issue was not found.');
-  const changeId = mappingFor(issue);
+  if (labels(issue).some((label) => TRACKING_LABELS.includes(label))) {
+    fail(`Issue #${issue.number} carries a tracking or series-parent label and is not independently executable.`);
+  }
+  const mapping = mappingFor(issue);
+  if (mapping.problem) fail(mapping.problem);
+  const direct = !mapping.changeId;
+  const changeId = mapping.changeId || deriveChangeId(issue.number, issue.title);
 
   const duplicates = context.allMappings.get(changeId) || [];
+  if (direct && duplicates.length > 0) {
+    fail(`Issue #${issue.number} derives change ${changeId}, but ${duplicates.map((item) => `#${item.number}`).join(', ')} already maps to it.`);
+  }
   if (duplicates.length > 1) fail(`Change ${changeId} has duplicate issue mappings: ${duplicates.map((item) => `#${item.number}`).join(', ')}.`);
 
   const comments = commentsFor(context.repo, issue.number);
@@ -238,25 +256,26 @@ function validateIssue(issue, context, {
   );
   if (claimClass === 'foreign' && excludeOwnedClaims) return { excluded: true };
   if (claimClass === 'current') {
+    if (direct) return { current: true, localMissing: false, result: resultFor(issue, changeId, { direct: true, currentClaim: true }) };
     const localMissing = !localDeliveryExists(context.worktreeRoot, changeId);
     if (localMissing && !deferCurrentLocalError) fail(`Local change ${changeId} does not exist in active or dated archive paths.`);
-    return { current: true, localMissing, result: resultFor(issue, changeId) };
+    return { current: true, localMissing, result: resultFor(issue, changeId, { currentClaim: true }) };
   }
   if (claimClass !== 'unclaimed') {
     fail(`Issue #${issue.number} has ${claimClass} claim state: ${summarizeIssueClaim(issue, comments, hasBranch)}`);
   }
   if (classifyOnly) return { unclaimed: true };
   if (!isReady(issue)) fail(`Issue #${issue.number} is not an open status:ready issue.`);
-  if (!localChangeExists(context.worktreeRoot, changeId)) fail(`Ready issue #${issue.number} maps to missing local change ${changeId}.`);
+  if (!direct && !localChangeExists(context.worktreeRoot, changeId)) fail(`Ready issue #${issue.number} maps to missing local change ${changeId}.`);
 
-  return { result: resultFor(issue, changeId) };
+  return { result: resultFor(issue, changeId, { direct }) };
 }
 
 function withBlockers(checked, issue, blockers) {
   const open = (blockers.get(Number(issue.number)) || [])
     .find((blocker) => String(blocker.state || '').toUpperCase() === 'OPEN');
   return open
-    ? { blocked: `Issue #${issue.number} is blocked by open issue #${open.number}.` }
+    ? { ...checked, blocked: `Issue #${issue.number} is blocked by open issue #${open.number}.` }
     : checked;
 }
 
@@ -328,15 +347,24 @@ try {
         && labels(issue).some((label) => ACTIVE_CLAIM_STATUSES.includes(label))
       ))
       .sort((left, right) => Number(left.number) - Number(right.number));
+    const skipped = [];
+    const checkedOrSkip = (issue, options) => {
+      try {
+        return validateIssue(issue, context, options);
+      } catch (error) {
+        skipped.push(error.message);
+        return { skipped: true };
+      }
+    };
     let selected = null;
     let selectedLocalMissing = false;
     for (const issue of candidates) {
-      const checked = validateIssue(issue, context, {
+      const checked = checkedOrSkip(issue, {
         excludeOwnedClaims: true,
         classifyOnly: true,
         deferCurrentLocalError: true,
       });
-      if (checked.excluded) continue;
+      if (checked.excluded || checked.skipped) continue;
       if (checked.current) {
         if (!selected) {
           selected = checked.result;
@@ -356,20 +384,25 @@ try {
       if (checked.blocked) fail(checked.blocked);
     }
 
-    let firstBlocked = '';
     const ready = issues
       .filter(isReady)
       .sort((left, right) => Number(left.number) - Number(right.number));
     const blockers = selected ? new Map() : blockersByIssue(repo, ready.map((issue) => issue.number));
     for (const issue of selected ? [] : ready) {
-      const checked = withBlockers(validateIssue(issue, context), issue, blockers);
+      const checked = withBlockers(checkedOrSkip(issue), issue, blockers);
+      if (checked.skipped) {
+        if (checked.blocked) skipped.push(checked.blocked);
+        continue;
+      }
       if (checked.blocked) {
-        firstBlocked ||= checked.blocked;
+        skipped.push(checked.blocked);
         continue;
       }
       selected ||= checked.result;
     }
-    if (!selected && firstBlocked) fail(firstBlocked);
+    if (!selected && skipped.length > 0) {
+      fail(`No selectable issue; skipped candidates:\n- ${[...new Set(skipped)].join('\n- ')}`);
+    }
     process.stdout.write(`${JSON.stringify(selected || { mode: 'lite', result: 'exhausted' })}\n`);
   }
 } catch (error) {

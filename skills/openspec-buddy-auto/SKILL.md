@@ -22,19 +22,19 @@ OpenSpec Buddy Auto 默认采用 Lightweight Mode（lite）。GPT-5.6 主模型�
 <openspec-buddy-auto-skill-dir>/scripts/buddy-auto.mjs --change <change_id> --no-pr
 ```
 
-公开入口内部只使用三个确定性协调脚本，代理不得把它们组合成另一套工作流：
+公开入口内部只使用四个确定性协调脚本，代理不得把它们组合成另一套工作流：`scripts/lite/select-available-issue.mjs`、`scripts/lite/claim-issue.mjs`、`scripts/lite/set-issue-status.sh`、`scripts/lite/worktree-base.sh`。
 
-1. `scripts/lite/select-available-issue.mjs`
-2. `scripts/lite/claim-issue.mjs`
-3. `scripts/lite/set-issue-status.sh`
-
-入口返回单个无持久状态的工作上下文：`claimed`、`current_claim`、`local_only` 或 `exhausted`。它不执行实现、review、merge 或 Issue 收尾。
+入口返回单个无持久状态的工作上下文：`claimed`、`current_claim`、`local_only` 或 `exhausted`。它不执行实现、review、merge 或 Issue 收尾。新认领（非 `current_claim` 恢复）开始前，入口自动执行 `worktree-base.sh enter`：配置了 `buddy.boundBranch` 时切回绑定分支并 fast-forward 对齐绑定基线（缺省 `origin/$OPENSPEC_BUDDY_BASE_BRANCH`）；工作树不干净或与基线分叉时停止并等待人工处置。恢复自有活跃 Claim 时不执行该守卫，工作树合法地停在 claim branch 上。收尾归位见「合并门禁」。
 
 每次 Claim 前必须把本次实际运行环境写入 `OPENSPEC_BUDDY_AGENT`，格式为 `harness/model`，例如 `codex/gpt-5.6-sol`、`zcode/glm-5.3` 或 `grok/grok-4.6`。Claim comment 的 `agent` 只记录该运行环境；GitHub 评论作者与 assignee 才是认领者真源。
 
-无目标执行只查询带 Buddy 活跃状态的开放 Issue，将候选集合限制为 50 个，并选择编号最小的 Available Issue；超过上限时停止，不在不完整候选集上认领。Issue 必须开放、仅带 `status:ready`、显式映射到存在的本地 OpenSpec change，且没有开放的 GitHub 原生 `blockedBy` 关系；本地 change 缺失时立即停止，不跳到其他 Issue。选择不读取 Project、series、risk、mode、coupling、`depends_on` 或 Buddy cache。
+无目标执行只查询带 Buddy 活跃状态的开放 Issue，将候选集合限制为 50 个，并选择编号最小的 Available Issue；超过上限时停止，不在不完整候选集上认领。候选必须开放、仅带 `status:ready`、没有开放的 GitHub 原生 `blockedBy` 关系，且显式排除带 `status:tracking` 或 `type:series-parent` 的 Issue——`status:ready` 只允许挂在可独立执行的 Issue 上。无 mapping 的 ready Issue 不再停止：选择器立即以派生 change_id（`issue-<编号>-<标题slug>`，与 Full Mode 同一格式）把它选为 direct claim 候选并直接认领，见「Direct Claim」。有 mapping 的 Issue 仍要求本地 OpenSpec change 存在。单个 Issue 的前置检查不通过（foreign/partial Claim、mapping 无效/重复/冲突、有开放 blockedBy、已映射但本地 change 缺失）时跳过该 Issue 继续检查下一个，直到队列末端；仍有跳过原因时以摘要报错停止，完全没有候选时才返回 `exhausted`。候选超过上限、blockedBy 批量读取不完整、仓库或身份解析失败等使选择本身无法被证明安全的全局读取失败仍立即停止。选择不读取 Project、series、risk、mode、coupling、`depends_on` 或 Buddy cache。
 
-`--issue` 与 `--change` 都是单目标。`--change` 恰好映射一个开放 Issue 时仍走 Issue-backed 协调；只有完全没有映射 Issue 才是 Local-only。多个映射、仅有 closed 映射、外部 Claim 或部分 Claim 均停止，不接管、不修复、不回滚。Local-only 必须提醒用户该 change 未登记 Issue。
+## Direct Claim
+
+无 mapping 的 ready Issue 采用 claim-first：Claim 先于 propose 建立排他锁，消除多代理「先补 mapping 再抢 claim」的竞态。入口完成认领后打印 `direct_claim_handoff` 引导，代理按引导保持 claim 活跃，用 OpenSpec Explore 只读评估原 Issue，以同一派生 change_id 完成 openspec-propose（strict validate 后提交并推送提案到配置的 base 分支），向 Issue body 写入恰好一个 `<!-- openspec-buddy change_id: <change_id> -->` 标记并回读确认，然后重新运行公开入口开始实施。Claim comment 含 `direct_claim: true` 标记；Claim 期间观察到 Issue 被写入其他 change_id 或无效/重复/冲突 mapping 时立即停止，不接管。
+
+`--issue` 与 `--change` 都是单目标，单目标保持 fail-fast，不跳过改选其他 Issue。`--issue` 指定的 Issue 无 mapping 时同样转为 direct claim 候选（带派生 change_id），不再停止。`--change` 恰好映射一个开放 Issue 时仍走 Issue-backed 协调；只有完全没有映射 Issue 才是 Local-only。多个映射、仅有 closed 映射、外部 Claim 或部分 Claim 均停止，不接管、不修复、不回滚。Local-only 必须提醒用户该 change 未登记 Issue。
 
 ## 实施与 Local Review
 
@@ -110,6 +110,8 @@ Issue-backed PR 合并成功后，依次完成：
 3. close Issue；若 PR 已自动关闭 Issue，仍补齐标签与评论。
 
 任一 Issue 收尾写入失败都停止。claim branch deletion 是 best-effort cleanup；只有分支删除失败时记录警告并继续，因为它不是完成真源。
+
+Issue 收尾完成后运行 `<openspec-buddy-auto-skill-dir>/scripts/lite/worktree-base.sh leave <change_id>` 归位：删除本地 claim 分支、切回绑定分支（未配置 `buddy.boundBranch` 时切回 `$OPENSPEC_BUDDY_BASE_BRANCH`）并 fast-forward 对齐远端集成分支。leave 失败（如工作树不干净或分支分叉）必须显式报告并等待人工处置，不得静默继续。
 
 无目标运行在一项成功合并并完成 Issue 收尾后，继续 select 下一项；没有 Available Issue 时停止。显式 `--issue` 或 `--change` 完成后停止。
 

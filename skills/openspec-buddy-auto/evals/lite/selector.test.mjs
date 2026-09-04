@@ -145,10 +145,10 @@ function writeExecutable(file, contents) {
   fs.writeFileSync(file, contents, { mode: 0o755 });
 }
 
-function issue(number, changeId, { state = 'open', status = 'status:ready', body, assignees = [], pullRequest = false } = {}) {
+function issue(number, changeId, { state = 'open', status = 'status:ready', body, title, assignees = [], pullRequest = false } = {}) {
   return {
     number,
-    title: `Issue ${number}`,
+    title: title ?? `Issue ${number}`,
     state,
     html_url: `https://example.test/issues/${number}`,
     body: body ?? `<!-- openspec-buddy change_id: ${changeId} -->`,
@@ -458,14 +458,16 @@ for (const [name, body] of [
 }
 
 {
-  const fixture = makeFixture('malformed-first', {
+  const fixture = makeFixture('unmapped-first-direct-claim', {
     issues: [issue(10, '', { body: 'No mapping' }), issue(20, 'valid')],
   });
   addChange(fixture.root, 'valid');
   const result = runSelector(fixture);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /ready issue #10.*mapping/i);
-  assert.equal(result.stdout, '');
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), {
+    mode: 'lite', result: 'issue', issue: 10, change_id: 'issue-10-issue-10',
+    url: 'https://example.test/issues/10', direct_claim: true,
+  });
 }
 
 {
@@ -726,8 +728,9 @@ for (const scenario of [
   addChange(fixture.root, 'claimed');
   addChange(fixture.root, 'available');
   const result = runSelector(fixture);
-  assert.notEqual(result.status, 0, scenario.name);
-  assert.match(result.stderr, /partial claim state/i);
+  assert.equal(result.status, 0, scenario.name);
+  assert.equal(JSON.parse(result.stdout).issue, 10,
+    `${scenario.name}: a partial claim must be skipped in untargeted selection`);
 }
 
 for (const activeStatus of ['status:claimed', 'status:in-progress', 'status:in-review']) {
@@ -785,19 +788,107 @@ for (const activeStatus of ['status:claimed', 'status:in-progress', 'status:in-r
 }
 
 {
-  const fixture = makeFixture('partial-still-blocks-default', {
+  const fixture = makeFixture('partial-skipped-default', {
     issues: [issue(5, 'partial', { status: 'status:claimed' }), issue(10, 'available')],
   });
   addChange(fixture.root, 'available');
   const result = runSelector(fixture);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).issue, 10,
+    'a partial claim must be skipped in untargeted selection');
+}
+
+{
+  const conflicting = issue(5, '', { body: '---\nchange_id: one\n---\n<!-- openspec-buddy change_id: two -->' });
+  const fixture = makeFixture('conflict-skipped-default', {
+    issues: [conflicting, issue(10, 'available')],
+  });
+  addChange(fixture.root, 'available');
+  const result = runSelector(fixture);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).issue, 10,
+    'a conflicting mapping must be skipped in untargeted selection');
+}
+
+for (const [name, trackingLabels] of [
+  ['status-tracking', ['status:ready', 'status:tracking']],
+  ['series-parent', ['status:ready', 'type:series-parent']],
+]) {
+  const tracked = issue(5, 'tracked');
+  tracked.labels = trackingLabels.map((label) => ({ name: label }));
+  const fixture = makeFixture(`exclude-${name}`, {
+    issues: [tracked, issue(10, 'available')],
+  });
+  addChange(fixture.root, 'tracked');
+  addChange(fixture.root, 'available');
+  const result = runSelector(fixture);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).issue, 10,
+    `${trackingLabels[1]} must be excluded from selection even when mislabeled status:ready`);
+}
+
+{
+  const fixture = makeFixture('all-skipped-summary', {
+    issues: [issue(11, '', { body: '<!-- openspec-buddy\nchange_id: ../demo\n-->' })],
+  });
+  const result = runSelector(fixture);
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /partial claim state/i);
-  assert.doesNotMatch(result.stderr, /missing local change/i);
+  assert.match(result.stderr, /no selectable issue/i);
+  assert.match(result.stderr, /invalid change mapping/i);
+  assert.equal(result.stdout, '');
+}
+
+{
+  const fixture = makeFixture('target-issue-direct-claim', {
+    issues: [issue(30, '', { body: 'No mapping', title: 'Fix Login Timeout!' })],
+  });
+  const untargeted = runSelector(fixture);
+  assert.equal(untargeted.status, 0, untargeted.stderr);
+  assert.deepEqual(JSON.parse(untargeted.stdout), {
+    mode: 'lite', result: 'issue', issue: 30, change_id: 'issue-30-fix-login-timeout',
+    url: 'https://example.test/issues/30', direct_claim: true,
+  });
+  const targeted = runSelector(fixture, ['--issue', '30']);
+  assert.equal(targeted.status, 0, targeted.stderr);
+  assert.deepEqual(JSON.parse(targeted.stdout), {
+    mode: 'lite', result: 'issue', issue: 30, change_id: 'issue-30-fix-login-timeout',
+    url: 'https://example.test/issues/30', direct_claim: true,
+  });
+}
+
+{
+  const fixture = makeFixture('derived-change-collision', {
+    issues: [
+      issue(30, '', { body: 'No mapping', title: 'Fix Login Timeout!' }),
+      issue(40, 'issue-30-fix-login-timeout'),
+    ],
+  });
+  addChange(fixture.root, 'issue-30-fix-login-timeout');
+  const untargeted = runSelector(fixture);
+  assert.equal(untargeted.status, 0, untargeted.stderr);
+  assert.equal(JSON.parse(untargeted.stdout).issue, 40,
+    'a derived change id already mapped by another issue must be skipped in untargeted selection');
+  const targeted = runSelector(fixture, ['--issue', '30']);
+  assert.notEqual(targeted.status, 0);
+  assert.match(targeted.stderr, /derives change issue-30-fix-login-timeout.*#40/i);
+}
+
+{
+  const fixture = makeFixture('skipped-keeps-real-reason', {
+    issues: [issue(11, '', { body: '---\nchange_id: one\n---\n<!-- openspec-buddy change_id: two -->' })],
+    blockedBy: { 11: [{ number: 7, state: 'OPEN' }] },
+  });
+  const result = runSelector(fixture);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /conflicting change mapping/i,
+    'the skip summary must keep the real validation failure');
+  assert.match(result.stderr, /blocked by open issue #7/i,
+    'the skip summary must still mention the open blocker');
 }
 
 {
   const current = 'OpenSpec Buddy Claim\nissue: 5\nstate: active\nagent: @codex\nchange_id: archived-current\nbranch: archived-current\nworktree_alias: dev1';
-  const fixture = makeFixture('later-partial-still-blocks-current', {
+  const fixture = makeFixture('later-partial-skipped-current-resumes', {
     issues: [
       issue(5, 'archived-current', { status: 'status:in-review', assignees: ['codex'] }),
       issue(20, 'partial', { status: 'status:claimed' }),
@@ -805,15 +896,17 @@ for (const activeStatus of ['status:claimed', 'status:in-progress', 'status:in-r
     comments: { 5: [{ body: current }] },
     branches: ['archived-current'],
   });
+  addChange(fixture.root, 'archived-current');
   const result = runSelector(fixture);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /partial claim state/i,
-    'a smaller current Claim must not hide a later partial Claim');
+  assert.equal(result.status, 0, result.stderr);
+  const parsed = JSON.parse(result.stdout);
+  assert.equal(parsed.issue, 5, 'a later partial claim must be skipped and the current claim resumed');
+  assert.equal(parsed.current_claim, true);
 }
 
 {
   const current = 'OpenSpec Buddy Claim\nissue: 5\nstate: active\nagent: @codex\nchange_id: archived-current\nbranch: archived-current\nworktree_alias: dev1';
-  const fixture = makeFixture('ready-partial-still-blocks-current', {
+  const fixture = makeFixture('ready-partial-skipped-current-resumes', {
     issues: [
       issue(5, 'archived-current', { status: 'status:in-review', assignees: ['codex'] }),
       issue(20, 'dirty-ready', { assignees: ['other'] }),
@@ -821,10 +914,11 @@ for (const activeStatus of ['status:claimed', 'status:in-progress', 'status:in-r
     comments: { 5: [{ body: current }] },
     branches: ['archived-current'],
   });
+  addChange(fixture.root, 'archived-current');
   const result = runSelector(fixture);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /partial claim state/i,
-    'a current Claim must not hide a ready-labeled partial Claim');
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).issue, 5,
+    'a ready-labeled partial claim must be skipped and the current claim resumed');
 }
 
 console.log('lite selector tests passed');

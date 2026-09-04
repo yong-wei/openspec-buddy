@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const selector = path.join(scriptDir, 'lite/select-available-issue.mjs');
 const claim = path.join(scriptDir, 'lite/claim-issue.mjs');
+const worktreeBase = path.join(scriptDir, 'lite/worktree-base.sh');
 const fullController = path.join(scriptDir, 'full/buddy-auto.mjs');
 
 function helpText() {
@@ -80,9 +81,30 @@ function runLite(argv) {
   const result = JSON.parse(selected.stdout);
   if (result.result === 'issue') {
     if (noPr) throw new Error('--no-pr is only valid for a local-only --change target.');
+    if (!result.current_claim) {
+      const guard = spawnSync('bash', [worktreeBase, 'enter'], {
+        cwd: process.cwd(), env: process.env, stdio: 'inherit',
+      });
+      if (guard.status !== 0 || guard.signal) finish(guard);
+    }
     const claimed = spawnSync(process.execPath, [claim, String(result.issue), result.change_id], {
       cwd: process.cwd(), env: process.env, stdio: 'inherit',
     });
+    if (claimed.status === 0 && result.direct_claim) {
+      process.stdout.write(`${JSON.stringify({
+        mode: 'lite',
+        result: 'direct_claim_handoff',
+        issue: result.issue,
+        change_id: result.change_id,
+        next_steps: [
+          '保持该 claim 活跃：不删除远端 claim branch，不释放 assignee 或 status:claimed',
+          '用 OpenSpec Explore 只读评估原 Issue 与仓库事实',
+          `用 openspec-propose 以同一 change_id ${result.change_id} 创建并验证本地 change（openspec validate ${result.change_id} --strict），提交并推送提案到配置的 base 分支`,
+          `向 Issue #${result.issue} body 写入恰好一个 <!-- openspec-buddy change_id: ${result.change_id} --> 标记并回读确认`,
+          '重新运行本入口开始实施',
+        ],
+      })}\n`);
+    }
     finish(claimed);
   }
   if (selected.stdout) process.stdout.write(selected.stdout);

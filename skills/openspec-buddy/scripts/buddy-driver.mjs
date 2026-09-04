@@ -209,6 +209,7 @@ function describeNext(opts) {
       notes.push('Keep this change local-only. Do not create GitHub coordination state.');
     } else {
       notes.push('Create one open GitHub Issue containing exactly one openspec-buddy change_id marker and labels type:change plus status:ready.');
+      notes.push('Use status:ready only for independently executable issues; parent or tracking issues that are not independently executable must carry status:tracking and never status:ready.');
       notes.push('Record only real dependencies with native GitHub blockedBy relationships, then read the Issue and relationships back once.');
     }
     notes.push('Propose does not claim the Issue or start implementation.');

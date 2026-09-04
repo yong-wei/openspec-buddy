@@ -8,6 +8,28 @@ export const ACTIVE_CLAIM_STATUSES = Object.freeze([
   'status:in-review',
 ]);
 
+export const TRACKING_LABELS = Object.freeze(['status:tracking', 'type:series-parent']);
+
+function slugifyTitle(title) {
+  return String(title || '')
+    .normalize('NFKD')
+    .replace(/[^\x00-\x7F]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .split('-')
+    .filter(Boolean)
+    .slice(0, 8)
+    .join('-');
+}
+
+export function deriveChangeId(issueNumber, title) {
+  const titleSlug = slugifyTitle(title);
+  const prefix = `issue-${issueNumber}`;
+  const value = titleSlug ? `${prefix}-${titleSlug}` : prefix;
+  return value.slice(0, 80).replace(/-+$/g, '');
+}
+
 const CHANGE_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 export function isValidChangeId(value) {

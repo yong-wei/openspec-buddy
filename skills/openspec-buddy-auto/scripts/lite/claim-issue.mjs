@@ -50,13 +50,14 @@ function readBranch(repo, branch) {
   return branchExistsFromRefResult(result, branch);
 }
 
-function emit(result, expected) {
+function emit(result, expected, { direct = false } = {}) {
   process.stdout.write(`${JSON.stringify({
     mode: 'lite',
     result,
     issue: expected.issue,
     change_id: expected.changeId,
     branch: expected.changeId,
+    ...(direct ? { direct_claim: true } : {}),
   })}\n`);
 }
 
@@ -99,7 +100,8 @@ try {
       throw new Error(`Issue #${issueNumber} must remain open throughout Claim.`);
     }
     const mapping = parseChangeMapping(truth.issue?.body || '');
-    if (mapping.conflict || mapping.changeId !== changeId || mapping.sources.length !== 1) {
+    const mappingMissing = mapping.sources.length === 0;
+    if (!mappingMissing && (mapping.conflict || mapping.changeId !== changeId || mapping.sources.length !== 1)) {
       throw new Error(`Issue #${issueNumber} mapping must uniquely remain ${changeId}; observed ${mapping.changeId || 'none'}.`);
     }
     const claimClass = classifyIssueClaim(truth.issue, truth.comments, identity, {
@@ -112,10 +114,11 @@ try {
       path.join(worktreeRoot, 'openspec', 'changes', changeId),
       { throwIfNoEntry: false },
     )?.isDirectory();
-    if (claimClass === 'current' && !localDeliveryExists(worktreeRoot, changeId)) {
+    if (claimClass === 'current' && !mappingMissing && !localDeliveryExists(worktreeRoot, changeId)) {
       throw new Error(`Local change ${changeId} does not exist in active or dated archive paths.`);
     }
     if (claimClass === 'unclaimed'
+      && !mappingMissing
       && !activeChangeExists) {
       throw new Error(`Local change ${changeId} does not exist.`);
     }
@@ -124,8 +127,9 @@ try {
 
   const initialTruth = readTruth();
   const initial = classifyTruth(initialTruth);
+  const direct = parseChangeMapping(initialTruth.issue?.body || '').sources.length === 0;
   if (initial === 'current') {
-    emit('current_claim', expected);
+    emit('current_claim', expected, { direct });
   } else if (initial !== 'unclaimed') {
     throw new Error(`Issue #${issueNumber} has ${initial} Claim truth: ${summarizeIssueClaim(initialTruth.issue, initialTruth.comments, initialTruth.branch)}`);
   } else {
@@ -134,7 +138,7 @@ try {
       const recoveredTruth = readTruth();
       const recovered = classifyTruth(recoveredTruth);
       if (recovered === 'current') {
-        emit('current_claim', expected);
+        emit('current_claim', expected, { direct });
         process.exit(0);
       }
       const detail = String(result.stderr || result.stdout || '').trim();
@@ -159,6 +163,7 @@ try {
       `branch: ${changeId}`,
       `agent: ${identity.agent}`,
       `worktree_alias: ${identity.worktree}`,
+      ...(direct ? ['direct_claim: true'] : []),
     ].join('\n');
     recoverFailedWrite(attempt('gh', ['issue', 'comment', String(issueNumber), '--body', comment]), 'Claim comment write');
     recoverFailedWrite(attempt(statusHelper, [String(issueNumber), 'claimed']), 'Claim status write');
@@ -169,7 +174,7 @@ try {
       const facts = summarizeIssueClaim(finalTruth.issue, finalTruth.comments, finalTruth.branch);
       throw new Error(`Claim verification failed: complete Claim truth is ${final}: ${facts}.`);
     }
-    emit('claimed', expected);
+    emit('claimed', expected, { direct });
   }
 } catch (error) {
   process.stderr.write(`${error.message}\n`);

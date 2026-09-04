@@ -1,6 +1,8 @@
 # Full Mode Selection Rules（Full Mode Only）
 
-本参考只描述 Full controller 的内部选择语义，不适用于默认 lite。代理不得直接调用 claim、relationship list 或 selector helper；正常推进只有一个公开入口：
+本参考只描述 Full controller 的内部选择语义。候选细节不适用于默认 lite，但 lite 现在共享两条选择语义：无 mapping 的 ready Issue 是 claim-first 候选（以派生 change_id `issue-<编号>-<标题slug>` 直接认领）；单个 Issue 的前置检查不通过时跳过并继续下一个，直到队列末端才停止。差异仅在 full 走完整 metadata 与 Project 协调，lite 不读取这些维度。
+
+代理不得直接调用 claim、relationship list 或 selector helper；正常推进只有一个公开入口：
 
 ```bash
 <openspec-buddy-auto-skill-dir>/scripts/buddy-auto.mjs full

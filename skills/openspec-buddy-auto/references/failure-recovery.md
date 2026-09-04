@@ -143,6 +143,12 @@ blocked. Agents must never run `gh pr merge`.
 
 ## Resume Or Branch Drift
 
+In lite mode this drift is guarded deterministically: the entry runs
+`scripts/lite/worktree-base.sh enter` before any new claim (switching back to
+the bound branch and fast-forwarding it to the bound base), and
+`scripts/lite/worktree-base.sh leave <change_id>` re-seats the worktree after
+issue closeout. Manual drift outside those guards still follows this section.
+
 After a resume, compaction, or manual branch operation, verify the current
 branch before editing or committing. For GitHub-backed Buddy work, the
 controller-owned claim/worktree guard must pass before editing, committing, pushing, requesting review,

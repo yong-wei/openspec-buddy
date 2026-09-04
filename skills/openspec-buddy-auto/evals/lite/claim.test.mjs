@@ -246,4 +246,38 @@ assert.match(partialAtFinalResult.stderr, /complete Claim truth is partial/);
 assert.match(partialAtFinalResult.stderr, /"assignees":\[\]/);
 assert.match(partialAtFinalResult.stderr, /"branch_exists":true/);
 
+const direct = fixture('direct', { issueBody: 'No mapping yet', localChange: false });
+const directResult = run(direct);
+assert.equal(directResult.status, 0, directResult.stderr);
+assert.deepEqual(JSON.parse(directResult.stdout), {
+  mode: 'lite', result: 'claimed', issue: 17, change_id: 'demo-change', branch: 'demo-change', direct_claim: true,
+});
+const directComment = JSON.parse(fs.readFileSync(direct.state)).comments[0].body;
+assert.match(directComment, /change_id: demo-change/);
+assert.match(directComment, /^direct_claim: true$/m);
+const directCalls = fs.readFileSync(direct.log, 'utf8');
+assert.ok(directCalls.includes('api --method POST repos/acme/repo/git/refs'), 'direct claim must create the claim branch');
+
+const directRerun = run(direct);
+assert.equal(directRerun.status, 0, directRerun.stderr);
+assert.deepEqual(JSON.parse(directRerun.stdout), {
+  mode: 'lite', result: 'current_claim', issue: 17, change_id: 'demo-change', branch: 'demo-change', direct_claim: true,
+});
+
+const directConflicting = fixture('direct-conflicting-mapping', {
+  issueBody: '<!-- openspec-buddy change_id: other-change -->', localChange: false,
+});
+const directConflictingResult = run(directConflicting);
+assert.notEqual(directConflictingResult.status, 0);
+assert.match(directConflictingResult.stderr, /mapping must uniquely remain demo-change.*other-change/i);
+assert.doesNotMatch(fs.readFileSync(directConflicting.log, 'utf8'), /api --method POST/,
+  'a mapping written for another change must stop before ref creation');
+
+const directDuplicate = fixture('direct-duplicate-mapping', {
+  issueBody: '<!-- openspec-buddy change_id: demo-change -->\n<!-- openspec-buddy change_id: demo-change -->', localChange: false,
+});
+const directDuplicateResult = run(directDuplicate);
+assert.notEqual(directDuplicateResult.status, 0);
+assert.match(directDuplicateResult.stderr, /mapping must uniquely remain demo-change/i);
+
 console.log('lite claim tests passed');

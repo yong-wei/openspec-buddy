@@ -73,6 +73,11 @@ const commands = [
 
   node('skills/openspec-buddy-auto/evals/lane-state.test.mjs'),
   node('skills/openspec-buddy-auto/evals/lite/skill-contract.test.mjs'),
+  node('skills/openspec-buddy-auto/evals/lite/selector.test.mjs'),
+  node('skills/openspec-buddy-auto/evals/lite/claim.test.mjs'),
+  node('skills/openspec-buddy-auto/evals/lite/entry.test.mjs'),
+  node('skills/openspec-buddy-auto/evals/lite/status.test.mjs'),
+  node('skills/openspec-buddy-auto/evals/lite/worktree-base.test.mjs'),
   node('skills/openspec-buddy-auto/evals/review-truth.test.mjs'),
   node('skills/openspec-buddy-auto/evals/read-review-evidence.test.mjs'),
   node('skills/openspec-buddy-auto/evals/lane-action-runner.test.mjs'),
