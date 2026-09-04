@@ -53,3 +53,4 @@
 - 除本次已经开始的主工作树分支外，后续修改不要直接在主工作树开发；先创建隔离 worktree，完成后清理开发 worktree 并确认本地 `main` 跟随 `origin/main`。
 - README 面向使用者，不承载 release 和 GitHub automatic publishing 这类维护者流程。
 - 协作者应优先使用 npm copy 安装，避免把个人机器上的绝对路径软链接提交到项目中。
+- `v0.31.0` 发布线将 Buddy Auto lite 改为 claim-first 选择语义：缺 mapping 的 ready Issue 由选择器以确定性派生的 `issue-<编号>-<标题slug>` change_id 直接认领（claim 先于 propose 建立排他），claim 后再补提案与 mapping；无目标选择时单个 Issue 前置检查不通过改为跳过并继续，队列末端才停，全局读取不完整仍立即停。新增 `scripts/lite/worktree-base.sh`：`enter` 在新认领前归位并对齐 `buddy.boundBranch`/`buddy.boundBase`，`leave` 在 Issue 收尾后删除本地 claim 分支并切回对齐，删除前校验远端真源、存在未推送提交时拒绝。恢复自有活跃 Claim 时不执行 enter。
